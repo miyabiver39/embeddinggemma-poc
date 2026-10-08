@@ -45,7 +45,7 @@
   以前は任意のパスを登録でき、`/api/media` からコンテナ内の任意のファイル(`/etc/shadow` を含む)を取得できた。入力検証の不足として修正済み(認証は追加していない)。
 - 監視フォルダ(`watcher.py`、`WATCH_DIRS`): 定期走査で新しい録画を自動取り込み。`:cpu` イメージ上で、起動時の取り込みと稼働中に追加したファイルの取り込みを確認済み。
 - リリース時の SBOM・脆弱性検査(`.github/workflows/security.yml`、`docs/release.md`): タグ `v*` の push で、全イメージの SBOM(SPDX / CycloneDX)と grype の結果をリリースに添付。毎週の定期実行あり。
-  手動実行(main の最新イメージ)で 5 イメージとも成功を確認済み(約 7 分)。結果は Critical 0、High 3(setuptools 由来。更新済み)、Medium の大半は ffmpeg(`docs/release.md`)。
+  手動実行(main の最新イメージ)で 5 イメージとも成功を確認済み(約 7 分)。初回は Critical 0、High 3(setuptools 由来)。pip / setuptools 更新後の再検査で 5 イメージとも Critical 0・High 0。Medium の大半は ffmpeg(`docs/release.md`)。
 - `/api/info` に版・リビジョン、検索応答に `embed_ms`、起動時の DB 整合性の警告、pip / setuptools の更新、Dependabot。
 
 ## 4. 既知の課題・注意点(コードを読んで気づいたもの)
