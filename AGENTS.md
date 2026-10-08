@@ -20,7 +20,7 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 | セキュリティ | **対策は行わない**(認証・TLS・厳密な入力検証などは求められていない)。勝手に追加しない。ただし README に自己責任の旨と、映像が個人情報にあたり得る点を明記する |
 | ビルド | **GitHub Actions に任せる**。利用者は `docker pull` して起動するだけ |
 | 公開 | 公開リポジトリ。イメージは ghcr.io へ公開する |
-| 言語 | ドキュメント・コード中のコメント・docstring は**日本語**。識別子は英語 |
+| 言語 | ドキュメント・コード中のコメント・docstring・WebUI は**日本語**(ビジネス文書の表現。絵文字は使わない)。識別子は英語 |
 | 対象環境 | Linux コンテナ(CPU / NVIDIA CUDA / AMD ROCm / Intel XPU)。**Mac 環境は想定しない**(今後も不要) |
 | 速度 | 推論は、初回起動時に ONNX Runtime / OpenVINO / TensorRT などへ変換してキャッシュできるようにする |
 
@@ -101,9 +101,9 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 │   ├── api.py             取り込み・検索・参照 API
 │   ├── compute_api.py     ベクトル化 API(/compute/*)
 │   ├── pipeline.py        窓の計画と取り込みワーカー
-│   ├── store.py           SQLite + 総当たり検索
 │   ├── ingest_files.py    取り込みの受付(検証・重複確認・フォルダ一括・ファイル名の日時)
 │   ├── watcher.py         監視フォルダの自動取り込み(WATCH_DIRS)
+│   ├── store.py           SQLite + 総当たり検索
 │   ├── media.py           ffmpeg / ffprobe
 │   ├── config.py          環境変数とプリセット
 │   ├── embedders/         Embedder インターフェースと local / remote / dummy
@@ -142,7 +142,7 @@ EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory vmsembed.main:create_a
 
 - Python 3.12 以上を想定します。型ヒントを付けます。
 - コメント・docstring は日本語で、「なぜそうするか」を書きます。
-- 設定は環境変数で受け、既定値は一発で動く値にします(起動時に必須の設定を増やさない)。
+- 設定は環境変数で受け、既定値は追加の設定なしで動く値にします(起動時に必須の設定を増やさない)。
 - モデルの重み・映像・DBファイルを git にコミットしません(`.gitignore` で除外)。
 - 外部へ通信する処理(モデルのダウンロードなど)は、失敗時に原因が分かるメッセージを出します。
 
