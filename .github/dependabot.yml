@@ -1,0 +1,24 @@
+# 依存関係の更新(脆弱性の修正を含む)を、週に 1 回まとめて提案させます。
+# PyTorch と transformers は動作確認した版に固定しているため(AGENTS.md)、提案があっても取り込む前に確認してください。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
