@@ -72,7 +72,10 @@ def summarize(matches: list[dict]) -> dict:
                 }
             )
     listed.sort(key=lambda r: (SEVERITIES.index(r["severity"]), r["package"], r["id"]))
-    return {"counts": counts, "fixable": fixable, "listed": listed, "total": len(seen)}
+    # ffmpeg のように 1 つのソースから多数のパッケージ(libavcodec など)に分かれるものは、
+    # 同じ脆弱性がパッケージの数だけ数えられるため、ID の種類数も併記する
+    unique_ids = len({k[0] for k in seen})
+    return {"counts": counts, "fixable": fixable, "listed": listed, "total": len(seen), "unique_ids": unique_ids}
 
 
 def db_built(descriptor: dict) -> str:
@@ -98,7 +101,7 @@ def render(root: Path, title: str, max_rows: int = 30) -> str:
         s = summarize(matches)
         image = (vdir / "image.txt").read_text(encoding="utf-8").strip() if (vdir / "image.txt").is_file() else ""
         cells = [f"{s['counts'][sev]}({s['fixable'][sev]})" for sev in SEVERITIES[:4]]
-        rows.append(f"| `{vdir.name}` | " + " | ".join(cells) + f" | {s['total']} |")
+        rows.append(f"| `{vdir.name}` | " + " | ".join(cells) + f" | {s['total']} | {s['unique_ids']} |")
         if not tool_line:
             tool_line = (
                 f"検査ツール: grype {descriptor.get('version', '不明')}"
@@ -129,9 +132,12 @@ def render(root: Path, title: str, max_rows: int = 30) -> str:
         "公開したコンテナイメージを、添付の SBOM をもとに検査した結果です。",
         "各欄は「検出件数(修正版が公開されている件数)」です。",
         "同じ脆弱性・同じパッケージの重複は 1 件として数えています。",
+        "1 つの脆弱性が複数のパッケージ(ffmpeg の libavcodec・libavformat など)に該当する場合は、",
+        "パッケージごとに数えます。",
+        "このため、脆弱性 ID の種類数を最後の列に併記しています。",
         "",
-        "| イメージ | Critical | High | Medium | Low | 合計 |",
-        "|---|---|---|---|---|---|",
+        "| イメージ | Critical | High | Medium | Low | 合計 | 脆弱性 ID の種類数 |",
+        "|---|---|---|---|---|---|---|",
         *rows,
         "",
         tool_line,

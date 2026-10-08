@@ -42,7 +42,10 @@ def test_summarize_dedupes_and_counts_fixable():
             _match("CVE-4", "Strange", "x"),  # 未知の深刻度は Unknown
         ]
     )
-    assert s["total"] == 4
+    assert s["total"] == 4 and s["unique_ids"] == 4
+    # 1 つの脆弱性が複数のパッケージに該当する場合(ffmpeg の各ライブラリなど)
+    split = release_report.summarize([_match("CVE-5", "Medium", "libavcodec"), _match("CVE-5", "Medium", "libav")])
+    assert split["total"] == 2 and split["unique_ids"] == 1
     assert s["counts"]["High"] == 1 and s["fixable"]["High"] == 1
     assert s["counts"]["Critical"] == 1 and s["fixable"]["Critical"] == 0
     assert s["counts"]["Unknown"] == 1
@@ -54,7 +57,7 @@ def test_render_orders_variants_and_lists_high(tmp_path):
     _write(tmp_path, "slim", [])
     md = release_report.render(tmp_path, "v0.2.0")
     assert md.index("| `slim` |") < md.index("| `cpu` |")
-    assert "| `cpu` | 0(0) | 1(1) | 0(0) | 0(0) | 1 |" in md
+    assert "| `cpu` | 0(0) | 1(1) | 0(0) | 0(0) | 1 | 1 |" in md
     assert "| High | CVE-9 | pip | 1.0 | deb | 26.0 |" in md
     assert "grype 0.99.0" in md and "2026-10-01" in md
 
