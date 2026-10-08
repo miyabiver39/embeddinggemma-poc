@@ -43,7 +43,7 @@
 </head>
 <body>
 <header>
-  <h1>vmsembed <span class="badge">開発用WebUI(認証なし・自己責任)</span></h1>
+  <h1>vmsembed <span class="badge">開発用WebUI(自己責任)</span></h1>
   <span class="badge" id="hdr">読み込み中…</span>
 </header>
 <nav id="tabs">
@@ -142,6 +142,9 @@
   <div id="w-summary" class="mute"></div>
   <div class="row" style="margin-top:8px"><button id="btn-scan">今すぐ走査する</button></div>
   <div id="w-msg"></div>
+  <h3>認証</h3>
+  <div class="row"><button id="btn-logout">保存したトークンを消去する</button></div>
+  <div class="note">サーバで API_TOKEN を設定している場合、最初の操作時に入力したトークンをこのブラウザに 30 日間保存します。</div>
   <h3>詳細(/api/info)</h3>
   <pre id="info"></pre>
   <div class="note">API 仕様は <a href="/docs" target="_blank">/docs</a>(Swagger UI)にあります。</div>
@@ -163,8 +166,21 @@ document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => {
   if (b.dataset.t === "jobs") loadJobs(); if (b.dataset.t === "status") loadInfo();
 });
 
-async function api(path, opts) {
+// 認証(API_TOKEN を設定したサーバのみ)。トークンは Cookie に保存し、<img> や <video> の取得にも使う。
+// SameSite=Strict のため、他サイトのページからのリクエストには付かない
+const TOKEN_COOKIE = "vmsembed_token";
+function setToken(token) {
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = token
+    ? `${TOKEN_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=2592000; SameSite=Strict${secure}`
+    : `${TOKEN_COOKIE}=; Path=/; Max-Age=0; SameSite=Strict${secure}`;
+}
+async function api(path, opts, retried) {
   const r = await fetch(path, opts);
+  if (r.status === 401 && !retried) {
+    const token = prompt("このサーバは認証が有効です。API トークンを入力してください。");
+    if (token) { setToken(token.trim()); return api(path, opts, true); }
+  }
   let body = null; try { body = await r.json(); } catch (_) {}
   if (!r.ok) throw new Error((body && body.detail ? (typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)) : r.statusText) + " (HTTP " + r.status + ")");
   return body;
@@ -316,6 +332,7 @@ async function loadJobs() {
   } catch (e) { $("t-jobs").innerHTML = '<tr><td class="err">' + esc(e.message) + "</td></tr>"; }
 }
 $("btn-refresh").onclick = loadJobs;
+$("btn-logout").onclick = () => { setToken(""); $("w-msg").textContent = "保存したトークンを消去しました。"; };
 $("btn-scan").onclick = async () => {
   $("w-msg").textContent = "走査しています…";
   try { const r = await api("/api/watch/scan", { method: "POST" }); $("w-msg").textContent = `${r.queued}件を新たに受け付けました。`; loadInfo(); }

@@ -19,9 +19,10 @@ from .api import Context, build_api_router
 from .compute_api import build_compute_router
 from .config import Settings
 from .embedders import Embedder, build_embedder
-from .ingest_files import FileIntake
+from .ingest_files import FileIntake, PathNotAllowed
 from .media import MediaError
 from .pipeline import Ingestor
+from .security import SecurityMiddleware, startup_warnings
 from .store import IndexMismatch, Store
 from .watcher import FolderWatcher
 
@@ -78,7 +79,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     if s.role in ("all", "app"):
         store = Store(s.data_dir / "vmsembed.db")
         ingestor = Ingestor(s, store, emb)
-        intake = FileIntake(store, ingestor)
+        intake = FileIntake(store, ingestor, s.ingest_roots)
         watcher = FolderWatcher(s, store, intake)
         _warn_if_incompatible(store, emb)
 
@@ -108,6 +109,8 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     )
 
     app.state.embedder = emb
+    app.add_middleware(SecurityMiddleware, settings=s)
+    startup_warnings(s)
     if s.role in ("all", "compute"):
         app.include_router(build_compute_router(emb))
     if store and ingestor and intake and watcher:
@@ -124,6 +127,10 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     @app.exception_handler(ConnectionError)
     async def _compute_down(_: Request, exc: ConnectionError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=503)
+
+    @app.exception_handler(PathNotAllowed)
+    async def _path_not_allowed(_: Request, exc: PathNotAllowed) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=403)
 
     @app.exception_handler(MediaError)
     async def _media_error(_: Request, exc: MediaError) -> JSONResponse:

@@ -28,6 +28,7 @@ def settings(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("EMBEDDING_BACKEND", "dummy")
     monkeypatch.setenv("ROLE", "all")
+    monkeypatch.setenv("INGEST_ROOTS", str(tmp_path))  # テストの合成動画は tmp_path の下に作る
     return Settings.from_env()
 
 

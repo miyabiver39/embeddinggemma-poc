@@ -1,6 +1,6 @@
 """取り込み・検索・管理の HTTP API(ROLE=all / app で有効)。
 
-ここにはセキュリティの仕組み(認証など)はありません。開発用途で、閉じたネットワークで使ってください。
+認証・CSRF の防止・本文の大きさの上限などは、security.py のミドルウェアがすべての経路に対して行います。
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from . import __version__, media
 from .config import PRESETS, Settings
 from .embedders import Embedder
-from .ingest_files import FileIntake
+from .ingest_files import FileIntake, is_within
 from .media import MediaError
 from .pipeline import Ingestor, IngestParams
 from .store import Store
@@ -563,6 +563,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             raise HTTPException(404, "再取り込みできる取り込み元が見つかりません")
         if not src["path"] or not Path(src["path"]).is_file():
             raise HTTPException(404, f"元のファイルが見つかりません: {src['path']}")
+        ctx.intake.check_allowed(Path(src["path"]))  # 以前の版で登録された、許可外のパスは処理しない
         ctx.store.update_source(source_id, status="queued", error=None)
         return {"source_id": source_id, "job_id": ctx.ingestor.submit(source_id)}
 
@@ -587,6 +588,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             or src["kind"] not in ("video", "audio")
             or src["status"] == "failed"
             or not src["path"]
+            or not is_within(src["path"], s.ingest_roots)  # 以前の版で登録された、許可外のパスも返さない
             or not Path(src["path"]).is_file()
         ):
             raise HTTPException(404, "ファイルが見つかりません")

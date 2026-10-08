@@ -6,6 +6,8 @@
 x-common: &common
   restart: unless-stopped
   ports: ["8000:8000"]
+  # environment:
+  #   API_TOKEN: "<推測されにくい値>"   # 信頼できるネットワークの外で使う場合は必ず設定(docs/security.md)
   volumes:
     - ./data:/data
     # - /path/to/recordings:/recordings:ro   # VMS の録画ディレクトリ(/api/ingest/path で指定)
@@ -42,7 +44,7 @@ services:
   compute:
     image: ghcr.io/miyabiver39/embeddinggemma-poc:cpu   # GPU を使うなら cuda などに差し替え
     profiles: ["split"]
-    environment: { ROLE: compute }
+    environment: { ROLE: compute }   # 認証する場合は API_TOKEN を設定し、app の EMBEDDING_TOKEN を同じ値にする
     ports: ["8001:8000"]
 
   app:

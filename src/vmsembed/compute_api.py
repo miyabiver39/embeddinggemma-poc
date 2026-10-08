@@ -3,7 +3,7 @@
 ROLE=compute のコンテナの本体です。ROLE=all のコンテナにも同じ API が付くので、
 「全部入り」のコンテナを、別の app から使う compute として使うこともできます。
 
-ここにはセキュリティの仕組み(認証など)はありません。閉じたネットワークで使ってください。
+認証(API_TOKEN)などは security.py のミドルウェアが行います。app から呼ぶ場合は、app に EMBEDDING_TOKEN を設定します。
 """
 
 from __future__ import annotations
@@ -29,8 +29,14 @@ def build_compute_router(embedder: Embedder) -> APIRouter:
     router = APIRouter(prefix="/compute", tags=["compute"])
     own_dims = embedder.info().dims
 
-    def _dims(requested: int) -> int:
+    def _dims(requested) -> int:
         """app が求める次元。compute の次元以下なら、切り詰めて返せます(MRL)。"""
+        try:
+            requested = int(requested)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, f"dims は整数で指定してください: {requested!r}") from exc
+        if requested not in (768, 512, 256, 128):
+            raise HTTPException(400, "dims は 768 / 512 / 256 / 128 のいずれかにしてください")
         if requested > own_dims:
             raise HTTPException(
                 400, f"dims={requested} は compute の次元({own_dims})より大きいため返せません"
@@ -63,7 +69,7 @@ def build_compute_router(embedder: Embedder) -> APIRouter:
     @router.post("/embed/images")
     async def embed_images(request: Request) -> dict:
         form = await request.form()
-        dims = _dims(int(form.get("dims", own_dims)))
+        dims = _dims(form.get("dims", own_dims))
         high = form.get("high") == "1"
         images = [jpeg_to_image(await f.read()) for f in form.getlist("files")]
         if not images:
@@ -74,7 +80,7 @@ def build_compute_router(embedder: Embedder) -> APIRouter:
     @router.post("/embed/audio")
     async def embed_audio(request: Request) -> dict:
         form = await request.form()
-        dims = _dims(int(form.get("dims", own_dims)))
+        dims = _dims(form.get("dims", own_dims))
         high = form.get("high") == "1"
         upload = form.get("file")
         if upload is None:
@@ -87,7 +93,7 @@ def build_compute_router(embedder: Embedder) -> APIRouter:
     async def embed_parts(request: Request) -> dict:
         """文字・画像・音声を、並べた順序のまま1ベクトルにします。"""
         form = await request.form()
-        dims = _dims(int(form.get("dims", own_dims)))
+        dims = _dims(form.get("dims", own_dims))
         high = form.get("high") == "1"
         try:
             manifest = json.loads(str(form.get("manifest", "[]")))

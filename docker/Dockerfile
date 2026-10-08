@@ -22,7 +22,11 @@ ARG TORCH_VERSION=2.14.1
 ARG TORCHVISION_VERSION=0.29.1
 # EmbeddingGemma 2 は transformers の正式リリース(PyPI)に未収録のため、確認済みのコミットを使う
 ARG TRANSFORMERS_COMMIT=cb33194ad6152bd9fad6305378d92db385dd7b32
+# 取得したアーカイブが改ざんされていないことを、ハッシュで確かめる(pip が照合し、違えばビルドが失敗する)
+ARG TRANSFORMERS_SHA256=4c30d29ff39f7398d9b0b4073594d2bcd2fbfe1bc31b12743ab08be34deef934
 ARG MODEL_ID=google/embeddinggemma-2
+# モデルの版(Hugging Face のコミット)を固定する。ビルドのたびに中身が変わることを防ぐ
+ARG MODEL_REVISION=914f7f89142e33e77833254d9c9b90c3cef7303b
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Tokyo \
@@ -64,22 +68,32 @@ COPY src ./src
 RUN if [ "$VARIANT" = "slim" ]; then \
       pip install .; \
     else \
-      pip install "https://github.com/huggingface/transformers/archive/${TRANSFORMERS_COMMIT}.tar.gz" \
+      pip install "transformers @ https://github.com/huggingface/transformers/archive/${TRANSFORMERS_COMMIT}.tar.gz#sha256=${TRANSFORMERS_SHA256}" \
       && pip install ".[model]"; \
     fi
 
 # ---- モデルを同梱(初回起動でダウンロードしなくて済むように)。slim には入れない
 RUN if [ "$VARIANT" != "slim" ]; then \
-      python -c "from huggingface_hub import snapshot_download; snapshot_download('${MODEL_ID}')"; \
+      python -c "from huggingface_hub import snapshot_download; snapshot_download('${MODEL_ID}', revision='${MODEL_REVISION}')" \
+      && chmod -R a+rX "$HF_HOME"; \
     fi
-# 同梱後は実行時にネットワークへ出ない(オフライン)
-ENV HF_HUB_OFFLINE=1
+# chmod は、一般ユーザーでも読めるようにする(所有者だけが読める管理用ファイルがあるため)。同じ層で行い、モデルを複製しない
+# 同梱後は実行時にネットワークへ出ない(オフライン)。読み込むモデルの版も、同梱したものに合わせる
+ENV HF_HUB_OFFLINE=1 \
+    MODEL_REVISION=${MODEL_REVISION}
 
 # ---- 既定の動作: slim は app(外部 compute を使う)、それ以外は all(1コンテナで全部)
 RUN if [ "$VARIANT" = "slim" ]; then echo app > /etc/vmsembed_role; else echo all > /etc/vmsembed_role; fi
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+# ---- 実行用の一般ユーザー(uid / gid 1000)。ベースイメージの ubuntu ユーザー(同じ uid)は使わないので削除する。
+#      起動直後だけ root で /data の所有者などを整え、その後このユーザーに切り替える(entrypoint.sh)
+#      モデルのキャッシュ(HF_HOME)は root の所有のまま読み取り専用で使う(所有者を変えると、その層にモデルが丸ごと複製されるため)
 RUN chmod +x /usr/local/bin/entrypoint.sh \
- && mkdir -p /data /recordings
+ && (userdel --remove ubuntu 2>/dev/null || true) \
+ && groupadd --gid 1000 vmsembed \
+ && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /home/vmsembed --shell /usr/sbin/nologin vmsembed \
+ && mkdir -p /data /recordings /home/vmsembed \
+ && chown vmsembed:vmsembed /data /home/vmsembed
 
 ENV VARIANT=${VARIANT}
 # ビルド元のコミットと参照(タグ・ブランチ)。/api/info に表示し、不具合報告で版を特定できるようにする。

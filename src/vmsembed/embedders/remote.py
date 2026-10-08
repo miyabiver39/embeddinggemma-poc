@@ -36,11 +36,16 @@ class RemoteEmbedder(Embedder):
         timeout_sec: float = 300.0,
         client: httpx.Client | None = None,
         retries: int = 3,
+        token: str = "",
     ) -> None:
         self._dims = dims
         self._retries = retries
+        # compute 側で API_TOKEN を設定している場合に送るトークン(EMBEDDING_TOKEN)
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
         # テストでは、compute アプリを直接つないだクライアントを渡せます。
-        self._client = client or httpx.Client(base_url=base_url, timeout=timeout_sec)
+        self._client = client or httpx.Client(base_url=base_url, timeout=timeout_sec, headers=headers)
+        if client is not None and headers:
+            self._client.headers.update(headers)
         self._info: EmbedderInfo | None = None
 
     # ------------------------------------------------------------------ 内部処理
@@ -50,6 +55,12 @@ class RemoteEmbedder(Embedder):
         for attempt in range(1, self._retries + 1):
             try:
                 response = self._client.request(method, path, **kwargs)
+                if response.status_code in (401, 403):
+                    # 再試行しても結果は変わらないので、設定の見直しを促してすぐに失敗させる
+                    raise ConnectionError(
+                        f"compute({self._client.base_url})に認証で拒否されました(HTTP {response.status_code})。"
+                        "compute の API_TOKEN と、app の EMBEDDING_TOKEN(未設定なら API_TOKEN)を一致させてください。"
+                    )
                 response.raise_for_status()
                 return response
             except (httpx.ConnectError, httpx.ReadTimeout) as exc:

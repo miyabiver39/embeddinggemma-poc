@@ -17,7 +17,7 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 | 項目 | 方針 |
 |---|---|
 | 実装言語 | **全てPython**(アプリ本体も推論も) |
-| セキュリティ | **対策は行わない**(認証・TLS・厳密な入力検証などは求められていない)。勝手に追加しない。ただし README に自己責任の旨と、映像が個人情報にあたり得る点を明記する |
+| セキュリティ | **実施できる対策は実施する**。ただし「追加の設定なしで起動できること」は崩さない(環境に依存する対策は環境変数で有効にする方式にし、安全でない既定のまま起動したときはログで警告する)。新しい API・入力経路を足すときは、認証・CSRF・パスの制限・大きさの上限の対象になっているかを確認する。TLS はアプリでは扱わず、リバースプロキシに任せる。README に自己責任の旨と、映像が個人情報にあたり得る点を明記する。詳細は `docs/security.md` |
 | ビルド | **GitHub Actions に任せる**。利用者は `docker pull` して起動するだけ |
 | 公開 | 公開リポジトリ。イメージは ghcr.io へ公開する |
 | 言語 | ドキュメント・コード中のコメント・docstring・WebUI は**日本語**(ビジネス文書の表現。絵文字は使わない)。識別子は英語 |
@@ -95,7 +95,7 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 ```
 .
 ├── AGENTS.md / README.md / LICENSE / docker-compose.yml
-├── docs/                  design.md(設計書) operations.md(運用) gpu.md(GPU確認手順)
+├── docs/                  design.md(設計書) operations.md(運用) gpu.md(GPU確認手順) security.md(セキュリティ対策) release.md(リリース)
 ├── src/vmsembed/
 │   ├── main.py            アプリ生成(ROLE で構成が変わる)
 │   ├── api.py             取り込み・検索・参照 API
@@ -103,6 +103,7 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 │   ├── pipeline.py        窓の計画と取り込みワーカー
 │   ├── ingest_files.py    取り込みの受付(検証・重複確認・フォルダ一括・ファイル名の日時)
 │   ├── watcher.py         監視フォルダの自動取り込み(WATCH_DIRS)
+│   ├── security.py        認証・CSRF・Host・本文の上限・応答ヘッダー(ASGI ミドルウェア)
 │   ├── store.py           SQLite + 総当たり検索
 │   ├── media.py           ffmpeg / ffprobe
 │   ├── config.py          環境変数とプリセット

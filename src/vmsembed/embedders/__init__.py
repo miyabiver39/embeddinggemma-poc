@@ -43,6 +43,7 @@ def build_embedder(settings: Settings) -> Embedder:
             settings.embedding_url,
             dims=settings.dims,
             timeout_sec=settings.embedding_timeout_sec,
+            token=settings.embedding_token,
         )
     from .local import LocalEmbedder
 

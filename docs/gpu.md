@@ -48,6 +48,13 @@ curl -s localhost:8000/api/info | python3 -m json.tool | grep -A8 embedder
 - 確認: `python -c "import torch;print(torch.xpu.is_available())"`。
 - 古い Intel 内蔵 GPU を使いたい場合の代替は OpenVINO(フェーズ 2 の「ネイティブ化」候補。未実装・未検証)。
 
+## 一般ユーザーでの実行と GPU
+
+アプリは起動直後に一般ユーザー(uid 1000)へ切り替えて動きます(`docs/security.md`)。
+`/dev/dri` と `/dev/kfd` のグループはデバイスファイルから自動で引き継ぐため、通常は追加の設定は不要です。
+ただし実機の GPU では未確認です。GPU を掴めない(`accelerator: cpu`)場合は、切り分けのために `-e PUID=0`(root のまま動かす)でも試し、
+結果の違いを下の記録欄に残してください。起動ログの「補助グループ=…」に、デバイスファイルのグループ番号が含まれているかも確認してください。
+
 ## 複数 GPU・選択
 
 `DEVICE=cuda` / `xpu` / `cpu` で強制できます。複数 GPU の NVIDIA は `--gpus '"device=0"'` などで Docker 側から絞ってください。

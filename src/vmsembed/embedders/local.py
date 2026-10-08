@@ -169,6 +169,7 @@ class LocalEmbedder(Embedder):
         )
         self._model = SentenceTransformer(
             settings.model_id,
+            revision=settings.model_revision or None,
             device=self._device,
             model_kwargs={"dtype": self._torch_dtype},
         )

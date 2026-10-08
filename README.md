@@ -11,8 +11,9 @@ Google の [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) �
 - ビルドは GitHub Actions が行います。利用者は **`docker pull` / `docker run` だけ**です
 
 > ## ご利用前の注意事項(自己責任)
-> - **認証・暗号化・アクセス制御は一切ありません。** 信頼できるネットワーク内のバックエンドとして使う前提です。インターネットや不特定多数が届く場所に公開しないでください。
-> - 録画映像・音声には**個人情報**(顔・声・車のナンバーなど)が含まれ得ます。保存されるのは「ベクトル・サムネイル・元ファイルの参照」ですが、サムネイルや元動画の配信 API は誰でも叩けます。取り扱いは利用者の責任です。
+> - **既定では認証が無効です。** 追加の設定なしで起動できるようにするためです。信頼できるネットワークの外で使う場合は、必ず `API_TOKEN` を設定し、TLS(HTTPS)を終端するリバースプロキシの内側に置いてください。アプリ自体は暗号化を行いません。
+> - 録画映像・音声には**個人情報**(顔・声・車のナンバーなど)が含まれ得ます。保存されるのは「ベクトル・サムネイル・元ファイルの参照」ですが、`API_TOKEN` を設定していない場合、サムネイルや元動画の配信 API には誰でもアクセスできます。取り扱いは利用者の責任です。
+> - 実施しているセキュリティ対策と残っているリスクは [docs/security.md](docs/security.md) にまとめています。
 > - 開発・検証用途です。運用での利用は自己責任でお願いします。
 
 ## クイックスタート(まずは CPU)
@@ -126,6 +127,13 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `WATCH_SETTLE_SEC` | `30` | 最終更新からこの秒数が経過したファイルだけを取り込む(書き込み中のファイルを避ける) |
 | `WATCH_CAMERA_FROM_DIR` | `true` | ファイルが入っているフォルダ名をカメラ ID にする |
 | `WATCH_PRESET` | (空) | 監視フォルダの取り込みに使うプリセット(`object` / `action` / `speech`)。空なら上記の窓の既定値 |
+| `API_TOKEN` | (空) | 設定すると `/api` と `/compute` にトークンが必要になる(`docs/security.md`) |
+| `EMBEDDING_TOKEN` | `API_TOKEN` と同じ | remote のとき、compute に送るトークン |
+| `INGEST_ROOTS` | `/recordings` | パス指定・フォルダ一括で取り込めるフォルダ(カンマ区切り)。`DATA_DIR` と監視フォルダは自動で追加 |
+| `MAX_UPLOAD_MB` | `4096` | 1 リクエストの大きさの上限(MB)。`0` で無制限 |
+| `ALLOWED_ORIGINS` | (空) | 別のオリジンのページから更新系の API を呼ぶ場合に許可するオリジン(カンマ区切り) |
+| `ALLOWED_HOSTS` | `*` | 受け付ける Host ヘッダー(カンマ区切り)。DNS リバインディング対策 |
+| `PUID` / `PGID` | `1000` | アプリを動かすユーザー / グループの ID。`PUID=0` で root のまま動かす |
 | `TZ` | `Asia/Tokyo` | 時刻(ファイル名の日時、タイムゾーンのない `start_ts`)の解釈 |
 | `LOG_LEVEL` | `INFO` | |
 
@@ -161,6 +169,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 - [docs/operations.md](docs/operations.md) — 運用メモ(容量見積もり、チューニング、トラブルシュート)
 - [docs/gpu.md](docs/gpu.md) — GPU モード(RTX 3060 / RX 9060 XT / Intel)の確認手順
 - [docs/release.md](docs/release.md) — リリースの手順と、添付する SBOM・脆弱性検査結果
+- [docs/security.md](docs/security.md) — セキュリティ対策と、残っているリスク
 - [AGENTS.md](AGENTS.md) — AI エージェント向けの作業ガイド
 
 ## 開発

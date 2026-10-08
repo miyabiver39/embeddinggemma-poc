@@ -54,6 +54,7 @@ class Settings:
 
     # --- モデル ---
     model_id: str
+    model_revision: str  # モデルの版(Hugging Face のコミット)。空なら最新。イメージでは同梱した版に固定
     device: str  # auto / cpu / cuda(NVIDIA と AMD ROCm) / xpu(Intel)
     dtype: str  # auto / float32 / bfloat16 / float16
     dims: int  # 出力次元(MRL で 768 / 512 / 256 / 128 に切り詰め)
@@ -84,6 +85,14 @@ class Settings:
     host: str
     port: int
 
+    # --- セキュリティ(docs/security.md) ---
+    api_token: str  # 空なら認証なし。設定すると /api と /compute にトークンが必要
+    embedding_token: str  # remote の compute に送るトークン(既定は api_token と同じ)
+    ingest_roots: tuple[Path, ...]  # パス指定・フォルダ一括で取り込めるフォルダ
+    max_upload_mb: int  # 1 リクエストの本文の上限(MB)。0 なら無制限
+    allowed_origins: tuple[str, ...]  # 別オリジンからの更新系リクエストを許可するオリジン
+    allowed_hosts: tuple[str, ...]  # 受け付ける Host ヘッダー("*" なら制限なし)
+
     @classmethod
     def from_env(cls) -> Settings:
         role = _env("ROLE", "all")
@@ -100,6 +109,14 @@ class Settings:
         if dims not in (768, 512, 256, 128):
             raise ValueError("DIMS は 768 / 512 / 256 / 128 のいずれかにしてください")
 
+        data_dir = Path(_env("DATA_DIR", "/data"))
+        # パスの一覧はカンマ区切り(パスに空白を含められるよう、空白では区切らない)
+        watch_dirs = tuple(Path(d.strip()) for d in _env("WATCH_DIRS", "").split(",") if d.strip())
+        # 取り込めるフォルダ: 既定は録画のマウント先(/recordings)と DATA_DIR。監視フォルダは自動で加える
+        roots = [Path(d.strip()) for d in _env("INGEST_ROOTS", "/recordings").split(",") if d.strip()]
+        ingest_roots = tuple(dict.fromkeys([*roots, data_dir, *watch_dirs]))
+        api_token = _env("API_TOKEN", "")
+
         watch_preset = _env("WATCH_PRESET", "")
         if watch_preset and watch_preset not in PRESETS:
             raise ValueError(f"WATCH_PRESET は {list(PRESETS)} のいずれかにしてください: {watch_preset!r}")
@@ -110,24 +127,30 @@ class Settings:
             embedding_url=_env("EMBEDDING_URL", "http://localhost:8001").rstrip("/"),
             embedding_timeout_sec=_env_float("EMBEDDING_TIMEOUT_SEC", 300.0),
             model_id=_env("MODEL_ID", "google/embeddinggemma-2"),
+            model_revision=_env("MODEL_REVISION", ""),
             device=_env("DEVICE", "auto"),
             dtype=_env("DTYPE", "auto"),
             dims=dims,
             image_max_tokens=_env_int("IMAGE_MAX_TOKENS", 0),
             image_max_side=_env_int("IMAGE_MAX_SIDE", 448),
-            data_dir=Path(_env("DATA_DIR", "/data")),
+            data_dir=data_dir,
             window_sec=_env_int("WINDOW_SEC", PRESETS["object"]["window_sec"]),
             frames_per_window=_env_int("FRAMES_PER_WINDOW", PRESETS["object"]["frames_per_window"]),
             overlap_sec=_env_int("OVERLAP_SEC", 0),
             include_audio=_env_bool("INCLUDE_AUDIO", False),
             audio_chunk_sec=_env_int("AUDIO_CHUNK_SEC", 10),
             top_k_default=_env_int("TOP_K", 10),
-            # 区切りはカンマ(パスに空白を含められるよう、空白では区切らない)
-            watch_dirs=tuple(Path(d.strip()) for d in _env("WATCH_DIRS", "").split(",") if d.strip()),
+            watch_dirs=watch_dirs,
             watch_interval_sec=max(_env_int("WATCH_INTERVAL_SEC", 60), 5),
             watch_settle_sec=max(_env_int("WATCH_SETTLE_SEC", 30), 0),
             watch_camera_from_dir=_env_bool("WATCH_CAMERA_FROM_DIR", True),
             watch_preset=watch_preset,
             host=_env("HOST", "0.0.0.0"),
             port=_env_int("PORT", 8000),
+            api_token=api_token,
+            embedding_token=_env("EMBEDDING_TOKEN", api_token),
+            ingest_roots=ingest_roots,
+            max_upload_mb=max(_env_int("MAX_UPLOAD_MB", 4096), 0),
+            allowed_origins=tuple(o.strip().rstrip("/") for o in _env("ALLOWED_ORIGINS", "").split(",") if o.strip()),
+            allowed_hosts=tuple(h.strip().lower() for h in _env("ALLOWED_HOSTS", "*").split(",") if h.strip()),
         )

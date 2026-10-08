@@ -4,6 +4,7 @@
 どれも、ここを通してキューに入れます。受付の時点で次を確認し、だめなら理由をすぐ返します
 (バックグラウンドのジョブが失敗してから気づく、という手戻りを減らすため)。
 
+  - INGEST_ROOTS で許可したフォルダの下にあるか(コンテナ内の任意のファイルを登録させない)
   - 拡張子が映像・音声のものか(設定ファイルなど、メディア以外のファイルを登録しない)
   - ffprobe で読めて、必要なトラック(映像 / 音声)があり、長さが 0 でないか
   - 同じファイルを、すでに取り込んでいないか(重複した窓で検索結果が埋まるのを防ぐ)
@@ -37,6 +38,16 @@ AUDIO_EXTS = frozenset({".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".oga",
 _TS_PATTERN = re.compile(
     r"(?<!\d)(20\d{2})[-_]?(\d{2})[-_]?(\d{2})[T_\- ]?(\d{2})[-_:]?(\d{2})[-_:]?(\d{2})(?!\d)"
 )
+
+
+class PathNotAllowed(MediaError):
+    """INGEST_ROOTS の外のパス(API では 403)。"""
+
+
+def is_within(path: str | Path, roots: tuple[Path, ...]) -> bool:
+    """path が roots のどれかの下にあるか。シンボリックリンクと .. は解決してから比べます。"""
+    resolved = Path(path).resolve()
+    return any(resolved.is_relative_to(Path(r).resolve()) for r in roots)
 
 
 def media_kind_of(path: str | Path) -> str | None:
@@ -87,15 +98,25 @@ class Accepted:
 class FileIntake:
     """ファイルを検証し、取り込みキューに入れます。"""
 
-    def __init__(self, store: Store, ingestor: Ingestor) -> None:
+    def __init__(self, store: Store, ingestor: Ingestor, roots: tuple[Path, ...]) -> None:
         self._store = store
         self._ingestor = ingestor
+        self._roots = roots
         # 重複の確認から登録までを直列にする(監視フォルダの走査と API が同じファイルを同時に受け付けないように)
         self._lock = threading.Lock()
 
-    @staticmethod
-    def validate(path: Path, kind: str) -> media.MediaInfo:
-        """取り込めるファイルか確かめます。だめなら MediaError(API では 422)を送出します。"""
+    def check_allowed(self, path: Path) -> None:
+        """許可したフォルダの外なら PathNotAllowed を送出します。"""
+        if not is_within(path, self._roots):
+            allowed = ", ".join(str(r) for r in self._roots)
+            raise PathNotAllowed(
+                f"取り込めるフォルダの外です: {path}"
+                f"(許可しているフォルダ: {allowed}。環境変数 INGEST_ROOTS で変更できます)"
+            )
+
+    def validate(self, path: Path, kind: str) -> media.MediaInfo:
+        """取り込めるファイルか確かめます。だめなら MediaError(API では 422 か 403)を送出します。"""
+        self.check_allowed(path)
         expected = media_kind_of(path)
         if expected is None:
             raise MediaError(
@@ -183,6 +204,7 @@ class FileIntake:
         settle_sec を指定すると、最終更新から指定秒数たっていないファイル(録画中の可能性がある)を後回しにします。
         """
         root = root.resolve()
+        self.check_allowed(root)
         if not root.is_dir():
             raise MediaError(f"フォルダが見つかりません: {root}(コンテナ内のパスで指定してください)")
         now = time.time()
