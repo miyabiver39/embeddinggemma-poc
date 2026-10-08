@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import tempfile
@@ -20,12 +21,14 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import media
+from . import __version__, media
 from .config import PRESETS, Settings
 from .embedders import Embedder
+from .ingest_files import FileIntake
 from .media import MediaError
 from .pipeline import Ingestor, IngestParams
 from .store import Store
+from .watcher import FolderWatcher
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +41,8 @@ class Context:
     store: Store
     embedder: Embedder
     ingestor: Ingestor
+    intake: FileIntake
+    watcher: FolderWatcher
 
     @property
     def media_dir(self) -> Path:
@@ -49,6 +54,13 @@ class Context:
 
 
 # ---------------------------------------------------------------------- 入力の変換
+def parse_opt_ts(value: str | None) -> float | None:
+    """時刻の指定を UNIX 秒にします。空なら None(ファイル名からの推定や受付時刻に任せる)。"""
+    if value is None or value.strip() == "":
+        return None
+    return parse_ts(value)
+
+
 def parse_ts(value: str | None) -> float:
     """時刻の指定を UNIX 秒にします。空なら現在時刻。
 
@@ -139,6 +151,22 @@ class IngestPathRequest(BaseModel):
     overlap_sec: int | None = None
     include_audio: bool | None = None
     kind: str = "video"  # video / audio
+    force: bool = False  # 取り込み済みでも、もう一度取り込む
+
+
+class IngestDirRequest(BaseModel):
+    dir: str
+    recursive: bool = True
+    kind: str = "auto"  # auto(拡張子で判定) / video / audio
+    camera_id: str | None = None
+    camera_from_dir: bool = False  # ファイルが入っているフォルダ名をカメラ ID にする
+    location: str | None = None
+    preset: str | None = None
+    window_sec: int | None = None
+    frames_per_window: int | None = None
+    overlap_sec: int | None = None
+    include_audio: bool | None = None
+    force: bool = False
 
 
 class TextSearchRequest(BaseModel):
@@ -179,27 +207,17 @@ def build_api_router(ctx: Context) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    def _queue_source(
-        *,
-        kind: str,
-        path: str,
-        name: str,
-        camera_id: str | None,
-        location: str | None,
-        start_ts: float,
-        params: IngestParams,
-    ) -> dict:
-        source_id = ctx.store.add_source(
-            kind=kind,
-            path=path,
-            name=name,
-            camera_id=camera_id or None,
-            location=location or None,
-            start_ts=start_ts,
-            params=params.to_dict(),
-        )
-        job_id = ctx.ingestor.submit(source_id)
-        return {"source_id": source_id, "job_id": job_id}
+    def _accept_upload(upload: UploadFile, kind: str, start_ts: str | None, **meta) -> dict:
+        """アップロードされたファイルを保存して受け付けます。取り込めないファイルなら消して 422 を返します。"""
+        dest = _save_upload(upload)
+        try:
+            result = ctx.intake.accept(
+                dest, kind=kind, name=upload.filename or dest.name, start_ts=parse_opt_ts(start_ts), **meta
+            )
+        except MediaError:
+            dest.unlink(missing_ok=True)
+            raise
+        return result.to_dict()
 
     def _save_upload(upload: UploadFile) -> Path:
         ctx.media_dir.mkdir(parents=True, exist_ok=True)
@@ -220,7 +238,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             return ["tav"] if s.include_audio else ["frames"]
         return [kind]
 
-    def _search(qvec: np.ndarray, f: dict, auto_kinds: list[str] | None = None) -> dict:
+    def _search(qvec: np.ndarray, f: dict, auto_kinds: list[str] | None = None, embed_ms: int = 0) -> dict:
         started = time.time()
         info = ctx.embedder.info()
         ctx.store.ensure_compat(info.model_id, info.dims)
@@ -244,7 +262,8 @@ def build_api_router(ctx: Context) -> APIRouter:
             h["thumb_url"] = f"/api/thumb/{h['window_id']}"
         out = {
             "results": hits,
-            "took_ms": int((time.time() - started) * 1000),
+            "took_ms": int((time.time() - started) * 1000),  # DB の検索だけにかかった時間
+            "embed_ms": embed_ms,  # クエリのベクトル化にかかった時間
             "searched_kinds": f.get("kind", "auto"),
         }
         if f.get("merge", True):
@@ -269,6 +288,12 @@ def build_api_router(ctx: Context) -> APIRouter:
             embedder = {"error": str(exc)}
         return {
             "role": s.role,
+            "version": {
+                "app": __version__,
+                "variant": os.environ.get("VARIANT", "source"),
+                "revision": os.environ.get("VMSEMBED_REVISION", "unknown"),
+                "build_ref": os.environ.get("VMSEMBED_BUILD_REF", "local"),
+            },
             "embedder": embedder,
             "defaults": {
                 "window_sec": s.window_sec,
@@ -285,6 +310,7 @@ def build_api_router(ctx: Context) -> APIRouter:
                 "dims": ctx.store.get_meta("dims"),
                 "queue_size": ctx.ingestor.queue_size,
             },
+            "watch": ctx.watcher.status,
         }
 
     # ------------------------------------------------------------------ 取り込み
@@ -308,16 +334,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             _opt_int(overlap_sec, "overlap_sec"),
             _opt_bool(include_audio),
         )
-        dest = _save_upload(file)
-        return _queue_source(
-            kind="video",
-            path=str(dest),
-            name=file.filename or dest.name,
-            camera_id=camera_id,
-            location=location,
-            start_ts=parse_ts(start_ts),
-            params=params,
-        )
+        return _accept_upload(file, "video", start_ts, camera_id=camera_id, location=location, params=params)
 
     @router.post("/ingest/audio")
     def ingest_audio(
@@ -329,20 +346,15 @@ def build_api_router(ctx: Context) -> APIRouter:
     ) -> dict:
         """音声ファイル(または音声つきの動画)を、音声だけで取り込みます。"""
         params = _params(None, None, None, None, None, _opt_int(chunk_sec, "chunk_sec"))
-        dest = _save_upload(file)
-        return _queue_source(
-            kind="audio",
-            path=str(dest),
-            name=file.filename or dest.name,
-            camera_id=camera_id,
-            location=location,
-            start_ts=parse_ts(start_ts),
-            params=params,
-        )
+        return _accept_upload(file, "audio", start_ts, camera_id=camera_id, location=location, params=params)
 
     @router.post("/ingest/path")
     def ingest_path(body: IngestPathRequest) -> dict:
-        """サーバ(コンテナ)内にあるファイルを取り込みます。VMS の録画ディレクトリをマウントして使う想定です。"""
+        """サーバ(コンテナ)内にあるファイルを取り込みます。VMS の録画ディレクトリをマウントして使う想定です。
+
+        start_ts を省略すると、ファイル名の日時(例: 20260101_090000)を録画開始時刻にします。
+        取り込み済みのファイルは重複として既存の取り込み元を返します(force=true で取り込み直し)。
+        """
         path = Path(body.path)
         if not path.is_file():
             raise HTTPException(
@@ -357,15 +369,49 @@ def build_api_router(ctx: Context) -> APIRouter:
             body.overlap_sec,
             body.include_audio,
         )
-        return _queue_source(
+        return ctx.intake.accept(
+            path,
             kind=body.kind,
-            path=str(path),
-            name=path.name,
             camera_id=body.camera_id,
             location=body.location,
-            start_ts=parse_ts(body.start_ts),
+            start_ts=parse_opt_ts(body.start_ts),
             params=params,
+            force=body.force,
+        ).to_dict()
+
+    @router.post("/ingest/dir")
+    def ingest_dir(body: IngestDirRequest) -> dict:
+        """フォルダの中の映像・音声ファイルを、まとめて取り込みます。
+
+        録画開始時刻はファイル名の日時から読み取ります(読み取れなければ受付時刻)。
+        取り込み済みのファイルは飛ばすので、同じフォルダに何度実行しても重複しません。
+        """
+        if body.kind not in ("auto", "video", "audio"):
+            raise HTTPException(400, "kind は auto / video / audio のいずれかにしてください")
+        params = _params(
+            body.preset,
+            body.window_sec,
+            body.frames_per_window,
+            body.overlap_sec,
+            body.include_audio,
         )
+        return ctx.intake.accept_dir(
+            Path(body.dir),
+            params=params,
+            recursive=body.recursive,
+            kind=body.kind,
+            camera_id=body.camera_id,
+            camera_from_dir=body.camera_from_dir,
+            location=body.location,
+            force=body.force,
+        )
+
+    @router.post("/watch/scan")
+    def watch_scan() -> dict:
+        """監視フォルダを、次の定期走査を待たずに今すぐ走査します(WATCH_DIRS の設定が必要)。"""
+        if not s.watch_dirs:
+            raise HTTPException(400, "監視フォルダが設定されていません(環境変数 WATCH_DIRS)")
+        return {"queued": ctx.watcher.scan_once(), "watch": ctx.watcher.status}
 
     @router.post("/ingest/frames")
     def ingest_frames(
@@ -410,8 +456,9 @@ def build_api_router(ctx: Context) -> APIRouter:
     def search_text(body: TextSearchRequest) -> dict:
         if not body.query.strip():
             raise HTTPException(400, "query が空です")
+        t0 = time.time()
         qvec = ctx.embedder.embed_texts([body.query], kind="query")[0]
-        return _search(qvec, body.model_dump())
+        return _search(qvec, body.model_dump(), embed_ms=int((time.time() - t0) * 1000))
 
     def _form_filters(
         top_k: str | None,
@@ -453,9 +500,12 @@ def build_api_router(ctx: Context) -> APIRouter:
             image = jpeg_to_image(file.file.read())  # JPEG 以外(PNG など)も PIL が読める
         except Exception as exc:
             raise HTTPException(400, f"画像として読めません: {exc}") from exc
+        t0 = time.time()
         qvec = ctx.embedder.embed_images([image], high=True)[0]
         return _search(
-            qvec, _form_filters(top_k, min_score, camera_id, location, from_ts, to_ts, kind, merge)
+            qvec,
+            _form_filters(top_k, min_score, camera_id, location, from_ts, to_ts, kind, merge),
+            embed_ms=int((time.time() - t0) * 1000),
         )
 
     @router.post("/search/audio")
@@ -478,13 +528,16 @@ def build_api_router(ctx: Context) -> APIRouter:
             pcm = media.extract_audio(tmp_path, 0, min(max(info.duration_ms, 1), 60_000))
         if pcm.size == 0:
             raise HTTPException(400, "音声を読み取れませんでした")
+        t0 = time.time()
         qvec = ctx.embedder.embed_audio(pcm, high=True)
+        embed_ms = int((time.time() - t0) * 1000)
         # 音声だけのベクトルは映像のみ(frames)の窓とはほぼ無関係な順位になる(実測)ため、
         # 音声クエリの auto は、音声のみで取り込んだ窓(audio)を探す
         return _search(
             qvec,
             _form_filters(top_k, min_score, camera_id, location, from_ts, to_ts, kind, merge),
             auto_kinds=["audio"],
+            embed_ms=embed_ms,
         )
 
     # ------------------------------------------------------------------ 取り込み元・ジョブ
@@ -508,6 +561,8 @@ def build_api_router(ctx: Context) -> APIRouter:
         src = ctx.store.get_source(source_id)
         if src is None or src["kind"] not in ("video", "audio"):
             raise HTTPException(404, "再取り込みできる取り込み元が見つかりません")
+        if not src["path"] or not Path(src["path"]).is_file():
+            raise HTTPException(404, f"元のファイルが見つかりません: {src['path']}")
         ctx.store.update_source(source_id, status="queued", error=None)
         return {"source_id": source_id, "job_id": ctx.ingestor.submit(source_id)}
 
@@ -526,7 +581,14 @@ def build_api_router(ctx: Context) -> APIRouter:
     @router.get("/media/{source_id}")
     def get_media(source_id: int) -> FileResponse:
         src = ctx.store.get_source(source_id)
-        if src is None or not src["path"] or not Path(src["path"]).is_file():
+        # 配信するのは、受付時の検証を通った映像・音声だけ(取り込みに失敗したものは返さない)
+        if (
+            src is None
+            or src["kind"] not in ("video", "audio")
+            or src["status"] == "failed"
+            or not src["path"]
+            or not Path(src["path"]).is_file()
+        ):
             raise HTTPException(404, "ファイルが見つかりません")
         return FileResponse(src["path"])  # Range リクエスト(シーク再生)に対応
 

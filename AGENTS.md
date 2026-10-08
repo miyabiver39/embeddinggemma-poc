@@ -79,6 +79,7 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 - [x] 音声のトークン数は 1 秒あたり 25(40ms/トークン)。プロセッサで実測。448px の画像は 256 トークン
 - [x] CPU(4 vCPU)での 1 窓あたりの処理時間: frames 約 8.5 秒、tav 約 8.7 秒、音声 10 秒区切り約 1 秒(`docs/operations.md`)
 - [x] `:cuda` / `:intel` イメージは、GPU を渡さずに起動すると CPU で動き、検索スコアが `:cpu` と一致する(`:intel` は修正前はセグメンテーション違反で起動できなかった。`docs/gpu.md`)。`:rocm` は容量の都合で未実施
+- [x] 取り込みの受付(拡張子・ffprobe の検証、重複確認、ファイル名の日時、フォルダ一括、監視フォルダ)が `:cpu` イメージ上で実モデルとともに動く。`/etc/shadow` などメディア以外のパスは 422 で拒否される
 - [x] イメージの容量(ghcr の圧縮サイズ): slim 0.27GB / cpu 1.46GB / cuda 4.94GB / rocm 7.89GB / intel 3.82GB。展開後は slim 1.1GB / cpu 5.1GB / intel 14.1GB / cuda 14.4GB
 
 未確認(推測を含む。実測してから記述を確定すること):
@@ -100,6 +101,8 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 │   ├── compute_api.py     ベクトル化 API(/compute/*)
 │   ├── pipeline.py        窓の計画と取り込みワーカー
 │   ├── store.py           SQLite + 総当たり検索
+│   ├── ingest_files.py    取り込みの受付(検証・重複確認・フォルダ一括・ファイル名の日時)
+│   ├── watcher.py         監視フォルダの自動取り込み(WATCH_DIRS)
 │   ├── media.py           ffmpeg / ffprobe
 │   ├── config.py          環境変数とプリセット
 │   ├── embedders/         Embedder インターフェースと local / remote / dummy

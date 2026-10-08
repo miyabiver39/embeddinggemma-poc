@@ -19,9 +19,11 @@ from .api import Context, build_api_router
 from .compute_api import build_compute_router
 from .config import Settings
 from .embedders import Embedder, build_embedder
+from .ingest_files import FileIntake
 from .media import MediaError
 from .pipeline import Ingestor
 from .store import IndexMismatch, Store
+from .watcher import FolderWatcher
 
 log = logging.getLogger("vmsembed")
 WEB_DIR = Path(__file__).parent / "web"
@@ -32,6 +34,32 @@ def _setup_logging() -> None:
         level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+
+def _warn_if_incompatible(store: Store, emb: Embedder) -> None:
+    """DB のモデル・次元と現在の推論の設定が違えば、起動時に警告します(起動は止めません)。
+
+    取り込み・検索のたびにも同じ確認をして 409 を返しますが、設定の誤りに早く気づけるよう、
+    起動時にもログへ出します。外部の compute に届かない場合は、ここでは確認を見送ります
+    (compute より先に app が起動しても動けるようにするため)。
+    """
+    saved_model, saved_dims = store.get_meta("model_id"), store.get_meta("dims")
+    if saved_model is None:
+        return
+    try:
+        info = emb.info()
+    except ConnectionError as exc:
+        log.warning("推論側に接続できないため、DB との整合性の確認を見送ります: %s", exc)
+        return
+    if saved_model != info.model_id or saved_dims != str(info.dims):
+        log.warning(
+            "DB(model_id=%s, dims=%s)と現在の設定(model_id=%s, dims=%s)が一致しません。"
+            "このままでは取り込み・検索が 409 で拒否されます。設定を戻すか DATA_DIR を変えてください。",
+            saved_model,
+            saved_dims,
+            info.model_id,
+            info.dims,
+        )
 
 
 def create_app(settings: Settings | None = None, embedder: Embedder | None = None) -> FastAPI:
@@ -45,18 +73,27 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     emb = embedder or build_embedder(s)
     store: Store | None = None
     ingestor: Ingestor | None = None
+    intake: FileIntake | None = None
+    watcher: FolderWatcher | None = None
     if s.role in ("all", "app"):
         store = Store(s.data_dir / "vmsembed.db")
         ingestor = Ingestor(s, store, emb)
+        intake = FileIntake(store, ingestor)
+        watcher = FolderWatcher(s, store, intake)
+        _warn_if_incompatible(store, emb)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if ingestor:
             ingestor.start()
+        if watcher:
+            watcher.start()
         log.info("起動が完了しました。 http://localhost:%d/", s.port)
         try:
             yield
         finally:
+            if watcher:
+                watcher.stop()
             if ingestor:
                 ingestor.stop()
             if store:
@@ -73,8 +110,8 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     app.state.embedder = emb
     if s.role in ("all", "compute"):
         app.include_router(build_compute_router(emb))
-    if store and ingestor:
-        app.include_router(build_api_router(Context(s, store, emb, ingestor)))
+    if store and ingestor and intake and watcher:
+        app.include_router(build_api_router(Context(s, store, emb, ingestor, intake, watcher)))
 
     @app.get("/healthz", tags=["system"])
     def healthz() -> dict:

@@ -90,12 +90,13 @@
   <div class="row">
     <label>カメラID<input id="i-cam"></label>
     <label>場所<input id="i-loc"></label>
-    <label>録画開始日時(空なら現在)<input id="i-ts" type="datetime-local"></label>
+    <label>録画開始日時(空欄の場合はファイル名の日時、なければ受付時刻)<input id="i-ts" type="datetime-local"></label>
     <label>プリセット<select id="i-preset"><option value="">(既定)</option></select></label>
     <label>窓の長さ(秒)<input id="i-win" type="number" min="1" style="width:80px"></label>
     <label>窓あたりのフレーム数<input id="i-fr" type="number" min="1" style="width:80px"></label>
     <label>重なり(秒)<input id="i-ov" type="number" min="0" style="width:80px"></label>
     <label>音声を含める<select id="i-aud"><option value="">(既定)</option><option value="true">含める</option><option value="false">含めない</option></select></label>
+    <label style="flex-direction:row;align-items:center;gap:4px"><input type="checkbox" id="i-force"> 取り込み済みのファイルも再度取り込む</label>
   </div>
   <div class="note" id="i-note"></div>
 
@@ -113,6 +114,16 @@
     <label>種類<select id="i-pkind"><option>video</option><option>audio</option></select></label>
     <button id="btn-path" class="primary" style="margin-bottom:8px">取り込む</button>
   </div>
+
+  <h3>フォルダを一括で取り込む</h3>
+  <div class="row">
+    <label class="grow">フォルダ(コンテナ内)<input id="i-dir" placeholder="/recordings"></label>
+    <label>種類<select id="i-dkind"><option value="auto">拡張子で判定</option><option value="video">video のみ</option><option value="audio">audio のみ</option></select></label>
+    <label style="flex-direction:row;align-items:center;gap:4px"><input type="checkbox" id="i-rec" checked> 下位フォルダも対象にする</label>
+    <label style="flex-direction:row;align-items:center;gap:4px"><input type="checkbox" id="i-camdir"> フォルダ名をカメラIDにする</label>
+    <button id="btn-dir" class="primary" style="margin-bottom:8px">一括で取り込む</button>
+  </div>
+  <div class="note">取り込み済みのファイルは対象外になるため、同じフォルダに繰り返し実行しても重複しません。録画を自動で取り込む場合は、環境変数 WATCH_DIRS で監視フォルダを設定してください(「状態」タブで確認できます)。</div>
   <div id="i-msg"></div>
 </section>
 
@@ -127,6 +138,11 @@
 
 <!-- ============ 状態 ============ -->
 <section id="status">
+  <h3 style="margin-top:0">監視フォルダ</h3>
+  <div id="w-summary" class="mute"></div>
+  <div class="row" style="margin-top:8px"><button id="btn-scan">今すぐ走査する</button></div>
+  <div id="w-msg"></div>
+  <h3>詳細(/api/info)</h3>
   <pre id="info"></pre>
   <div class="note">API 仕様は <a href="/docs" target="_blank">/docs</a>(Swagger UI)にあります。</div>
 </section>
@@ -160,9 +176,17 @@ async function loadInfo() {
   try {
     INFO = await api("/api/info");
     $("info").textContent = JSON.stringify(INFO, null, 2);
-    const e = INFO.embedder || {};
-    $("hdr").textContent = e.error ? "埋め込み: 接続エラー" :
-      `${e.backend} / ${e.model_id} / ${e.dims}次元 / ${e.accelerator} (${e.device}, ${e.dtype}) / 窓 ${INFO.index.windows ?? "-"}`;
+    const e = INFO.embedder || {}, v = INFO.version || {};
+    $("hdr").textContent = (e.error ? "埋め込み: 接続エラー" :
+      `${e.backend} / ${e.model_id} / ${e.dims}次元 / ${e.accelerator} (${e.device}, ${e.dtype}) / 窓 ${INFO.index.windows ?? "-"}`) +
+      ` / v${v.app} ${v.variant || ""} ${(v.revision || "").slice(0, 7)}`;
+    const w = INFO.watch || {};
+    $("w-summary").textContent = !w.enabled ? "監視フォルダは設定されていません(環境変数 WATCH_DIRS で設定できます)。" :
+      `対象: ${w.dirs.join(", ")} / 走査間隔 ${w.interval_sec}秒 / 更新から ${w.settle_sec}秒経過したファイルを対象 / ` +
+      `前回の走査: ${w.last_scan_at ? new Date(w.last_scan_at * 1000).toLocaleString() : "未実施"} / ` +
+      `前回の登録 ${w.last_queued}件・累計 ${w.total_queued}件・待機中 ${w.pending}件` +
+      (w.errors && w.errors.length ? ` / 取り込めないファイル ${w.errors.length}件(詳細は下記)` : "");
+    $("btn-scan").disabled = !w.enabled;
     const sel = $("i-preset");
     if (sel.options.length === 1) Object.keys(INFO.presets || {}).forEach((k) => sel.add(new Option(k, k)));
     const d = INFO.defaults || {};
@@ -187,11 +211,11 @@ async function runSearch(kind) {
   try {
     let res;
     if (kind === "text") {
-      if (!$("q").value.trim()) throw new Error("検索ワードを入力してください");
+      if (!$("q").value.trim()) throw new Error("検索ワードを入力してください。");
       res = await api("/api/search/text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: $("q").value, ...filters() }) });
     } else {
       const file = $(kind === "image" ? "qimg" : "qaud").files[0];
-      if (!file) throw new Error("ファイルを選んでください");
+      if (!file) throw new Error("ファイルを選択してください。");
       const fd = new FormData(); fd.append("file", file); formFilters(fd);
       res = await api("/api/search/" + kind, { method: "POST", body: fd });
     }
@@ -201,7 +225,7 @@ async function runSearch(kind) {
 function renderHits(res) {
   const items = res.intervals || res.results.map((r) => ({ ...r, window_ids: [r.window_id] }));
   const byWin = Object.fromEntries(res.results.map((r) => [r.window_id, r]));
-  $("s-msg").textContent = `${items.length} 件(${res.took_ms} ms, 対象種別: ${res.searched_kinds})`;
+  $("s-msg").textContent = `${items.length} 件(ベクトル化 ${res.embed_ms ?? "-"} ms・検索 ${res.took_ms} ms、対象種別: ${res.searched_kinds})`;
   $("hits").innerHTML = items.map((it, i) => {
     const first = byWin[it.window_ids[0]] || {};
     const thumb = first.thumb_url || "";
@@ -233,14 +257,19 @@ function ingestFields(fd) {
 }
 async function ingest(kind) {
   const file = $(kind === "video" ? "i-vfile" : "i-afile").files[0];
-  if (!file) { $("i-msg").innerHTML = '<span class="err">ファイルを選んでください</span>'; return; }
+  if (!file) { $("i-msg").innerHTML = '<span class="err">ファイルを選択してください。</span>'; return; }
   $("i-msg").textContent = "アップロード中…";
   try {
     const fd = ingestFields(new FormData()); fd.append("file", file);
     if (kind === "audio") { fd.delete("preset"); fd.delete("window_sec"); fd.delete("frames_per_window"); fd.delete("overlap_sec"); fd.delete("include_audio"); }
     const r = await api("/api/ingest/" + kind, { method: "POST", body: fd });
-    $("i-msg").textContent = `受け付けました: source_id=${r.source_id}, job_id=${r.job_id}(「ジョブ・ソース」タブで進捗を確認)`;
+    $("i-msg").textContent = acceptedText(r) + "(進捗は「ジョブ・ソース」タブで確認できます)";
   } catch (e) { $("i-msg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+}
+const TS_FROM = { request: "指定値", filename: "ファイル名", now: "受付時刻", existing: "取り込み済み" };
+function acceptedText(r) {
+  if (r.duplicate) return `取り込み済みのファイルです(source_id=${r.source_id})。再度取り込む場合は「取り込み済みのファイルも再度取り込む」を選択してください。`;
+  return `受け付けました: source_id=${r.source_id}, job_id=${r.job_id}、録画開始 ${r.start_ts}(${TS_FROM[r.start_ts_from] || r.start_ts_from})`;
 }
 $("btn-vup").onclick = () => ingest("video");
 $("btn-aup").onclick = () => ingest("audio");
@@ -250,9 +279,24 @@ $("btn-path").onclick = async () => {
   for (const [k, id] of Object.entries(m)) if ($(id).value) body[k] = $(id).value;
   for (const [k, id] of Object.entries({ window_sec: "i-win", frames_per_window: "i-fr", overlap_sec: "i-ov" })) if ($(id).value) body[k] = +$(id).value;
   if ($("i-aud").value) body.include_audio = $("i-aud").value === "true";
+  body.force = $("i-force").checked;
   try {
     const r = await api("/api/ingest/path", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    $("i-msg").textContent = `受け付けました: source_id=${r.source_id}, job_id=${r.job_id}`;
+    $("i-msg").textContent = acceptedText(r);
+  } catch (e) { $("i-msg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+};
+$("btn-dir").onclick = async () => {
+  if (!$("i-dir").value.trim()) { $("i-msg").innerHTML = '<span class="err">フォルダを入力してください。</span>'; return; }
+  const body = { dir: $("i-dir").value.trim(), kind: $("i-dkind").value, recursive: $("i-rec").checked,
+    camera_from_dir: $("i-camdir").checked, force: $("i-force").checked };
+  for (const [k, id] of Object.entries({ camera_id: "i-cam", location: "i-loc", preset: "i-preset" })) if ($(id).value) body[k] = $(id).value;
+  for (const [k, id] of Object.entries({ window_sec: "i-win", frames_per_window: "i-fr", overlap_sec: "i-ov" })) if ($(id).value) body[k] = +$(id).value;
+  if ($("i-aud").value) body.include_audio = $("i-aud").value === "true";
+  $("i-msg").textContent = "フォルダを確認しています…";
+  try {
+    const r = await api("/api/ingest/dir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    $("i-msg").innerHTML = esc(`${r.dir}: ${r.queued}件を受け付けました(取り込み済み ${r.duplicates}件は対象外)。`) +
+      (r.errors.length ? '<div class="err">' + r.errors.map((x) => esc(x.path + ": " + x.error)).join("\n") + "</div>" : "");
   } catch (e) { $("i-msg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
 };
 
@@ -272,6 +316,11 @@ async function loadJobs() {
   } catch (e) { $("t-jobs").innerHTML = '<tr><td class="err">' + esc(e.message) + "</td></tr>"; }
 }
 $("btn-refresh").onclick = loadJobs;
+$("btn-scan").onclick = async () => {
+  $("w-msg").textContent = "走査しています…";
+  try { const r = await api("/api/watch/scan", { method: "POST" }); $("w-msg").textContent = `${r.queued}件を新たに受け付けました。`; loadInfo(); }
+  catch (e) { $("w-msg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
+};
 setInterval(() => { if ($("jobs").classList.contains("on") && $("auto").checked) loadJobs(); }, 3000);
 
 loadInfo();

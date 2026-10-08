@@ -33,9 +33,29 @@ docker run -d --name vmsembed -p 8000:8000 -v ./data:/data \
 docker run -d --name vmsembed -p 8000:8000 -v ./data:/data -v /path/to/recordings:/recordings:ro \
   ghcr.io/miyabiver39/embeddinggemma-poc:cpu
 
+# 1 ファイルを取り込む(録画開始時刻はファイル名の 20260101_090000 から読み取ります)
 curl -X POST localhost:8000/api/ingest/path -H 'Content-Type: application/json' \
-  -d '{"path":"/recordings/cam01/20260101_090000.mp4","camera_id":"cam01","location":"玄関","start_ts":"2026-01-01T09:00:00+09:00"}'
+  -d '{"path":"/recordings/cam01/20260101_090000.mp4","camera_id":"cam01","location":"玄関"}'
+
+# フォルダをまとめて取り込む(フォルダ名 cam01 などをカメラ ID にする。取り込み済みのファイルは対象外)
+curl -X POST localhost:8000/api/ingest/dir -H 'Content-Type: application/json' \
+  -d '{"dir":"/recordings","camera_from_dir":true}'
 ```
+
+- `start_ts` を省略すると、ファイル名に含まれる日時(`20260101_090000`、`2026-01-01T09-00-00` など)を録画開始時刻にします。読み取れない場合は受付時刻になります。
+- 同じファイルを再度指定しても重複して登録しません(既存の取り込み元を返します)。取り込み直す場合は `"force": true` を付けます。
+- 受付の時点で ffprobe による検証を行い、映像・音声として扱えないファイルは 422 で拒否します(取り込める拡張子は `docs/operations.md` を参照)。
+
+### 録画フォルダを監視して自動で取り込む
+
+```bash
+docker run -d --name vmsembed -p 8000:8000 -v ./data:/data -v /path/to/recordings:/recordings:ro \
+  -e WATCH_DIRS=/recordings ghcr.io/miyabiver39/embeddinggemma-poc:cpu
+```
+
+`WATCH_DIRS` に指定したフォルダを定期的に走査し、新しい録画ファイルを自動で取り込みます。
+書き込み中のファイルを避けるため、最終更新から `WATCH_SETTLE_SEC` 秒(既定 30 秒)経過したファイルだけを対象にします。
+ファイルが入っているフォルダ名をカメラ ID にします(`/recordings/cam01/...` なら `cam01`)。状態は WebUI の「状態」タブで確認できます。
 
 ## イメージの種類
 
@@ -101,7 +121,12 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `IMAGE_MAX_TOKENS` | `0` | 画像1枚あたりのトークン上限(0=モデル既定) |
 | `TOP_K` | `10` | 検索の既定件数 |
 | `DATA_DIR` | `/data` | DB・サムネイル・アップロード動画の保存先 |
-| `TZ` | `Asia/Tokyo` | 絶対時刻(`start_ts` 省略時など)の解釈 |
+| `WATCH_DIRS` | (空) | 自動で取り込む監視フォルダ(カンマ区切り)。空なら無効 |
+| `WATCH_INTERVAL_SEC` | `60` | 監視フォルダを走査する間隔(秒) |
+| `WATCH_SETTLE_SEC` | `30` | 最終更新からこの秒数が経過したファイルだけを取り込む(書き込み中のファイルを避ける) |
+| `WATCH_CAMERA_FROM_DIR` | `true` | ファイルが入っているフォルダ名をカメラ ID にする |
+| `WATCH_PRESET` | (空) | 監視フォルダの取り込みに使うプリセット(`object` / `action` / `speech`)。空なら上記の窓の既定値 |
+| `TZ` | `Asia/Tokyo` | 時刻(ファイル名の日時、タイムゾーンのない `start_ts`)の解釈 |
 | `LOG_LEVEL` | `INFO` | |
 
 取り込みのプリセット(`preset`): `object`(2秒窓・2フレーム・音声なし。物体やシーン向け)/ `action`(4秒窓・4フレーム・音声なし。動作向け)/ `speech`(6秒窓・6フレーム・音声あり。会話や音が重要なとき向け)。
@@ -117,9 +142,11 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 
 | | |
 |---|---|
-| `GET /api/info` | 状態・既定値・プリセット・索引の件数 |
+| `GET /api/info` | 状態・版・既定値・プリセット・索引の件数・監視フォルダの状態 |
 | `POST /api/ingest/video` / `audio` | ファイルのアップロード取り込み |
 | `POST /api/ingest/path` | コンテナ内パスの取り込み |
+| `POST /api/ingest/dir` | コンテナ内フォルダの一括取り込み |
+| `POST /api/watch/scan` | 監視フォルダを今すぐ走査 |
 | `POST /api/ingest/frames` | 加工済みフレーム(+音声)の取り込み |
 | `POST /api/search/text` / `image` / `audio` | 検索(カメラ・場所・期間・種別・最小スコアで絞り込み) |
 | `GET /api/jobs`, `/api/sources` ほか | ジョブ・ソースの確認、削除、再取り込み |

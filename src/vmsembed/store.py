@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS sources (
   error TEXT,
   created_at REAL NOT NULL
 );
+-- 同じファイルの重複取り込みを確認するため(監視フォルダでは定期的に全件を照合する)
+CREATE INDEX IF NOT EXISTS idx_sources_path ON sources(path);
 
 CREATE TABLE IF NOT EXISTS windows (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -166,6 +168,17 @@ class Store:
                 (limit,),
             ).fetchall()
         return [self._source_dict(r) for r in rows]
+
+    def find_sources_by_path(self, path: str) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM sources WHERE path=? ORDER BY id", (path,)).fetchall()
+        return [self._source_dict(r) for r in rows]
+
+    def known_paths(self) -> set[str]:
+        """登録済みのファイルのパス(状態を問わない)。監視フォルダで新しいファイルを見分けるのに使います。"""
+        with self._lock:
+            rows = self._db.execute("SELECT DISTINCT path FROM sources WHERE path IS NOT NULL").fetchall()
+        return {r["path"] for r in rows}
 
     def update_source(self, source_id: int, **fields: Any) -> None:
         allowed = {"status", "error", "duration_ms", "params"}

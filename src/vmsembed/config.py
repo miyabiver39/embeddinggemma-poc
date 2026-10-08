@@ -73,6 +73,13 @@ class Settings:
     # --- 検索 ---
     top_k_default: int
 
+    # --- 監視フォルダ(空なら無効) ---
+    watch_dirs: tuple[Path, ...]
+    watch_interval_sec: int  # 走査の間隔(秒)
+    watch_settle_sec: int  # 最終更新からこの秒数たったファイルだけを取り込む(書き込み中を避ける)
+    watch_camera_from_dir: bool  # ファイルが入っているフォルダ名をカメラ ID にする
+    watch_preset: str  # 取り込みのプリセット(空なら WINDOW_SEC などの既定値)
+
     # --- サーバ ---
     host: str
     port: int
@@ -93,6 +100,10 @@ class Settings:
         if dims not in (768, 512, 256, 128):
             raise ValueError("DIMS は 768 / 512 / 256 / 128 のいずれかにしてください")
 
+        watch_preset = _env("WATCH_PRESET", "")
+        if watch_preset and watch_preset not in PRESETS:
+            raise ValueError(f"WATCH_PRESET は {list(PRESETS)} のいずれかにしてください: {watch_preset!r}")
+
         return cls(
             role=role,
             embedding_backend=backend,
@@ -111,6 +122,12 @@ class Settings:
             include_audio=_env_bool("INCLUDE_AUDIO", False),
             audio_chunk_sec=_env_int("AUDIO_CHUNK_SEC", 10),
             top_k_default=_env_int("TOP_K", 10),
+            # 区切りはカンマ(パスに空白を含められるよう、空白では区切らない)
+            watch_dirs=tuple(Path(d.strip()) for d in _env("WATCH_DIRS", "").split(",") if d.strip()),
+            watch_interval_sec=max(_env_int("WATCH_INTERVAL_SEC", 60), 5),
+            watch_settle_sec=max(_env_int("WATCH_SETTLE_SEC", 30), 0),
+            watch_camera_from_dir=_env_bool("WATCH_CAMERA_FROM_DIR", True),
+            watch_preset=watch_preset,
             host=_env("HOST", "0.0.0.0"),
             port=_env_int("PORT", 8000),
         )
