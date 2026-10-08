@@ -10,6 +10,9 @@ GPU の種類ごとの手順は docs/gpu.md を参照してください。
 from __future__ import annotations
 
 import logging
+import signal
+import subprocess
+import sys
 from collections.abc import Sequence
 
 import numpy as np
@@ -29,6 +32,73 @@ from .gate import PriorityGate
 log = logging.getLogger(__name__)
 
 
+# Intel GPU の有無を調べる子プロセスのコード。結果(デバイス数)を最後の行に出す
+_XPU_PROBE = "import torch; print(torch.xpu.device_count())"
+
+
+def run_probe(code: str, timeout: float = 120) -> str | None:
+    """Python のコードを子プロセスで実行し、標準出力の最後の行を返します。失敗したら None。
+
+    子プロセスが異常終了(セグメンテーション違反など)しても、このプロセスは巻き込まれません。
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=timeout
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("デバイスの確認に失敗しました: %s", exc)
+        return None
+    if result.returncode != 0:
+        # 負の終了コードはシグナルによる終了(-11 = SIGSEGV)
+        code = result.returncode
+        reason = signal.Signals(-code).name if code < 0 and -code in signal.valid_signals() else code
+        log.warning("デバイスの確認中に子プロセスが異常終了しました(%s)", reason)
+        return None
+    lines = result.stdout.strip().splitlines()
+    return lines[-1] if lines else None
+
+
+def xpu_usable() -> bool:
+    """Intel GPU(XPU)が使えるかを、子プロセスで確かめます。
+
+    Ubuntu 24.04 の Intel GPU ドライバ(libze-intel-gpu1)と PyTorch XPU 版の組み合わせでは、
+    GPU が無い環境で torch.xpu.is_available() がセグメンテーション違反を起こし、
+    プロセスごと落ちることを確認しています(:intel イメージを --device=/dev/dri なしで起動した場合)。
+    アプリ本体を巻き込まないよう、判定だけを別プロセスで行います。
+    """
+    import torch
+
+    xpu = getattr(torch, "xpu", None)
+    if xpu is None or not getattr(xpu, "_is_compiled", lambda: True)():
+        return False  # XPU 版ではない PyTorch(cpu / cuda / rocm イメージ)
+    out = run_probe(_XPU_PROBE)
+    try:
+        count = int(out) if out is not None else 0
+    except ValueError:
+        count = 0
+    if count <= 0:
+        log.warning(
+            "Intel GPU(XPU)が見つからないため CPU で動きます。"
+            "GPU を使うには --device=/dev/dri を付けて起動してください(docs/gpu.md)"
+        )
+    return count > 0
+
+
+def hide_xpu() -> None:
+    """XPU を使わないときに、このプロセスから Intel GPU を「0 台」に見せます。
+
+    transformers は import 時に torch.xpu.is_available() を呼ぶため、GPU の無い環境では
+    xpu_usable() と同じセグメンテーション違反で落ちる(実測)。XPU 版でない PyTorch では何もしない。
+    """
+    import torch
+
+    xpu = getattr(torch, "xpu", None)
+    if xpu is None or not getattr(xpu, "_is_compiled", lambda: True)():
+        return
+    xpu.is_available = lambda: False
+    xpu.device_count = lambda: 0
+
+
 def resolve_device(requested: str) -> str:
     """DEVICE=auto のとき、使える GPU を自動で選びます。"""
     import torch
@@ -37,8 +107,7 @@ def resolve_device(requested: str) -> str:
         return requested
     if torch.cuda.is_available():  # NVIDIA CUDA / AMD ROCm
         return "cuda"
-    xpu = getattr(torch, "xpu", None)
-    if xpu is not None and xpu.is_available():  # Intel GPU
+    if xpu_usable():  # Intel GPU
         return "xpu"
     return "cpu"
 
@@ -79,10 +148,13 @@ def resolve_dtype(requested: str, device: str):
 class LocalEmbedder(Embedder):
     def __init__(self, settings: Settings) -> None:
         import torch
-        from sentence_transformers import SentenceTransformer
 
         self._settings = settings
         self._device = resolve_device(settings.device)
+        if not self._device.startswith("xpu"):
+            hide_xpu()  # sentence-transformers(transformers)を読み込む前に行う
+        from sentence_transformers import SentenceTransformer
+
         self._torch_dtype = resolve_dtype(settings.dtype, self._device)
         self._accelerator = accelerator_name(self._device)
         self._dims = settings.dims
