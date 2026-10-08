@@ -1,6 +1,6 @@
 # 引き継ぎメモ(次の担当者・AI エージェント向け)
 
-作成: 2026-10-08 / 最終コミット時点: `a6e4f86`(main)
+作成: 2026-10-08 / 更新: 2026-10-08(コンテナの起動確認・Intel イメージの修正。ブランチ `ccr-bfc902ef-c2jg00`。main への取り込みとイメージの再ビルドは未実施)
 先に `AGENTS.md`(方針・規約)と `docs/design.md`(設計)を読んでください。このメモは「今どこまで進んでいて、何が未確認で、次に何をするか」だけをまとめます。
 
 ## 1. 依頼の要点(利用者の意向)
@@ -18,7 +18,8 @@
 - リポジトリ: https://github.com/miyabiver39/embeddinggemma-poc (main に初版を push 済み)
 - GitHub Actions(`.github/workflows/build.yml`): test → 5 イメージのビルドと ghcr.io への公開まで**全て成功**。
 - イメージ: `ghcr.io/miyabiver39/embeddinggemma-poc:{slim,cpu,cuda,rocm,intel}`(`:latest` = cpu)。**匿名で manifest を取得できることを確認済み**(公開設定は不要だった)。
-- ローカルテスト: `pytest -q` で 10 passed / 1 skipped(skip は実モデルのテスト)。`ruff check src tests` クリーン。
+- ローカルテスト: `pytest -q` で 13 passed / 1 skipped(skip は実モデルのテスト)。`ruff check src tests` クリーン。
+- **コンテナの起動確認を実施**(GPU なしのクラウド環境・4 vCPU。`dockerd` を手で起動して使えた): `:cpu` 単体、`:slim` + `:cpu`(compute)の分離構成、`:cuda` / `:intel` の CPU フォールバック。結果は `AGENTS.md` 第 6 節と `docs/operations.md`・`docs/gpu.md`。
 - 構成物の一覧は `AGENTS.md` の「7. ディレクトリ構成」を参照。
 
 ## 3. 確認済み・未確認
@@ -32,30 +33,31 @@
 
 **未確認(ここが次の作業の中心)**:
 
-1. **コンテナを実際に起動した動作**。CI は「ビルドが通った」ことまでで、起動・`/healthz`・取り込み・検索はどのイメージでも未実施(作業環境に Docker デーモンがなかった)。
-2. **GPU 3 種**(cuda / rocm / xpu)の動作。bf16 での NaN の有無、CPU 版とのベクトル一致度、RX 9060 XT が ROCm 7.2 ホイールで動くか。手順と結果記入欄は `docs/gpu.md`。
-3. 動画+音声(`tav`)・音声のみ・画像クエリを、アプリ経由で実モデルに通した結果。
-4. 音声のトークン率の食い違い(Gallery のコメント 6.25/秒、記事 25/秒)。現状は安全側の 25/秒で予算検証している。
-5. 窓あたりの処理時間(CPU/GPU)、実際の監視映像での検索精度。
+1. **GPU 3 種**(cuda / rocm / xpu)を**実機の GPU で**動かした結果。bf16 での NaN の有無、CPU 版とのベクトル一致度、RX 9060 XT が ROCm 7.2 ホイールで動くか。手順と結果記入欄は `docs/gpu.md`。
+   `:cuda` と `:intel` は「GPU なしで起動して CPU で動く」ところまで確認済み。`:rocm` は展開後の容量が作業環境のディスク枠に入らず未実施。
+2. 窓あたりの処理時間(GPU)、実際の監視映像での検索精度。
+
+解決済み(2026-10-08): コンテナの起動・取り込み・検索(`:cpu` / 分離構成)、`tav` / `audio` / 画像クエリの実モデル通し、音声のトークン率(実測 25/秒)、CPU での窓あたりの処理時間。
 
 ## 4. 既知の課題・注意点(コードを読んで気づいたもの)
 
-- `kind=auto` は `INCLUDE_AUDIO` の設定で `tav` か `frames` を決めるだけで、**音声のみで取り込んだ分(`audio`)は `auto` では探されない**。音声クエリ(`/api/search/audio`)の `auto` をどうするか、仕様を決めて直す余地あり。
+- (対処済み)音声クエリ(`/api/search/audio`)の `kind=auto` は `audio` の窓を探すように変更した。以前は `frames` を探し、無関係な映像が並んでいた(実測)。文字・画像クエリの `auto` は従来どおり `INCLUDE_AUDIO` で `tav` か `frames`。
+- (対処済み)`:intel` イメージは Intel GPU が見えないと `torch.xpu` の判定がセグメンテーション違反で落ちていた。判定を子プロセスにし、使わないときは transformers の読み込み前に XPU を 0 台に見せる(`embedders/local.py`)。根本は Ubuntu 24.04 の古い Intel ドライバと PyTorch XPU 版の組み合わせなので、実機で問題が出たら Intel 公式のドライバ(compute-runtime)への差し替えを検討。
 - 次元・モデルの整合性チェック(`ensure_compat`)は**取り込み時・検索時**に行う。起動時には行わない(remote の compute が落ちていても app が起動できるようにするため)。起動時警告が欲しければ追加。
 - DB に記録する「窓の設定」の照合は、モデルID・次元が中心。AGENTS.md の第 4 節にある窓長・フレーム数などの照合が全項目実装されているかは未精査。
 - `torchcodec` が読み込めない環境があったため、動画ファイルをモデルに渡さず **ffmpeg で復号した配列を渡す**設計にしている。これは意図的(変えないこと)。
 - `transformers` は PyPI 版に `embedding_gemma2` が無く、Dockerfile でコミット `cb33194ad6152bd9fad6305378d92db385dd7b32` のアーカイブを入れている。PyPI に入ったら通常版へ戻せる(`docker/Dockerfile` の `TRANSFORMERS_COMMIT`)。
 - 全バリアント Ubuntu 24.04 ベース(Intel の `libze-intel-gpu1` / `intel-opencl-icd` が Debian trixie に無かったため)。
-- 画像サイズは未計測(README には書いていない)。GPU 版は巨大になる見込み。
+- イメージの容量(圧縮/展開): slim 0.27/1.1GB、cpu 1.46/5.1GB、cuda 4.94/14.4GB、intel 3.82/14.1GB、rocm 7.89GB/未計測。
 - 推論は `PriorityGate` で 1 件ずつ直列。GPU のバッチ処理は未実装(速度改善の余地)。
 - `pyproject.toml` の pytest marker 説明文は「RUN_MODEL_TESTS=1 のときだけ実行」。`tests/conftest.py` がそれを実装している。
 
 ## 5. 次にやること(優先順)
 
-1. **起動確認**: `docker run -p 8000:8000 -v ./data:/data ghcr.io/miyabiver39/embeddinggemma-poc:cpu` で起動 → `/healthz` → WebUI で小さな動画を取り込み、検索。slim + compute の分離構成(`docker compose --profile split up`)も試す。
+1. **ブランチ `ccr-bfc902ef-c2jg00` を main に取り込み**、CI でイメージを再ビルドする(`:intel` の修正はそれまで利用者に届かない)。
 2. **GPU 実機確認**(利用者が RTX 3060 / RX 9060 XT を持っている)。`docs/gpu.md` の表を埋め、不具合があれば Dockerfile(ホイールの版、`HSA_OVERRIDE_GFX_VERSION` など)を直す。
-3. 音声系の実モデル通し(`tav` / `audio`)と、`kind=auto` の仕様整理。
-4. ベンチ: 窓あたりの処理時間(CPU/GPU)、取り込み速度。結果を `docs/operations.md` と `AGENTS.md` の「検証状況」に反映。
+3. GPU での窓あたりの処理時間・取り込み速度。結果を `docs/operations.md` と `AGENTS.md` の「検証状況」に反映。
+4. 速度改善: 推論が 1 件ずつ直列(CPU で約 8.5 秒/窓 = 実時間の約 0.24 倍速)。GPU でのバッチ処理を検討。
 5. フェーズ 2: ネイティブ化(ONNX Runtime → OpenVINO / TensorRT)。受け入れ条件は「PyTorch 版との出力コサイン類似度」と速度。設計は `docs/design.md` の第 7 節。
 6. (任意)規模が増えたときの検索のスケール対策(`Store.search` を専用ベクトル DB に差し替えられるよう、すでに `Store` に閉じてある)。
 
@@ -65,9 +67,10 @@
 - 手元起動(モデルなし): `EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory vmsembed.main:create_app --reload`
 - ffmpeg / ffprobe が必須(テストの動画は ffmpeg の `lavfi` で合成。実在の映像は使わない)。
 - PyTorch は 2.14.1 / torchvision 0.29.1 に固定。入手元: cpu / cu126 / rocm7.2 / xpu(cp312 ホイールの存在を確認済み)。
+- クラウドの作業環境では Docker デーモンが止まっていることがある。`dockerd &` で起動できた(root)。ディスク枠は約 40GB なので、GPU イメージは 1 つずつ pull して確認後に消す。
 - コミットの末尾には、実行環境が指定する `Co-Authored-By` などの行を付ける(`AGENTS.md` 第 10 節)。
 
 ## 7. 利用者への報告で伝えるべきこと
 
-- 「GPU 版・コンテナ起動は未確認」であることを、できた/できないに関わらず明記する(推測で「動く」と書かない)。
+- 「GPU 版は実機の GPU で未確認」であることを、できた/できないに関わらず明記する(推測で「動く」と書かない)。コンテナの起動は CPU で確認済み。
 - README の自己責任・個人情報の注意書きは消さない。セキュリティ機能は勝手に足さない。

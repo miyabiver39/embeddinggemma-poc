@@ -39,6 +39,12 @@ curl -s localhost:8000/api/info | python3 -m json.tool | grep -A8 embedder
 - `--device=/dev/dri`。イメージには Level Zero / OpenCL ランタイムを入れてあります(Ubuntu 24.04 の `libze-intel-gpu1`, `intel-opencl-icd`)。
 - PyTorch の XPU が正式に想定するのは Arc(A/B シリーズ)と Core Ultra の Arc グラフィックス世代。
   **Iris Xe など古い内蔵 GPU は対象外の可能性が高く**、その場合は `accelerator: cpu` で動きます(エラーにはしていません)。
+- **GPU が無い環境での既知の不具合(対処済み)**: このイメージの Intel ドライバ(Ubuntu 24.04 の `libze-intel-gpu1` 1.3.27642)と
+  PyTorch XPU 版の組み合わせでは、Intel GPU が見えないと `torch.xpu.is_available()` がセグメンテーション違反で落ちます
+  (`--device=/dev/dri` なしの起動で実測。ドライバを外すと正しく 0 台を返す)。アプリは判定を子プロセスで行い、落ちたら
+  警告「Intel GPU(XPU)が見つからないため CPU で動きます」を出して CPU で起動します。
+  実機の Intel GPU で同じ判定が通るか、また Ubuntu 24.04 のドライバが新しい世代(Arc B / Core Ultra 200 系)に対応しているかは未確認です。
+  GPU があるのにこの警告が出る場合は、コンテナ内で `python -c "import torch;print(torch.xpu.device_count())"` の結果を記録してください。
 - 確認: `python -c "import torch;print(torch.xpu.is_available())"`。
 - 古い Intel 内蔵 GPU を使いたい場合の代替は OpenVINO(フェーズ 2 の「ネイティブ化」候補。未実装・未検証)。
 
@@ -53,3 +59,5 @@ curl -s localhost:8000/api/info | python3 -m json.tool | grep -A8 embedder
 | RTX 3060 12GB | cuda | | | | | |
 | RX 9060 XT 16GB | rocm | | | | | |
 | Intel 内蔵 | intel | | | | | |
+| (GPU なし・4 vCPU) | cuda | 可(約 16 秒) | cpu | (未計測。検索スコアは cpu 版と小数 3 桁まで一致) | frames 約 8 秒/窓 | `torch 2.14.1+cu126`。GPU の確認にはならない |
+| (GPU なし・4 vCPU) | intel | 修正後は可(約 15 秒) | cpu | (未計測。検索スコアは cpu 版と小数 3 桁まで一致) | frames 約 8 秒/窓 | 修正前は SIGSEGV で起動不可。GPU の確認にはならない |

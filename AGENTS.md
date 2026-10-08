@@ -72,15 +72,20 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 - [x] `transformers` は PyPI 版に `embedding_gemma2` が無く、git のコミット `cb33194ad6152bd9fad6305378d92db385dd7b32` が必要。`torchvision` も必須
 - [x] `torchcodec` はサンドボックスで読み込めない → ファイル/URL を渡さず、ffmpeg で復号した配列を渡す(設計もそうしている)
 - [x] アプリ経由(実モデル・CPU)で「青い画面」→青い動画が 1 位(`RUN_MODEL_TESTS=1 pytest -m model`)
+- [x] GitHub Actions でテストと 5 イメージのビルド・ghcr.io への公開が成功。匿名で `docker pull` できる(公開設定の変更は不要だった)
+- [x] `:cpu` イメージを README の手順で起動 → 約 19 秒で `/healthz` 応答。WebUI(`/`)・`/docs` が開く。合成動画の取り込み → 文字検索(英語・日本語)・画像検索で正しい色の動画が 1 位
+- [x] `:slim` + `:cpu`(ROLE=compute)の分離構成(`docker compose --profile split up`)で同じ通しが成功し、スコアも内蔵時と一致。compute を止めると app は起動したまま検索が 503 になる
+- [x] 動画+音声(tav)・音声のみ(audio)の取り込みと、文字・音声クエリでの検索がアプリ経由(実モデル・CPU)で動く(サイン波/ノイズの区別も文字で 1 位が正しい)
+- [x] 音声のトークン数は 1 秒あたり 25(40ms/トークン)。プロセッサで実測。448px の画像は 256 トークン
+- [x] CPU(4 vCPU)での 1 窓あたりの処理時間: frames 約 8.5 秒、tav 約 8.7 秒、音声 10 秒区切り約 1 秒(`docs/operations.md`)
+- [x] `:cuda` / `:intel` イメージは、GPU を渡さずに起動すると CPU で動き、検索スコアが `:cpu` と一致する(`:intel` は修正前はセグメンテーション違反で起動できなかった。`docs/gpu.md`)。`:rocm` は容量の都合で未実施
+- [x] イメージの容量(ghcr の圧縮サイズ): slim 0.27GB / cpu 1.46GB / cuda 4.94GB / rocm 7.89GB / intel 3.82GB。展開後は slim 1.1GB / cpu 5.1GB / intel 14.1GB / cuda 14.4GB
 
 未確認(推測を含む。実測してから記述を確定すること):
 
 - [ ] GPU 3 種(cuda / rocm / xpu)の動作、bf16 の NaN の有無、RX 9060 XT が ROCm 7.2 ホイールで動くか
-- [ ] Docker ビルド、GitHub Actions、ghcr の公開設定(最初の CI 実行が最初のビルド)
-- [ ] 音声のトークン数(Gallery のコメントは 1秒あたり 6.25、記事は 25 と食い違っている。現状は安全側の 25 で計算)
-- [ ] CPU / GPU での 1 窓あたりの処理時間
+- [ ] GPU での 1 窓あたりの処理時間
 - [ ] ONNX Runtime / OpenVINO / TensorRT へ変換したときのベクトル一致度と速度(フェーズ 2)
-- [ ] 動画+音声(tav)をアプリ経由で実モデル通しした結果
 - [ ] 実際の監視映像での検索精度
 
 ## 7. ディレクトリ構成

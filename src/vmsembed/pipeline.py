@@ -29,8 +29,9 @@ from .store import Store
 
 log = logging.getLogger(__name__)
 
-# モデルの入力上限(トークン)。画像1枚あたりの既定は 280 トークン、音声は 1秒あたり 25 トークンとして
-# 見積もります(音声の値は資料によって食い違っており、実測できていないため、多めに見ています)。
+# モデルの入力上限(トークン)。画像1枚は 280 トークン、音声は 1秒あたり 25 トークンとして見積もります。
+# 実測(transformers の EmbeddingGemma2Processor): 音声は 40ms ごとに 1 トークン(=25/秒)、
+# 448px の画像は 256 トークン。画像は少し多め(安全側)に見ています。
 MAX_INPUT_TOKENS = 8192
 IMAGE_TOKENS = 280
 AUDIO_TOKENS_PER_SEC = 25
