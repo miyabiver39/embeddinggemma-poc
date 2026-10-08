@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vmsembed"
+version = "0.1.0"
+description = "EmbeddingGemma 2 を使った VMS(映像管理システム)向けマルチモーダル検索基盤(開発用)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "python-multipart>=0.0.9",
+  "numpy>=2.0",
+  "pillow>=10.0",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# モデルを自プロセスで動かす場合に必要です。
+# torch / torchvision は GPU の種類ごとに配布元(index)が違うため、ここには含めていません。
+# docker/Dockerfile と docs/gpu.md を参照してください。
+model = [
+  "sentence-transformers>=6.1.0",
+  "soundfile>=0.12",
+  "transformers",
+]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vmsembed = ["web/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "model: 実際のモデルを読み込むテスト(RUN_MODEL_TESTS=1 のときだけ実行)",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]  # FastAPI の File()/Form() は引数の既定値で使う作法

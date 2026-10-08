@@ -1,0 +1,151 @@
+# AGENTS.md
+
+このファイルは、AIエージェント(Claude Code など)がこのリポジトリで作業するときのガイドです。
+作業を始める前に必ず読み、設計の変更があれば `docs/design.md` とあわせて更新してください。
+
+## 1. プロジェクト概要
+
+Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向けのマルチモーダル検索基盤です。
+テキスト・画像・動画・音声を同じベクトル空間に変換し、文章や画像で映像の該当場面を探します。
+
+- 用途: **開発中の検証用途**です。運用品質の保証はしません。**自己責任**で利用する前提です。
+- 利用形態: バックエンドとして動かします。ブラウザなど外部のフロントから直接アクセスされることは想定しません。
+- WebUI: 開発用の簡易UIを同梱します(検索・取り込み・状態確認)。
+
+## 2. 方針(変更しないこと)
+
+| 項目 | 方針 |
+|---|---|
+| 実装言語 | **全てPython**(アプリ本体も推論も) |
+| セキュリティ | **対策は行わない**(認証・TLS・厳密な入力検証などは求められていない)。勝手に追加しない。ただし README に自己責任の旨と、映像が個人情報にあたり得る点を明記する |
+| ビルド | **GitHub Actions に任せる**。利用者は `docker pull` して起動するだけ |
+| 公開 | 公開リポジトリ。イメージは ghcr.io へ公開する |
+| 言語 | ドキュメント・コード中のコメント・docstring は**日本語**。識別子は英語 |
+| 対象環境 | Linux コンテナ(CPU / NVIDIA CUDA / AMD ROCm / Intel XPU)。**Mac 環境は想定しない**(今後も不要) |
+| 速度 | 推論は、初回起動時に ONNX Runtime / OpenVINO / TensorRT などへ変換してキャッシュできるようにする |
+
+## 3. 構成(1つのコードベースから3種類のイメージ)
+
+```
+[app]     取り込み + 検索 + DB + ffmpeg + WebUI   (モデルなし・軽量)
+[compute] ベクトル化だけ(モデル同梱。GPUはここに集約)
+[all]     app + compute を1コンテナに内蔵
+```
+
+- アプリは `Embedder` インターフェースを通してベクトル化を呼びます。実装は2つです。
+  - `LocalEmbedder`: 同一プロセス内で推論する(`all` 用)
+  - `RemoteEmbedder`: compute コンテナの HTTP API を呼ぶ(`app` + `compute` 用)
+- 切り替えは環境変数 `EMBEDDING_BACKEND=local|remote` と `EMBEDDING_URL` で行います。
+- 映像・音声の加工(ffmpeg での分割・フレーム抽出・16kHzモノラル変換)は **app で行う**のが基本です。加工済みの入力を app に渡すことも許可します。
+- 用途ごとに細かく API を分けます(例: `/ingest/video`, `/ingest/frames`, `/ingest/audio`, `/search/text`, `/search/image`)。
+- 取り込みと検索は**同じコンテナ**で動かします。取り込み中に検索が遅くならないよう、推論の並列数を制限し、検索用の経路を空けておきます。
+
+## 4. ベクトルとDBのルール(重要)
+
+1. **メタデータをベクトルに埋め込まない。** カメラID・場所・時刻などは、ベクトルと並べて別のフィールドとして保存し、検索時の絞り込みに使います。
+2. **モデルの混在を禁止する。** 次の値をDBに記録し、起動時・取り込み時に照合します。不一致なら取り込みを止めて警告します。
+   - モデルID、精度(dtype)、次元数
+   - 窓の長さ、1窓あたりのフレーム数、重なり幅、音声の有無
+3. 音声ありと音声なしのベクトルは**別の空間**として扱います。設定を変えたら再インデックスが必要です。
+4. MRL で次元を切り詰める場合は、DB作成時に決めて統一します(768 / 512 / 256 / 128)。
+5. 検索は近い順の候補を返すだけです。**スコアの閾値**を設け、該当なしを返せるようにします。
+6. 映像本体はDBに入れず、パスだけを保存します。実体は `/data` 配下に置きます。
+
+## 5. 窓(ウィンドウ)設計
+
+参考にした実装は Google AI Edge Gallery の Video Moments Finder です(Apache-2.0)。
+
+- 動画は時間窓に区切り、窓ごとに複数のフレームを画像として埋め込み、**1窓=1ベクトル**にします。
+- 音声を使う場合は、時刻付きで音声とフレームを交互に並べて1回で埋め込みます。
+- Gallery のプリセットを初期値の目安にします(物体: 2秒・2枚・音声なし / 動作: 4秒・4枚・音声なし / 会話: 6秒・6枚・音声あり)。
+- 窓が短いほどベクトル数が増えます。1台あたり1日の件数と容量を、必ず設計書に書いて確認してください。
+
+## 6. 検証状況(実測したら更新すること)
+
+推測で数字を書かないこと。確認したことだけを「確認済み」に書きます。
+
+確認済み(CPU・合成動画/画像/音声):
+
+- [x] ONNX 版リポジトリ(`onnx-community/embeddinggemma-2-ONNX`)に `model.onnx` / `vision_encoder.onnx` / `audio_encoder.onnx` があり、fp32/fp16/q4/q4f16/quantized が公開されている(変換・精度比較は未実施)
+- [x] sentence-transformers 6.1.0 で text / image / audio / video(`(T,H,W,3)` 配列)/ 構造化メッセージ(順序つき混在入力)が 1 ベクトルを返す
+- [x] 時刻ラベルを挟んだ交互配置(TAV)は、構造化メッセージで再現できる
+- [x] `transformers` は PyPI 版に `embedding_gemma2` が無く、git のコミット `cb33194ad6152bd9fad6305378d92db385dd7b32` が必要。`torchvision` も必須
+- [x] `torchcodec` はサンドボックスで読み込めない → ファイル/URL を渡さず、ffmpeg で復号した配列を渡す(設計もそうしている)
+- [x] アプリ経由(実モデル・CPU)で「青い画面」→青い動画が 1 位(`RUN_MODEL_TESTS=1 pytest -m model`)
+
+未確認(推測を含む。実測してから記述を確定すること):
+
+- [ ] GPU 3 種(cuda / rocm / xpu)の動作、bf16 の NaN の有無、RX 9060 XT が ROCm 7.2 ホイールで動くか
+- [ ] Docker ビルド、GitHub Actions、ghcr の公開設定(最初の CI 実行が最初のビルド)
+- [ ] 音声のトークン数(Gallery のコメントは 1秒あたり 6.25、記事は 25 と食い違っている。現状は安全側の 25 で計算)
+- [ ] CPU / GPU での 1 窓あたりの処理時間
+- [ ] ONNX Runtime / OpenVINO / TensorRT へ変換したときのベクトル一致度と速度(フェーズ 2)
+- [ ] 動画+音声(tav)をアプリ経由で実モデル通しした結果
+- [ ] 実際の監視映像での検索精度
+
+## 7. ディレクトリ構成
+
+```
+.
+├── AGENTS.md / README.md / LICENSE / docker-compose.yml
+├── docs/                  design.md(設計書) operations.md(運用) gpu.md(GPU確認手順)
+├── src/vmsembed/
+│   ├── main.py            アプリ生成(ROLE で構成が変わる)
+│   ├── api.py             取り込み・検索・参照 API
+│   ├── compute_api.py     ベクトル化 API(/compute/*)
+│   ├── pipeline.py        窓の計画と取り込みワーカー
+│   ├── store.py           SQLite + 総当たり検索
+│   ├── media.py           ffmpeg / ffprobe
+│   ├── config.py          環境変数とプリセット
+│   ├── embedders/         Embedder インターフェースと local / remote / dummy
+│   └── web/index.html     開発用 WebUI
+├── tests/                 pytest(実モデルのテストは RUN_MODEL_TESTS=1 のときだけ)
+├── docker/                Dockerfile(VARIANT=slim|cpu|cuda|rocm|intel)と entrypoint
+└── .github/workflows/     テストとイメージのビルド・公開
+```
+
+## 7.1 デバイスの対応表
+
+`DEVICE=auto|cpu|cuda|xpu`。ROCm 版 PyTorch でも `cuda` として見える(`torch.version.hip` で AMD と判定)。
+PyTorch 2.14.1 + torchvision 0.29.1 を固定(cpu / cu126 / rocm7.2 / xpu の cp312 ホイールの存在を確認済み)。
+dtype は GPU が bf16、CPU が fp32。NaN を検知したら `DTYPE=float32` を案内する。
+
+## 8. 開発コマンド
+
+```bash
+# 依存関係のインストール(開発用)
+pip install -e ".[dev]"
+
+# テスト(ダミー埋め込み。実モデルは RUN_MODEL_TESTS=1 pytest -m model)
+pytest -q
+
+# 静的解析・整形
+ruff check .
+
+# ローカル起動(モデルを使わない動作確認用)
+EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory vmsembed.main:create_app --reload
+```
+
+イメージのビルドは GitHub Actions で行います。ローカルでビルドする必要はありません。
+
+## 9. コーディング規約
+
+- Python 3.12 以上を想定します。型ヒントを付けます。
+- コメント・docstring は日本語で、「なぜそうするか」を書きます。
+- 設定は環境変数で受け、既定値は一発で動く値にします(起動時に必須の設定を増やさない)。
+- モデルの重み・映像・DBファイルを git にコミットしません(`.gitignore` で除外)。
+- 外部へ通信する処理(モデルのダウンロードなど)は、失敗時に原因が分かるメッセージを出します。
+
+## 10. コミットとPR
+
+- コミットメッセージは日本語で、1行目に要約を書きます。
+- 1つのコミットで1つの変更にします。ドキュメントだけの変更は分けます。
+- コミットメッセージの末尾には、利用環境の指示(Co-Authored-By など)に従った行を付けます。
+- 設計に関わる変更では、`docs/design.md` を同じコミットで更新します。
+
+## 11. 作業するときの注意
+
+- 変更前に、このファイルと `docs/design.md` を読んでください。
+- 「未検証事項」にある項目は、実測の結果を書いてから、チェックを入れます。
+- 方針(第2節)と矛盾する提案は、実装する前に利用者へ確認してください。
+- 映像は人が映る個人情報にあたり得ます。サンプルやテストに、実在の映像を含めないでください。

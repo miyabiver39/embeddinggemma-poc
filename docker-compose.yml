@@ -1,0 +1,55 @@
+# 使い方の例集です(どれか1つのサービスだけ起動してください)。
+#   docker compose up cpu
+#   docker compose up cuda
+#   docker compose --profile split up        # app + compute を分けて動かす
+# <owner> は実際の GitHub ユーザー名に置き換えてください。
+x-common: &common
+  restart: unless-stopped
+  ports: ["8000:8000"]
+  volumes:
+    - ./data:/data
+    # - /path/to/recordings:/recordings:ro   # VMS の録画ディレクトリ(/api/ingest/path で指定)
+
+services:
+  cpu:
+    <<: *common
+    image: ghcr.io/miyabiver39/embeddinggemma-poc:cpu
+    profiles: ["cpu"]
+
+  cuda:
+    <<: *common
+    image: ghcr.io/miyabiver39/embeddinggemma-poc:cuda
+    profiles: ["cuda"]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  rocm:
+    <<: *common
+    image: ghcr.io/miyabiver39/embeddinggemma-poc:rocm
+    profiles: ["rocm"]
+    devices: ["/dev/kfd", "/dev/dri"]
+    group_add: ["video"]
+
+  intel:
+    <<: *common
+    image: ghcr.io/miyabiver39/embeddinggemma-poc:intel
+    profiles: ["intel"]
+    devices: ["/dev/dri"]
+
+  # ---- 分離構成: 軽い app と、ベクトル化専用の compute
+  compute:
+    image: ghcr.io/miyabiver39/embeddinggemma-poc:cpu   # GPU を使うなら cuda などに差し替え
+    profiles: ["split"]
+    environment: { ROLE: compute }
+    ports: ["8001:8000"]
+
+  app:
+    <<: *common
+    image: ghcr.io/miyabiver39/embeddinggemma-poc:slim
+    profiles: ["split"]
+    environment:
+      ROLE: app
+      EMBEDDING_URL: http://compute:8000
+    depends_on: [compute]
