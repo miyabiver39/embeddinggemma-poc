@@ -39,7 +39,7 @@
 - モデル: `google/embeddinggemma-2`(768 次元、MRL で 768/512/256/128 に切り詰め可能。切り詰めたあと L2 正規化し直す)。
 - クエリの接頭辞: `task: search result | query: `、文書側: `title: none | text: `(sentence-transformers の `prompt_name` で付与)。
 - **窓(window)= N フレーム(+ 同じ時間帯の音声)= 1 ベクトル**。Google AI Edge Gallery の実装に倣う(既定 2 秒窓・2 フレーム)。
-- 音声を含む窓は、映像のみの窓と**別の空間**として扱う(`kind`): `frames` / `tav` / `audio`。検索時は `kind` で選ぶ。`auto` は `INCLUDE_AUDIO` の設定に合わせて `tav`(true)か `frames`(false)を探す。音声のみ(`audio`)は明示するか `all` で探す。
+- 音声を含む窓は、映像のみの窓と**別の空間**として扱う(`kind`): `frames` / `tav` / `audio`。検索時は `kind` で選ぶ。`auto` は、文字・画像のクエリでは `INCLUDE_AUDIO` の設定に合わせて `tav`(true)か `frames`(false)を、音声のクエリ(`/api/search/audio`)では `audio` を探す(音声だけのベクトルと映像のみの窓は比べても意味のある順位にならないため)。それ以外の組み合わせは明示するか `all` で探す。
 - 窓の入力レイアウト(tav): `[時刻ラベル][音声][時刻ラベル][画像]…` を 1 メッセージとして渡す。frames のみは画像列。
 - トークン予算: 画像 1 枚 ≈ 280 トークン(+ラベル)、音声 ≈ 25 トークン/秒 を上限 8192 に対して事前検証(超えると 400)。
   音声のトークン率はコード中のコメントでは 6.25/秒、記事では 25/秒と食い違っており**未解決**。安全側(25)で計算している。

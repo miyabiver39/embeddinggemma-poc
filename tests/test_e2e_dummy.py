@@ -80,6 +80,14 @@ def test_ingest_path_and_audio(client, tmp_path):
     kinds = client.get("/api/info").json()["index"]
     assert kinds["windows_by_kind"].get("tav", 0) > 0
 
+    # 音声ファイルとして取り込むと audio の窓になり、音声クエリの auto はそれを探す
+    r = client.post("/api/ingest/path", json={"path": str(v), "kind": "audio"})
+    assert wait_done(client, r.json()["job_id"])["status"] == "done"
+    r = client.post("/api/search/audio", files={"file": ("tone.mp4", v.read_bytes())})
+    assert r.status_code == 200, r.text
+    hits = r.json()["results"]
+    assert hits and {h["kind"] for h in hits} == {"audio"}
+
 
 def test_ingest_path_missing(client):
     assert client.post("/api/ingest/path", json={"path": "/nonexistent.mp4"}).status_code == 400

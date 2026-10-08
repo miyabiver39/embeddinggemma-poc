@@ -208,23 +208,26 @@ def build_api_router(ctx: Context) -> APIRouter:
             shutil.copyfileobj(upload.file, out)
         return dest
 
-    def _kinds(kind: str) -> list[str] | None:
+    def _kinds(kind: str, auto_kinds: list[str] | None = None) -> list[str] | None:
+        """検索対象の種別を決めます。auto_kinds は、クエリの種類ごとの auto の解釈です。"""
         if kind not in KIND_CHOICES:
             raise HTTPException(400, f"kind は {list(KIND_CHOICES)} のいずれかにしてください")
         if kind == "all":
             return None
         if kind == "auto":
+            if auto_kinds is not None:
+                return auto_kinds
             return ["tav"] if s.include_audio else ["frames"]
         return [kind]
 
-    def _search(qvec: np.ndarray, f: dict) -> dict:
+    def _search(qvec: np.ndarray, f: dict, auto_kinds: list[str] | None = None) -> dict:
         started = time.time()
         info = ctx.embedder.info()
         ctx.store.ensure_compat(info.model_id, info.dims)
         hits = ctx.store.search(
             qvec,
             top_k=f.get("top_k") or s.top_k_default,
-            kinds=_kinds(f.get("kind", "auto")),
+            kinds=_kinds(f.get("kind", "auto"), auto_kinds),
             camera_id=f.get("camera_id") or None,
             location=f.get("location") or None,
             ts_from=parse_ts(f["from_ts"]) if f.get("from_ts") else None,
@@ -467,7 +470,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         kind: str = Form("auto"),
         merge: str | None = Form(None),
     ) -> dict:
-        """音声で、似た場面を探します。"""
+        """音声で、似た場面を探します。kind=auto のときは音声のみの窓(audio)を探します。"""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp) / _safe_name(file.filename or "audio")
             tmp_path.write_bytes(file.file.read())
@@ -476,8 +479,12 @@ def build_api_router(ctx: Context) -> APIRouter:
         if pcm.size == 0:
             raise HTTPException(400, "音声を読み取れませんでした")
         qvec = ctx.embedder.embed_audio(pcm, high=True)
+        # 音声だけのベクトルは映像のみ(frames)の窓とはほぼ無関係な順位になる(実測)ため、
+        # 音声クエリの auto は、音声のみで取り込んだ窓(audio)を探す
         return _search(
-            qvec, _form_filters(top_k, min_score, camera_id, location, from_ts, to_ts, kind, merge)
+            qvec,
+            _form_filters(top_k, min_score, camera_id, location, from_ts, to_ts, kind, merge),
+            auto_kinds=["audio"],
         )
 
     # ------------------------------------------------------------------ 取り込み元・ジョブ
