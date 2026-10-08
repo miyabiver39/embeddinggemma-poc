@@ -43,7 +43,9 @@ RUN apt-get update \
       apt-get install -y --no-install-recommends libze1 libze-intel-gpu1 intel-opencl-icd; \
     fi \
  && rm -rf /var/lib/apt/lists/* \
- && python3 -m venv /opt/venv
+ && python3 -m venv /opt/venv \
+ && pip install --upgrade "pip>=26.2" "setuptools>=83"
+# venv に入る pip / setuptools は Ubuntu 同梱の古い版で、既知の脆弱性がある(pip-audit で確認)ため更新する
 
 # ---- PyTorch(バリアントごとに入手元が違う)。slim には入れない
 RUN case "$VARIANT" in \
