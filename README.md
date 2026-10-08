@@ -160,6 +160,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 - [docs/design.md](docs/design.md) — 設計書(構成、窓の設計、DB、API、ネイティブ化の計画)
 - [docs/operations.md](docs/operations.md) — 運用メモ(容量見積もり、チューニング、トラブルシュート)
 - [docs/gpu.md](docs/gpu.md) — GPU モード(RTX 3060 / RX 9060 XT / Intel)の確認手順
+- [docs/release.md](docs/release.md) — リリースの手順と、添付する SBOM・脆弱性検査結果
 - [AGENTS.md](AGENTS.md) — AI エージェント向けの作業ガイド
 
 ## 開発
@@ -172,6 +173,12 @@ pip install -e ".[model]"        # 実モデルを使う場合(transformers は 
 RUN_MODEL_TESTS=1 pytest -q -m model
 EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory vmsembed.main:create_app --reload
 ```
+
+## リリースと SBOM・脆弱性検査
+
+`v0.2.0` のようなタグを push すると、版付きのイメージ(`:0.2.0-cpu` など)を公開し、
+全イメージの **SBOM(SPDX / CycloneDX)と脆弱性検査の結果**を添付した GitHub のリリースを作成します。
+main の最新イメージは毎週検査し、結果を GitHub Actions の実行結果に残します。詳細は [docs/release.md](docs/release.md) を参照してください。
 
 ## ライセンス
 

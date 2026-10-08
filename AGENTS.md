@@ -88,6 +88,7 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 - [ ] GPU での 1 窓あたりの処理時間
 - [ ] ONNX Runtime / OpenVINO / TensorRT へ変換したときのベクトル一致度と速度(フェーズ 2)
 - [ ] 実際の監視映像での検索精度
+- [ ] リリース時の SBOM・脆弱性検査ワークフロー(`security.yml`)のタグ契機での実行(手動実行での確認結果は docs/HANDOFF.md)
 
 ## 7. ディレクトリ構成
 
@@ -108,8 +109,9 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 │   ├── embedders/         Embedder インターフェースと local / remote / dummy
 │   └── web/index.html     開発用 WebUI
 ├── tests/                 pytest(実モデルのテストは RUN_MODEL_TESTS=1 のときだけ)
+├── scripts/               release_report.py(脆弱性検査の結果をリリースノートにまとめる)
 ├── docker/                Dockerfile(VARIANT=slim|cpu|cuda|rocm|intel)と entrypoint
-└── .github/workflows/     テストとイメージのビルド・公開
+└── .github/               workflows/build.yml(テスト・ビルド・公開)、workflows/security.yml(SBOM・脆弱性検査)、dependabot.yml
 ```
 
 ## 7.1 デバイスの対応表
@@ -150,6 +152,7 @@ EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory vmsembed.main:create_a
 - 1つのコミットで1つの変更にします。ドキュメントだけの変更は分けます。
 - コミットメッセージの末尾には、利用環境の指示(Co-Authored-By など)に従った行を付けます。
 - 設計に関わる変更では、`docs/design.md` を同じコミットで更新します。
+- リリースはタグ `v*` の push で作成します。SBOM と脆弱性検査の結果は自動で添付されます(`docs/release.md`)。
 
 ## 11. 作業するときの注意
 

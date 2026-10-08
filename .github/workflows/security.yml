@@ -1,0 +1,171 @@
+# 公開したコンテナイメージの SBOM を作り、脆弱性を検査します。
+#
+#   - タグ(v*)の push 時: build.yml から呼ばれ、結果を GitHub のリリースに添付します。
+#   - 手動実行(workflow_dispatch): 任意の版を検査します。release を true にすると、既存のリリースの添付を更新します。
+#   - 定期実行(毎週): main の最新イメージを検査し、結果を Actions の成果物とサマリーに残します。
+#
+# SBOM は syft、脆弱性検査は grype(どちらも Anchore 製のオープンソース)を使います。
+# grype は SBOM を入力にするので、イメージのダウンロードは 1 回で済みます。
+name: security
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 検査する版のタグ(例 v0.2.0)。空なら main の最新イメージ
+        type: string
+        default: ""
+      release:
+        description: 結果を、タグと同名のリリースに添付する
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 検査する版のタグ(例 v0.2.0)。空なら main の最新イメージ
+        type: string
+        default: ""
+      release:
+        description: 結果を、タグと同名のリリースに添付する(タグ指定時のみ)
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 21 * * 0" # 毎週月曜 06:17(日本時間)
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [slim, cpu, cuda, rocm, intel]
+    steps:
+      - name: ディスクを空ける(GPU 系イメージは展開すると 15GB 以上になるため)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h /
+
+      - name: syft と grype を入れる
+        # 公式のインストーラ(配布物のチェックサムを検証する)で最新版を入れます。
+        # 脆弱性データベースの形式は grype の版に依存するため、検査ツールは固定せず最新を使います。
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$HOME/.local/bin"
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: 検査するイメージを決める
+        id: ref
+        env:
+          TAG: ${{ inputs.tag }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          if [ -n "$TAG" ]; then
+            echo "image=${IMAGE}:${TAG#v}-${VARIANT}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${IMAGE}:${VARIANT}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: SBOM を作る(syft)
+        env:
+          REF: ${{ steps.ref.outputs.image }}
+          V: ${{ matrix.variant }}
+        run: |
+          mkdir -p out
+          syft version
+          syft scan "registry:${REF}" \
+            -o "syft-json=out/sbom.syft.json" \
+            -o "spdx-json=out/sbom-${V}.spdx.json" \
+            -o "cyclonedx-json=out/sbom-${V}.cdx.json"
+          # 実際に検査したイメージを、ダイジェスト付きで記録する(タグは後で付け替わり得るため)
+          python3 - "$REF" > out/image.txt <<'EOF'
+          import json, sys
+          src = json.load(open("out/sbom.syft.json"))["source"].get("metadata", {})
+          digests = [d.split("@", 1)[1] for d in src.get("repoDigests") or [] if "@" in d]
+          digest = digests[0] if digests else src.get("manifestDigest", "")
+          print(sys.argv[1] + ("@" + digest if digest else ""))
+          EOF
+          cat out/image.txt
+
+      - name: 脆弱性を検査する(grype)
+        env:
+          V: ${{ matrix.variant }}
+        run: |
+          grype version
+          grype "sbom:out/sbom.syft.json" \
+            -o "json=out/vulnerabilities.json" \
+            -o "table=out/vulnerabilities-${V}.txt"
+          cp out/vulnerabilities.json "out/vulnerabilities-${V}.json"
+          # syft 独自形式の SBOM は grype の入力用なので、配布物には含めない
+          rm out/sbom.syft.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scan-${{ matrix.variant }}
+          path: out/
+          retention-days: 90
+
+  report:
+    needs: scan
+    # 一部のイメージの検査に失敗しても、残りの結果はまとめる
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # リリースへの添付に必要
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: scan-*
+          path: reports
+
+      - name: 結果をまとめる
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          for d in reports/scan-*; do mv "$d" "reports/${d#reports/scan-}"; done
+          python3 scripts/release_report.py --title "${TAG:-main の最新イメージ}" reports > notes.md
+          cat notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: notes.md
+          retention-days: 90
+
+      - name: リリースに添付する
+        if: ${{ inputs.release && inputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          files=$(ls reports/*/sbom-* reports/*/vulnerabilities-*)
+          # 検査結果の節は目印で囲み、再検査のときはその節だけを差し替える(変更履歴などは残す)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release view "$TAG" --json body --jq .body > body.md
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
+            gh release view "$TAG" --json body --jq .body > body.md
+          fi
+          python3 - <<'EOF'
+          import re
+          body = open("body.md", encoding="utf-8").read()
+          notes = open("notes.md", encoding="utf-8").read()
+          start, end = "<!-- security-report:start -->", "<!-- security-report:end -->"
+          block = f"{start}\n{notes}{end}"
+          if start in body and end in body:
+              body = re.sub(re.escape(start) + ".*?" + re.escape(end), lambda _: block, body, flags=re.S)
+          else:
+              body = (body.rstrip() + "\n\n" if body.strip() else "") + block
+          open("body.md", "w", encoding="utf-8").write(body + "\n")
+          EOF
+          gh release edit "$TAG" --notes-file body.md
+          gh release upload "$TAG" $files --clobber

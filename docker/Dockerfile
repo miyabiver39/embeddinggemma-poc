@@ -82,6 +82,12 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
  && mkdir -p /data /recordings
 
 ENV VARIANT=${VARIANT}
+# ビルド元のコミットと参照(タグ・ブランチ)。/api/info に表示し、不具合報告で版を特定できるようにする。
+# 毎回値が変わるため、ビルドキャッシュを壊さないよう最後の層で受け取る
+ARG VMSEMBED_REVISION=unknown
+ARG VMSEMBED_BUILD_REF=local
+ENV VMSEMBED_REVISION=${VMSEMBED_REVISION} \
+    VMSEMBED_BUILD_REF=${VMSEMBED_BUILD_REF}
 VOLUME ["/data"]
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
