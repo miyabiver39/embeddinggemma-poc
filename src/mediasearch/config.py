@@ -66,6 +66,7 @@ class Settings:
 
     # --- 保存先 ---
     data_dir: Path
+    store_media: bool  # 偽なら、アップロードした動画・画像とサムネイルを保存しない(検索結果は情報だけ)
 
     # --- 窓設計(取り込みの既定値) ---
     window_sec: int
@@ -145,6 +146,7 @@ class Settings:
             ffmpeg_hwaccel_device=_env("FFMPEG_HWACCEL_DEVICE", ""),
             ffmpeg_skip_frames=skip_frames,
             data_dir=data_dir,
+            store_media=_env_bool("STORE_MEDIA", True),
             window_sec=_env_int("WINDOW_SEC", PRESETS["object"]["window_sec"]),
             frames_per_window=_env_int("FRAMES_PER_WINDOW", PRESETS["object"]["frames_per_window"]),
             overlap_sec=_env_int("OVERLAP_SEC", 0),

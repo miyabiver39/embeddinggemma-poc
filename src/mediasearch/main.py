@@ -25,7 +25,7 @@ from .media import MediaError
 from .pipeline import Ingestor
 from .schemas import Health
 from .security import SecurityMiddleware, startup_warnings
-from .service import Context, InvalidInput
+from .service import Context, InvalidInput, NotFound
 from .store import IndexMismatch, Store
 from .watcher import FolderWatcher
 
@@ -265,6 +265,10 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     @app.exception_handler(InvalidInput)
     async def _invalid_input(_: Request, exc: InvalidInput) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    @app.exception_handler(NotFound)
+    async def _not_found(_: Request, exc: NotFound) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=404)
 
     @app.exception_handler(sqlite3.Error)
     async def _db_error(_: Request, exc: sqlite3.Error) -> JSONResponse:

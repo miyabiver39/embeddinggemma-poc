@@ -105,3 +105,34 @@ def test_dims_mismatch_refused(settings):
         assert c.post("/api/search/text", json={"query": "x"}).status_code == 200
     with TestClient(create_app(replace(settings, dims=256))) as c:
         assert c.post("/api/search/text", json={"query": "x"}).status_code == 409
+
+
+@needs_ffmpeg
+def test_store_media_false_keeps_only_information(client, settings, tmp_path):
+    """保存しないモード: アップロードしたファイルとサムネイルを残さず、検索結果は情報だけを返す。"""
+    video = tmp_path / "20260101_090000.mp4"
+    make_video(video, "red", seconds=4)
+    r = client.post(
+        "/api/ingest/video",
+        files={"file": ("clip.mp4", video.read_bytes(), "video/mp4")},
+        data={"store_media": "false", "group_id": "nostore"},
+    )
+    assert r.status_code == 200, r.text
+    assert wait_done(client, r.json()["job_id"])["status"] == "done"
+    src = client.get(f"/api/sources/{r.json()['source_id']}").json()
+    assert src["path"] is None and src["params"]["store_media"] is False
+    media_dir = settings.data_dir / "media"
+    assert not media_dir.exists() or not list(media_dir.iterdir())  # アップロードしたファイルは削除済み
+    hits = client.post("/api/search/text", json={"query": "red", "group_id": "nostore"}).json()["results"]
+    assert hits and all(h["media_url"] is None and h["thumb_url"] is None for h in hits)
+    assert hits[0]["source_name"] == "clip.mp4" and hits[0]["abs_time"]
+    assert client.get(f"/api/thumb/{hits[0]['window_id']}").status_code == 404
+    assert client.get(f"/api/media/{src['id']}").status_code == 404
+    assert not list((settings.data_dir / "thumbs").glob(f"w{hits[0]['window_id']}.jpg"))
+    assert client.post(f"/api/sources/{src['id']}/reindex").status_code == 404
+
+    # パス指定のファイルは利用者のものなので消さず、配信の対象からだけ外す
+    r = client.post("/api/ingest/path", json={"path": str(video), "store_media": False})
+    assert wait_done(client, r.json()["job_id"])["status"] == "done"
+    assert video.is_file()
+    assert client.get(f"/api/media/{r.json()['source_id']}").status_code == 404

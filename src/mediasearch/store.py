@@ -309,7 +309,7 @@ class Store:
         return {r["path"] for r in rows}
 
     def update_source(self, source_id: int, **fields: Any) -> None:
-        allowed = {"status", "error", "duration_ms", "params"}
+        allowed = {"status", "error", "duration_ms", "params", "path"}
         assert set(fields) <= allowed, f"更新できない列です: {set(fields) - allowed}"
         if "params" in fields:
             fields["params"] = json.dumps(fields["params"], ensure_ascii=False)

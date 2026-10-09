@@ -42,7 +42,7 @@ from .schemas import (
     WatchScanResponse,
     errors,
 )
-from .service import Context, Service, parse_opt_ts, parse_ts
+from .service import Context, Service, media_stored, parse_opt_ts, parse_ts
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +66,10 @@ def _safe_name(name: str) -> str:
     return re.sub(r"[^\w.\-]+", "_", name, flags=re.UNICODE)[:80] or "file"
 
 
+_STORE_MEDIA_FORM = (
+    "false にすると、ファイルを取り込み後に削除し、サムネイルも作らない(検索結果は情報だけ)。省略時は STORE_MEDIA"
+)
+
 # ---------------------------------------------------------------------- リクエストの型
 class _WindowOptions(BaseModel):
     """取り込みの窓の設定(省略した項目は既定値。GET /api/info の defaults と presets を参照)。"""
@@ -75,6 +79,13 @@ class _WindowOptions(BaseModel):
     frames_per_window: int | None = Field(None, description="窓あたりのフレーム数")
     overlap_sec: int | None = Field(None, description="窓の重なり(秒)")
     include_audio: bool | None = Field(None, description="動画の音声も同じベクトルに含める")
+    store_media: bool | None = Field(
+        None,
+        description=(
+            "偽にすると、アップロードしたファイルを取り込み後に削除し、サムネイルも作らない。検索結果は時刻などの情報だけになる"
+            "(省略時はサーバの STORE_MEDIA)"
+        ),
+    )
 
 
 class IngestPathRequest(_WindowOptions):
@@ -151,6 +162,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         overlap_sec: int | None,
         include_audio: bool | None,
         chunk_sec: int | None = None,
+        store_media: bool | None = None,
     ) -> IngestParams:
         try:
             return IngestParams.from_settings(
@@ -161,6 +173,7 @@ def build_api_router(ctx: Context) -> APIRouter:
                 overlap_sec=overlap_sec,
                 include_audio=include_audio,
                 chunk_sec=chunk_sec,
+                store_media=store_media,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -214,6 +227,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         frames_per_window: str | None = Form(None, description="窓あたりのフレーム数"),
         overlap_sec: str | None = Form(None, description="窓の重なり(秒)"),
         include_audio: str | None = Form(None, description="音声も同じベクトルに含める(true / false)"),
+        store_media: str | None = Form(None, description=_STORE_MEDIA_FORM),
     ) -> dict:
         """動画を受け付け、バックグラウンドの取り込みジョブを作ります。
 
@@ -225,6 +239,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             _opt_int(frames_per_window, "frames_per_window"),
             _opt_int(overlap_sec, "overlap_sec"),
             _opt_bool(include_audio),
+            store_media=_opt_bool(store_media),
         )
         return _accept_upload(file, "video", start_ts, group_id=group_id, location=location, params=params)
 
@@ -241,9 +256,12 @@ def build_api_router(ctx: Context) -> APIRouter:
         location: str | None = Form(None, description="任意の場所の名前"),
         start_ts: str | None = Form(None, description="録音開始の日時"),
         chunk_sec: str | None = Form(None, description="区切りの長さ(秒。既定は AUDIO_CHUNK_SEC)"),
+        store_media: str | None = Form(None, description=_STORE_MEDIA_FORM),
     ) -> dict:
         """音声を区切りごとにベクトルにします(窓の種類は audio)。"""
-        params = _params(None, None, None, None, None, _opt_int(chunk_sec, "chunk_sec"))
+        params = _params(
+            None, None, None, None, None, _opt_int(chunk_sec, "chunk_sec"), store_media=_opt_bool(store_media)
+        )
         return _accept_upload(file, "audio", start_ts, group_id=group_id, location=location, params=params)
 
     @router.post(
@@ -258,12 +276,13 @@ def build_api_router(ctx: Context) -> APIRouter:
         group_id: str | None = Form(None, description="任意のグループ ID"),
         location: str | None = Form(None, description="任意の場所の名前"),
         start_ts: str | None = Form(None, description="撮影日時(省略時はファイル名・EXIF・受付時刻の順)"),
+        store_media: str | None = Form(None, description=_STORE_MEDIA_FORM),
     ) -> dict:
         """静止画を取り込みます。画像 1 枚が 1 件の取り込み元になります(動画から切り出せない場合など)。
 
         1 枚ずつ受け付け、取り込めない画像があっても残りは処理します(結果は items と errors に分けて返します)。
         """
-        params = _params(None, None, None, None, None)
+        params = _params(None, None, None, None, None, store_media=_opt_bool(store_media))
         items, errs = [], []
         for upload in files:
             try:
@@ -293,7 +312,14 @@ def build_api_router(ctx: Context) -> APIRouter:
         kind = media_kind_of(path) if body.kind == "auto" else body.kind
         if kind is None:
             raise MediaError(f"映像・音声・画像として扱えない拡張子です: {path.name}")
-        params = _params(body.preset, body.window_sec, body.frames_per_window, body.overlap_sec, body.include_audio)
+        params = _params(
+            body.preset,
+            body.window_sec,
+            body.frames_per_window,
+            body.overlap_sec,
+            body.include_audio,
+            store_media=body.store_media,
+        )
         return ctx.intake.accept(
             path,
             kind=kind,
@@ -316,7 +342,14 @@ def build_api_router(ctx: Context) -> APIRouter:
 
         取り込み済みのファイルは飛ばすので、同じフォルダに何度実行しても重複しません。
         """
-        params = _params(body.preset, body.window_sec, body.frames_per_window, body.overlap_sec, body.include_audio)
+        params = _params(
+            body.preset,
+            body.window_sec,
+            body.frames_per_window,
+            body.overlap_sec,
+            body.include_audio,
+            store_media=body.store_media,
+        )
         return ctx.intake.accept_dir(
             Path(body.dir),
             params=params,
@@ -343,6 +376,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         group_id: str | None = Form(None, description="任意のグループ ID"),
         location: str | None = Form(None, description="任意の場所の名前"),
         start_ts: str | None = Form(None, description="区間の開始の日時"),
+        store_media: str | None = Form(None, description=_STORE_MEDIA_FORM),
     ) -> dict:
         """利用側で切り出したフレームを渡して、その場で 1 つの窓にします(キューを通さない)。"""
         try:
@@ -373,6 +407,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             location=location or None,
             start_ts=parse_ts(start_ts),
             thumb_dir=ctx.thumb_dir,
+            store_media=_opt_bool(store_media),
         )
 
     @router.post(
@@ -495,7 +530,9 @@ def build_api_router(ctx: Context) -> APIRouter:
         src = ctx.store.get_source(source_id)
         if src is None or src["kind"] not in MEDIA_KINDS:
             raise HTTPException(404, "再取り込みできる取り込み元が見つかりません")
-        if not src["path"] or not Path(src["path"]).is_file():
+        if not src["path"]:
+            raise HTTPException(404, "元のファイルを保存していないため、取り込み直せません(store_media=false)")
+        if not Path(src["path"]).is_file():
             raise HTTPException(404, f"元のファイルが見つかりません: {src['path']}")
         ctx.intake.check_allowed(Path(src["path"]))  # 以前の版で登録された、許可外のパスは処理しない
         ctx.store.update_source(source_id, status="queued", error=None)
@@ -558,6 +595,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             src is None
             or src["kind"] not in MEDIA_KINDS
             or src["status"] == "failed"
+            or not media_stored(src)  # 保存しない設定で取り込んだものは返さない(情報だけを返す)
             or not src["path"]
             or not is_within(src["path"], s.ingest_roots)  # 以前の版で登録された、許可外のパスも返さない
             or not Path(src["path"]).is_file()
@@ -579,21 +617,9 @@ def build_api_router(ctx: Context) -> APIRouter:
         },
     )
     def get_thumb(window_id: int) -> FileResponse:
-        thumb = ctx.thumb_dir / f"w{window_id}.jpg"
-        if thumb.is_file():
-            return FileResponse(thumb, media_type="image/jpeg")
-        window = ctx.store.get_window(window_id)
-        src = ctx.store.get_source(window["source_id"]) if window else None
-        if not window or not src or src["kind"] not in ("video", "image") or not src["path"]:
-            raise HTTPException(404, "サムネイルがありません")
-        mid = (window["start_ms"] + window["end_ms"]) // 2
+        """取り込み時に作ったサムネイルを返します。保存しない設定(store_media=false)で取り込んだ窓は 404 です。"""
         try:
-            if src["kind"] == "image":
-                from .pipeline import save_thumbnail
-
-                save_thumbnail(media.load_image(src["path"], 320), thumb)
-            else:
-                media.make_thumbnail(src["path"], mid, thumb)
+            thumb = svc.thumbnail(window_id)
         except MediaError as exc:
             raise HTTPException(404, f"サムネイルを作れません: {exc}") from exc
         return FileResponse(thumb, media_type="image/jpeg")

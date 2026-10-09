@@ -116,6 +116,13 @@
 - 一度登録したファイルは(失敗したものも含め)自動では再処理しない。壊れたファイルを毎回処理し直さないため。
 - inotify ではなく定期走査にしている。Docker のバインドマウントや NAS(SMB / NFS)では変更通知が届かないことがあるため。
 
+### 保存しないモード(`STORE_MEDIA=false` / `store_media`)
+
+- 取り込みの設定(`sources.params.store_media`)として取り込み元ごとに記録する。以前の版の取り込み元は、保存する扱い。
+- 偽のとき: サムネイルを作らない。取り込みが終わったら(失敗した場合も)、`DATA_DIR/media` の下のファイル(アップロード)を削除し、`sources.path` を NULL にする。
+  パス指定・フォルダ一括・監視フォルダのファイルは削除しない(利用者のファイルのため)。
+- 検索結果の `media_url` / `thumb_url` は null、`/api/media` と `/api/thumb` は 404 を返す。MCP の get_thumbnail もエラーにする。
+
 ### メディア配信の範囲
 
 `/api/media/{id}` が返すのは、受付の検証を通った映像・音声(`kind` が video / audio、状態が failed 以外)だけとする。

@@ -173,8 +173,12 @@ class SearchHit(_Open):
     abs_time: str = Field(description="窓の開始の日時(ISO 8601)")
     score: float = Field(description="コサイン類似度(-1〜1。大きいほど近い)")
     source_name: str | None = None
-    media_url: str | None = Field(description="元ファイルの URL(Range 対応。動画は #t=秒 で頭出しできる)")
-    thumb_url: str = Field(description="サムネイル(JPEG)の URL")
+    media_url: str | None = Field(
+        description="元ファイルの URL(Range 対応。動画は #t=秒 で頭出しできる)。保存しない設定で取り込んだものは null"
+    )
+    thumb_url: str | None = Field(
+        description="サムネイル(JPEG)の URL。音声の窓と、保存しない設定(store_media=false)で取り込んだものは null"
+    )
 
 
 class SearchInterval(_Open):

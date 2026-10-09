@@ -151,6 +151,9 @@ curl -H 'Range: bytes=0-' -o clip.mp4 http://localhost:8000/api/media/12   # 元
 
 ブラウザの `<video>` では `"/api/media/12#t=4.0"` のように指定すると、該当の位置から再生できます。
 
+`media_url` / `thumb_url` が `null` の場合は表示できません(音声の窓のサムネイル、または保存しない設定 `store_media=false` で取り込んだもの)。
+保存しない設定では、検索結果は取り込み元の名前・時刻・スコアなどの情報だけになります。
+
 ## クライアントの自動生成
 
 `docs/openapi.json` から、各言語のクライアントを生成できます。

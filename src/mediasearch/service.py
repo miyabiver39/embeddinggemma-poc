@@ -29,6 +29,15 @@ class InvalidInput(ValueError):
     """入力の誤り(API では 400)。"""
 
 
+class NotFound(LookupError):
+    """対象が見つからない(API では 404)。"""
+
+
+def media_stored(source: dict) -> bool:
+    """元のファイルとサムネイルを保存する取り込み元か(STORE_MEDIA / store_media が偽なら、情報だけを返す)。"""
+    return bool((source.get("params") or {}).get("store_media", True))
+
+
 @dataclass
 class Context:
     settings: Settings
@@ -153,8 +162,9 @@ class Service:
             sources[h["source_id"]] = src
             h["source_name"] = src.get("name")
             h["abs_time"] = fmt_ts(h["abs_ts"])
-            h["media_url"] = f"/api/media/{h['source_id']}" if src.get("path") else None
-            h["thumb_url"] = f"/api/thumb/{h['window_id']}"
+            stored = media_stored(src)
+            h["media_url"] = f"/api/media/{h['source_id']}" if stored and src.get("path") else None
+            h["thumb_url"] = f"/api/thumb/{h['window_id']}" if stored and src.get("kind") != "audio" else None
         out = {
             "results": hits,
             "took_ms": int((time.time() - started) * 1000),  # DB の検索だけにかかった時間
@@ -183,6 +193,29 @@ class Service:
         # 音声だけのベクトルは映像のみ(frames)の窓とはほぼ無関係な順位になる(実測)ため、
         # 音声クエリの auto は、音声のみで取り込んだ窓(audio)を探す
         return self.search(qvec, filters, auto_kinds=["audio"], embed_ms=int((time.time() - t0) * 1000))
+
+    def thumbnail(self, window_id: int) -> Path:
+        """窓のサムネイル(JPEG)のパス。取り込み時に作っていなければ(以前の版で取り込んだものなど)、ここで作ります。"""
+        ctx = self.ctx
+        thumb = ctx.thumb_dir / f"w{window_id}.jpg"
+        window = ctx.store.get_window(window_id)
+        src = ctx.store.get_source(window["source_id"]) if window else None
+        if not window or not src:
+            raise NotFound(f"window_id={window_id} の窓が見つかりません")
+        if not media_stored(src):
+            raise NotFound("この取り込み元は、画像を保存しない設定(store_media=false)で取り込まれています")
+        if thumb.is_file():
+            return thumb
+        if src["kind"] not in ("video", "image") or not src["path"]:
+            raise NotFound(f"window_id={window_id} のサムネイルがありません(音声、または元のファイルがありません)")
+        from . import media
+        from .pipeline import save_thumbnail
+
+        if src["kind"] == "image":
+            save_thumbnail(media.load_image(src["path"], 320), thumb)
+        else:
+            media.make_thumbnail(src["path"], (window["start_ms"] + window["end_ms"]) // 2, thumb)
+        return thumb
 
     def stats(self, limit: int = 100) -> dict:
         """直近の完了ジョブの処理時間を、取り込み元の種類(video / audio / image)ごとに集計します。

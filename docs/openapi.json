@@ -1868,6 +1868,7 @@
           "配信"
         ],
         "summary": "窓のサムネイル(JPEG)",
+        "description": "取り込み時に作ったサムネイルを返します。保存しない設定(store_media=false)で取り込んだ窓は 404 です。",
         "operationId": "get_thumb_api_thumb__window_id__get",
         "parameters": [
           {
@@ -2074,6 +2075,18 @@
             ],
             "title": "Chunk Sec",
             "description": "区切りの長さ(秒。既定は AUDIO_CHUNK_SEC)"
+          },
+          "store_media": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Media",
+            "description": "false にすると、ファイルを取り込み後に削除し、サムネイルも作らない(検索結果は情報だけ)。省略時は STORE_MEDIA"
           }
         },
         "type": "object",
@@ -2158,6 +2171,18 @@
             ],
             "title": "Start Ts",
             "description": "区間の開始の日時"
+          },
+          "store_media": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Media",
+            "description": "false にすると、ファイルを取り込み後に削除し、サムネイルも作らない(検索結果は情報だけ)。省略時は STORE_MEDIA"
           }
         },
         "type": "object",
@@ -2213,6 +2238,18 @@
             ],
             "title": "Start Ts",
             "description": "撮影日時(省略時はファイル名・EXIF・受付時刻の順)"
+          },
+          "store_media": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Media",
+            "description": "false にすると、ファイルを取り込み後に削除し、サムネイルも作らない(検索結果は情報だけ)。省略時は STORE_MEDIA"
           }
         },
         "type": "object",
@@ -2324,6 +2361,18 @@
             ],
             "title": "Include Audio",
             "description": "音声も同じベクトルに含める(true / false)"
+          },
+          "store_media": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Media",
+            "description": "false にすると、ファイルを取り込み後に削除し、サムネイルも作らない(検索結果は情報だけ)。省略時は STORE_MEDIA"
           }
         },
         "type": "object",
@@ -3190,6 +3239,18 @@
             "title": "Include Audio",
             "description": "動画の音声も同じベクトルに含める"
           },
+          "store_media": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Media",
+            "description": "偽にすると、アップロードしたファイルを取り込み後に削除し、サムネイルも作らない。検索結果は時刻などの情報だけになる(省略時はサーバの STORE_MEDIA)"
+          },
           "dir": {
             "type": "string",
             "title": "Dir",
@@ -3323,6 +3384,18 @@
             ],
             "title": "Include Audio",
             "description": "動画の音声も同じベクトルに含める"
+          },
+          "store_media": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Media",
+            "description": "偽にすると、アップロードしたファイルを取り込み後に削除し、サムネイルも作らない。検索結果は時刻などの情報だけになる(省略時はサーバの STORE_MEDIA)"
           },
           "path": {
             "type": "string",
@@ -3780,12 +3853,19 @@
               }
             ],
             "title": "Media Url",
-            "description": "元ファイルの URL(Range 対応。動画は #t=秒 で頭出しできる)"
+            "description": "元ファイルの URL(Range 対応。動画は #t=秒 で頭出しできる)。保存しない設定で取り込んだものは null"
           },
           "thumb_url": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Thumb Url",
-            "description": "サムネイル(JPEG)の URL"
+            "description": "サムネイル(JPEG)の URL。音声の窓と、保存しない設定(store_media=false)で取り込んだものは null"
           }
         },
         "additionalProperties": true,

@@ -31,7 +31,7 @@ from . import __version__, media
 from .ingest_files import MEDIA_KINDS, media_kind_of
 from .media import MediaError
 from .pipeline import IngestParams
-from .service import Context, InvalidInput, Service, parse_opt_ts
+from .service import Context, InvalidInput, NotFound, Service, parse_opt_ts
 from .store import IndexMismatch
 
 MCP_PATH = "/mcp"
@@ -85,7 +85,7 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         """アプリの例外を、エージェントが理解できる日本語のエラーにする。"""
         try:
             return fn(*args, **kwargs)
-        except (InvalidInput, MediaError, IndexMismatch, ConnectionError, ValueError) as exc:
+        except (InvalidInput, NotFound, MediaError, IndexMismatch, ConnectionError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
 
     def _filters(top_k, min_score, group_id, location, from_time, to_time, kind) -> dict:
@@ -229,25 +229,12 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         Args:
             window_id: 検索結果の window_id
         """
-        thumb = ctx.thumb_dir / f"w{window_id}.jpg"
-        if not thumb.is_file():
-            window = ctx.store.get_window(window_id)
-            src = ctx.store.get_source(window["source_id"]) if window else None
-            if not window or not src or not src["path"]:
-                raise ToolError(f"window_id={window_id} のサムネイルがありません")
-            from .pipeline import save_thumbnail
-
-            if src["kind"] == "image":
-                save_thumbnail(_guard(media.load_image, src["path"], 320), thumb)
-            elif src["kind"] == "video":
-                _guard(media.make_thumbnail, src["path"], (window["start_ms"] + window["end_ms"]) // 2, thumb)
-            else:
-                raise ToolError(f"window_id={window_id} は音声のため、サムネイルがありません")
+        thumb = _guard(svc.thumbnail, window_id)
         return Image(data=thumb.read_bytes(), format="jpeg")
 
     # ------------------------------------------------------------------ 取り込み
-    def _params(preset: str | None) -> IngestParams:
-        return _guard(IngestParams.from_settings, s, preset=preset or None)
+    def _params(preset: str | None, store_media: bool | None = None) -> IngestParams:
+        return _guard(IngestParams.from_settings, s, preset=preset or None, store_media=store_media)
 
     @server.tool(annotations=_INGEST)
     def ingest_path(
@@ -258,6 +245,7 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         start_time: str | None = None,
         preset: str | None = None,
         force: bool = False,
+        store_media: bool | None = None,
     ) -> dict[str, Any]:
         """サーバー内のファイル(動画・音声・画像)を取り込みます。
 
@@ -271,6 +259,7 @@ def build_mcp_server(ctx: Context) -> MCPServer:
             start_time: 録画開始(撮影)の日時(ISO 8601)。省略時はファイル名・EXIF・受付時刻の順
             preset: 取り込みのプリセット(object / action / speech)
             force: 取り込み済みでも、もう一度取り込む
+            store_media: false にすると、サムネイルを作らず、検索結果に画像・再生の URL を付けない(省略時はサーバー設定)
         """
         p = Path(path)
         _guard(ctx.intake.check_allowed, p)
@@ -288,7 +277,7 @@ def build_mcp_server(ctx: Context) -> MCPServer:
             group_id=group_id,
             location=location,
             start_ts=_guard(parse_opt_ts, start_time),
-            params=_params(preset),
+            params=_params(preset, store_media),
             force=force,
         )
         return accepted.to_dict()
@@ -303,6 +292,7 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         location: str | None = None,
         preset: str | None = None,
         force: bool = False,
+        store_media: bool | None = None,
     ) -> dict[str, Any]:
         """サーバー内のフォルダの動画・音声・画像を、まとめて取り込みます。取り込み済みのファイルは対象外です。
 
@@ -315,13 +305,14 @@ def build_mcp_server(ctx: Context) -> MCPServer:
             location: 任意の場所の名前
             preset: 取り込みのプリセット(object / action / speech)
             force: 取り込み済みでも、もう一度取り込む
+            store_media: false にすると、サムネイルを作らず、検索結果に画像・再生の URL を付けない(省略時はサーバー設定)
         """
         if kind not in ("auto", *MEDIA_KINDS):
             raise ToolError("kind は auto / video / audio / image のいずれかにしてください")
         result = _guard(
             ctx.intake.accept_dir,
             Path(dir),
-            params=_params(preset),
+            params=_params(preset, store_media),
             recursive=recursive,
             kind=kind,
             group_id=group_id,

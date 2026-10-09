@@ -50,6 +50,8 @@ class IngestParams:
     overlap_sec: int
     include_audio: bool
     chunk_sec: int = 10  # 音声だけを取り込むときの区切り(秒)
+    # 偽なら、元のファイル(アップロードしたもの)とサムネイルを残さない。検索結果は時刻などの情報だけになる
+    store_media: bool = True
 
     @classmethod
     def from_settings(cls, s: Settings, preset: str | None = None, **overrides) -> IngestParams:
@@ -59,6 +61,7 @@ class IngestParams:
             "overlap_sec": s.overlap_sec,
             "include_audio": s.include_audio,
             "chunk_sec": s.audio_chunk_sec,
+            "store_media": s.store_media,
         }
         if preset:
             if preset not in PRESETS:
@@ -368,17 +371,36 @@ class Ingestor:
         self._store.update_source(source["id"], status="running", error=None)
         return source
 
+    def _discard_media(self, source: dict) -> None:
+        """保存しない設定(store_media が偽)の取り込み元で、アップロードされたファイルを削除します。
+
+        削除するのは DATA_DIR/media の下(アップロードで受け取ったもの)だけです。
+        パス指定で取り込んだ利用者のファイルは消しません(配信と再取り込みの対象から外すだけ)。
+        """
+        if source["params"].get("store_media", True) or not source["path"]:
+            return
+        path = Path(source["path"])
+        try:
+            uploaded = path.resolve().is_relative_to((self._settings.data_dir / "media").resolve())
+        except OSError:
+            return
+        if uploaded:
+            path.unlink(missing_ok=True)
+            self._store.update_source(source["id"], path=None)
+
     def _fail(self, job_id: int, source: dict, exc: Exception) -> None:
         log.exception("取り込みに失敗しました: job=%s source=%s", job_id, source["id"], exc_info=exc)
         message = f"{type(exc).__name__}: {exc}"
         self._store.update_job(job_id, status="failed", error=message, finished_at=time.time())
         self._store.update_source(source["id"], status="failed", error=message)
+        self._discard_media(source)
 
     def _finish(self, job_id: int, source: dict, timings: dict) -> None:
         info = self._embedder.info()
         timings.update(accelerator=info.accelerator, backend=info.backend)
         self._store.update_job(job_id, status="done", finished_at=time.time(), timings=timings)
         self._store.update_source(source["id"], status="done")
+        self._discard_media(source)
         log.info(
             "取り込みが完了しました: %s(%s 窓、%.1f 秒、実時間比 %s)",
             source["name"], timings.get("windows"), (timings.get("total_ms") or 0) / 1000,
@@ -512,9 +534,10 @@ class Ingestor:
                 abs_ts=source["start_ts"] + plan.start_ms / 1000,
                 vec=vec,
             )
-        with timer.stage("thumb"):
-            # 復号済みのフレームから作る(表示のたびに ffmpeg を起動しなくて済む)
-            save_thumbnail(picked[len(picked) // 2], self._thumb_path(window_id))
+        if source["params"].get("store_media", True):
+            with timer.stage("thumb"):
+                # 復号済みのフレームから作る(表示のたびに ffmpeg を起動しなくて済む)
+                save_thumbnail(picked[len(picked) // 2], self._thumb_path(window_id))
 
     def _index_audio(self, job_id: int, source: dict) -> dict:
         timer = StageTimer()
@@ -615,8 +638,9 @@ class Ingestor:
                     abs_ts=source["start_ts"],
                     vec=vec,
                 )
-            with timer.stage("thumb"):
-                save_thumbnail(image, self._thumb_path(window_id))
+            if source["params"].get("store_media", True):
+                with timer.stage("thumb"):
+                    save_thumbnail(image, self._thumb_path(window_id))
             self._store.update_job(job_id, total=1, progress=1)
         timer.extra["batch"] = len(items)
         return timer.result(len(items), 0)
@@ -633,6 +657,7 @@ class Ingestor:
         location: str | None,
         start_ts: float,
         thumb_dir: Path,
+        store_media: bool | None = None,
     ) -> dict:
         """事前に加工済みのフレーム(と音声)から、1窓を作ります。キューを通さず、その場で処理します。"""
         info = self._embedder.info()
@@ -643,6 +668,7 @@ class Ingestor:
             frames_per_window=max(1, len(frames)),
             overlap_sec=0,
             include_audio=audio is not None and audio.size > 0,
+            store_media=self._settings.store_media if store_media is None else store_media,
         )
         slices = None
         if audio is not None and audio.size > 0:
@@ -670,5 +696,6 @@ class Ingestor:
             abs_ts=start_ts + min(times_ms) / 1000,
             vec=vec,
         )
-        save_thumbnail(frames[0], thumb_dir / f"w{window_id}.jpg")
+        if params.store_media:
+            save_thumbnail(frames[0], thumb_dir / f"w{window_id}.jpg")
         return {"source_id": source_id, "window_id": window_id, "kind": kind}

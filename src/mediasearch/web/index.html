@@ -29,6 +29,7 @@
   .hits { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; margin-top:12px; }
   .hit { border:1px solid var(--line); border-radius:6px; overflow:hidden; background:var(--bg); cursor:pointer; }
   .hit img { width:100%; aspect-ratio:16/9; object-fit:cover; background:#000; display:block; }
+  .hit .nothumb { width:100%; aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; background:var(--line); color:var(--mute); font-size:12px; }
   .hit .meta { padding:6px 8px; font-size:12px; }
   .score { font-weight:700; color:var(--acc); }
   .mute { color:var(--mute); }
@@ -250,7 +251,7 @@ function renderHits(res) {
     const first = byWin[it.window_ids[0]] || {};
     const thumb = first.thumb_url || "";
     return `<div class="hit" data-i="${i}">
-      <img loading="lazy" src="${esc(thumb)}" alt="">
+      ${thumb ? `<img loading="lazy" src="${esc(thumb)}" alt="">` : `<div class="nothumb">${first.kind === "audio" ? "音声" : "画像を保存していません"}</div>`}
       <div class="meta"><span class="score">${it.score.toFixed(3)}</span>
       ${esc(it.source_name)} ${first.kind === "image" ? "(静止画)" : fmt(it.start_ms) + "–" + fmt(it.end_ms)}<br>
       <span class="mute">${esc(it.group_id || "")} ${esc(it.location || "")} ${esc(first.abs_time || "")} ${first.kind ? "["+esc(first.kind)+"]" : ""}</span></div></div>`;
