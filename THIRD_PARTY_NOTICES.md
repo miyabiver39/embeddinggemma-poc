@@ -58,6 +58,13 @@ GPU 用のイメージに含まれる NVIDIA と Intel のライブラリは、�
 - Launchpad: https://launchpad.net/ubuntu/+source/ffmpeg
 - コンテナ内での確認: `dpkg -s ffmpeg`(版)、`/usr/share/doc/ffmpeg/copyright`(ライセンス文)
 
+## ブラウザが読み込むもの(イメージには含まれません)
+
+| ソフトウェア | 用途 | ライセンス |
+|---|---|---|
+| Scalar(`@scalar/api-reference`。jsDelivr から版を固定して読み込み) | API リファレンスの画面(`/scalar`) | MIT |
+| Swagger UI / ReDoc(FastAPI の既定。jsDelivr から読み込み) | API 仕様の画面(`/docs`、`/redoc`) | Apache-2.0 / MIT |
+
 ## ビルドと検査に使うツール(イメージには含まれません)
 
 | ツール | 用途 | ライセンス |

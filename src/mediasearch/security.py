@@ -33,9 +33,10 @@ log = logging.getLogger(__name__)
 
 TOKEN_COOKIE = "mediasearch_token"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-# 認証なしで開けるパス。/healthz は Docker の死活監視、/ と /docs は WebUI と API 仕様の画面
-# (画面自体には情報がなく、データの取得には認証が要る)
-PUBLIC_PATHS = frozenset({"/", "/healthz", "/docs", "/docs/oauth2-redirect", "/redoc"})
+# 認証なしで開けるパス。/healthz は Docker の死活監視、/ と /docs・/redoc・/scalar は WebUI と API 仕様の画面。
+# /openapi.json は仕様書の画面が読み込むため公開する(仕様書にデータは含まれず、リポジトリでも公開している)。
+# データの取得(/api・/compute・/mcp)には認証が要る
+PUBLIC_PATHS = frozenset({"/", "/healthz", "/docs", "/docs/oauth2-redirect", "/redoc", "/scalar", "/openapi.json"})
 
 # WebUI(/)に付ける CSP。WebUI は 1 ファイルで、スクリプトとスタイルを埋め込んでいるため 'unsafe-inline' が必要
 WEBUI_CSP = (

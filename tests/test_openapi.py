@@ -32,3 +32,13 @@ def test_every_operation_is_documented():
             if path.startswith("/api/") or path.startswith("/compute/"):
                 assert "401" in op["responses"], f"{where} に 401(認証)の応答がありません"
                 assert {} in op["security"], f"{where} は認証なしでも呼べる旨(API_TOKEN 未設定時)がありません"
+
+
+def test_scalar_page_pins_version_and_disables_external_calls(client):
+    html = client.get("/scalar").text
+    assert 'integrity="sha384-' in html and 'crossorigin="anonymous"' in html  # SRI で改ざんを検出する
+    assert "@scalar/api-reference@" in html and "@latest" not in html  # 版を固定している
+    # 試し呼び出しを外部の中継サーバーに送らない・利用状況を送らない・AI 機能を使わない
+    assert '"proxyUrl": ""' in html and '"telemetry": false' in html and '"agent": {"disabled": true}' in html
+    assert 'url: location.origin + "/mcp"' in html  # MCP の案内は、このサーバーの /mcp を指す
+    assert client.get("/openapi.json").status_code == 200

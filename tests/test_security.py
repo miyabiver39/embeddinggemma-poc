@@ -29,7 +29,8 @@ def test_token_required_except_public_paths(secured):
     assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer"
     assert secured.get("/api/info", headers={"Authorization": "Bearer wrong"}).status_code == 401
     assert secured.get("/compute/info").status_code == 401
-    assert secured.get("/openapi.json").status_code == 401
+    assert secured.get("/openapi.json").status_code == 200  # 仕様書の画面が読み込むため公開
+    assert secured.get("/scalar").status_code == 200
 
 
 @pytest.mark.parametrize(

@@ -3,7 +3,7 @@
   "info": {
     "title": "mediasearch",
     "summary": "EmbeddingGemma 2 を使った録画映像・音声・画像のマルチモーダル検索 API(開発用)",
-    "description": "\n録画映像・音声・画像を取り込み、**文章・画像・音声**で該当する場面を探すための API です。\n\n- 取り込み(`/api/ingest/*`)はバックグラウンドのジョブで行い、応答の `job_id` で進み具合を確認します\n  (`GET /api/jobs/{job_id}`)。\n- 検索(`/api/search/*`)は、スコア(コサイン類似度)の高い順に窓(時間の区切り、または静止画 1 枚)を返します。\n- 元ファイルは `GET /api/media/{source_id}`(Range 対応)、サムネイルは `GET /api/thumb/{window_id}` で取得します。\n- エラーは `{\"detail\": \"...\"}` の形で返します(説明は日本語)。\n\n**認証**: サーバに `API_TOKEN` が設定されている場合、`Authorization: Bearer <トークン>` か\n`X-API-Key: <トークン>` が必要です\n(右上の Authorize から設定できます)。設定されていない場合は不要です。\n\nAI エージェントからは、同じ機能を MCP(`/mcp`)で利用できます。\n開発者向けの説明は docs/api.md と docs/mcp.md を参照してください。\n",
+    "description": "\n録画映像・音声・画像を取り込み、**文章・画像・音声**で該当する場面を探すための API です。\n\n- 取り込み(`/api/ingest/*`)はバックグラウンドのジョブで行い、応答の `job_id` で進み具合を確認します\n  (`GET /api/jobs/{job_id}`)。\n- 検索(`/api/search/*`)は、スコア(コサイン類似度)の高い順に窓(時間の区切り、または静止画 1 枚)を返します。\n- 元ファイルは `GET /api/media/{source_id}`(Range 対応)、サムネイルは `GET /api/thumb/{window_id}` で取得します。\n- エラーは `{\"detail\": \"...\"}` の形で返します(説明は日本語)。\n\n**認証**: サーバに `API_TOKEN` が設定されている場合、`Authorization: Bearer <トークン>` か\n`X-API-Key: <トークン>` が必要です(設定されていない場合は不要)。\nScalar(`/scalar`)では Authentication 欄、Swagger UI(`/docs`)では右上の Authorize にトークンを入力します。\n\nAI エージェントからは、同じ機能を MCP(`/mcp`)で利用できます。\n開発者向けの説明は docs/api.md と docs/mcp.md を参照してください。\n",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"

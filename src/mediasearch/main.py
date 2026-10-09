@@ -12,7 +12,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from . import __version__
 from .api import build_api_router
@@ -49,8 +49,8 @@ API_DESCRIPTION = """
 - エラーは `{"detail": "..."}` の形で返します(説明は日本語)。
 
 **認証**: サーバに `API_TOKEN` が設定されている場合、`Authorization: Bearer <トークン>` か
-`X-API-Key: <トークン>` が必要です
-(右上の Authorize から設定できます)。設定されていない場合は不要です。
+`X-API-Key: <トークン>` が必要です(設定されていない場合は不要)。
+Scalar(`/scalar`)では Authentication 欄、Swagger UI(`/docs`)では右上の Authorize にトークンを入力します。
 
 AI エージェントからは、同じ機能を MCP(`/mcp`)で利用できます。
 開発者向けの説明は docs/api.md と docs/mcp.md を参照してください。
@@ -70,6 +70,58 @@ OPENAPI_TAGS = [
     {"name": "配信", "description": "元ファイルとサムネイルの取得"},
     {"name": "compute", "description": "ベクトル化だけを行う API(ROLE=compute / all)。app から内部的に使います"},
 ]
+
+
+# Scalar(API リファレンスの画面)。版を固定し、SRI のハッシュで改ざんされていないことをブラウザに確かめさせる。
+# 版を上げるときは、ファイルの sha384 を計算し直して SCALAR_SRI も更新すること(docs/api.md)
+SCALAR_VERSION = "1.72.1"
+SCALAR_SRI = "sha384-U11tb2XnKvmwt8RlTvnwUnYgrN+ur4Xyh9htLhjajWNR/Oyl5AX5DEz00qRmlrmK"
+# 外部への送信を止める設定。既定のままでは、試し呼び出しを Scalar 社の中継サーバー(proxy.scalar.com)経由で
+# 送ることがあり、トークンや検索結果が外部に渡り得る。
+# 利用状況の送信(telemetry)、AI 機能(api.scalar.com)、外部のフォントも使わない
+SCALAR_CONFIG = {
+    "url": "/openapi.json",
+    "proxyUrl": "",
+    "telemetry": False,
+    "agent": {"disabled": True},
+    "withDefaultFonts": False,
+    "hideClientButton": True,
+    "showDeveloperTools": "never",
+    "persistAuth": False,
+    "defaultHttpClient": {"targetKey": "shell", "clientKey": "curl"},
+    "authentication": {"preferredSecurityScheme": "bearer"},
+}
+SCALAR_HTML = """<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>mediasearch API リファレンス</title>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@{version}/dist/browser/standalone.js"
+  integrity="{sri}" crossorigin="anonymous"></script>
+<script>
+  // MCP の案内は、外部のサービスではなく、このサーバーの /mcp を指す(接続先はページを開いた URL から決める)
+  const config = {config};
+  config.mcp = { name: "mediasearch", url: location.origin + "/mcp" };
+  Scalar.createApiReference("#app", config);
+</script>
+</body>
+</html>
+"""
+
+
+def _scalar_page() -> str:
+    import json
+
+    return (
+        SCALAR_HTML.replace("{version}", SCALAR_VERSION)
+        .replace("{sri}", SCALAR_SRI)
+        .replace("{config}", json.dumps(SCALAR_CONFIG, ensure_ascii=False))
+    )
 
 
 def _openapi_with_security(app: FastAPI) -> dict:
@@ -199,6 +251,11 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
         from .mcp_server import build_mcp_server, mount_mcp
 
         mcp_run = mount_mcp(app, build_mcp_server(ctx), s.max_upload_mb * 1024 * 1024)
+
+    @app.get("/scalar", include_in_schema=False)
+    def scalar() -> HTMLResponse:
+        """API リファレンス(Scalar)。仕様の閲覧と、API の試し呼び出しができます。"""
+        return HTMLResponse(_scalar_page())
 
     @app.get("/healthz", tags=["状態"], summary="死活監視(認証不要)", response_model=Health)
     def healthz() -> dict:

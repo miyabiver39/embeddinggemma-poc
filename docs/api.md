@@ -4,7 +4,8 @@ mediasearch の HTTP API の使い方をまとめます。全項目の定義は 
 
 | 資料 | 場所 |
 |---|---|
-| 対話的な仕様書(Swagger UI。試しに呼び出せる) | `http://<サーバ>:8000/docs` |
+| **API リファレンス(Scalar。閲覧と試し呼び出し。推奨)** | `http://<サーバ>:8000/scalar` |
+| 対話的な仕様書(Swagger UI) | `http://<サーバ>:8000/docs` |
 | 読みやすい仕様書(ReDoc) | `http://<サーバ>:8000/redoc` |
 | 仕様書(JSON) | `http://<サーバ>:8000/openapi.json`、リポジトリの [docs/openapi.json](openapi.json) |
 | AI エージェントからの利用(MCP) | [docs/mcp.md](mcp.md) |
@@ -28,7 +29,23 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/info
 curl -H "X-API-Key: $TOKEN"            http://localhost:8000/api/info
 ```
 
-Swagger UI(`/docs`)では、右上の Authorize にトークンを入力します。`/healthz` は認証なしで呼べます(死活監視用)。
+Scalar(`/scalar`)では Authentication 欄、Swagger UI(`/docs`)では右上の Authorize にトークンを入力します。
+`/healthz` は認証なしで呼べます(死活監視用)。仕様書(`/openapi.json`)と、仕様書の画面も認証なしで開けます(データは含みません)。
+
+## Scalar(API リファレンス)について
+
+`/scalar` は [Scalar](https://github.com/scalar/scalar)(MIT ライセンス)で表示しています。
+
+- 画面のプログラムは、ブラウザが CDN(jsDelivr)から読み込みます。版を固定し、SRI のハッシュで改ざんされていないことを確認しています。
+  ブラウザがインターネットに接続できない環境では表示できません。その場合は `docs/openapi.json` を手元のツールで開いてください。
+- 既定の Scalar は、試し呼び出しを Scalar 社の中継サーバー経由で送ることや、利用状況の送信、AI 機能による外部への送信を行うことがあります。
+  本アプリではこれらをすべて無効にしています。試し呼び出しはブラウザからこのサーバーへ直接送られます(Chromium で通信先を確認済み)。
+- 画面左下の「Connect MCP」は、このサーバーの MCP(`/mcp`)への接続方法を案内します。
+- Scalar の版を上げる場合は、`src/mediasearch/main.py` の `SCALAR_VERSION` と、ファイルの sha384(`SCALAR_SRI`)を更新します。
+
+```bash
+curl -sL https://cdn.jsdelivr.net/npm/@scalar/api-reference@<版>/dist/browser/standalone.js | openssl dgst -sha384 -binary | base64
+```
 
 ## エラー
 

@@ -35,7 +35,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/info
 
 - ヘッダーは `Authorization: Bearer <トークン>` か `X-API-Key: <トークン>` のどちらでも構いません。
 - WebUI は、最初の操作時にトークンの入力を求め、ブラウザに 30 日間保存します(Cookie、`SameSite=Strict`)。「状態」タブで消去できます。
-- 認証なしで開けるのは `/healthz`(死活監視)、`/`(WebUI の画面)、`/docs`(API 仕様の画面)だけです。データの取得にはトークンが必要です。
+- 認証なしで開けるのは `/healthz`(死活監視)、`/`(WebUI の画面)、`/docs`・`/redoc`・`/scalar`(API 仕様の画面)、`/openapi.json`(仕様書。リポジトリでも公開している内容)だけです。データの取得(`/api`・`/compute`・`/mcp`)にはトークンが必要です。
 - app と compute を分ける構成では、compute に `API_TOKEN` を、app に同じ値の `EMBEDDING_TOKEN` を設定します
   (app 自身にも `API_TOKEN` を設定する場合、`EMBEDDING_TOKEN` を省略すると同じ値を使います)。
 
