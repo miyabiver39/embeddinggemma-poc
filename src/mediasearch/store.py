@@ -360,6 +360,16 @@ class Store:
             ).fetchall()
         return [self._job_dict(r) for r in rows]
 
+    def finished_timings(self, limit: int = 100) -> list[dict]:
+        """処理時間を記録した完了済みのジョブ(新しい順)。取り込み元の種類を kind に入れて返します。"""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT j.id, j.timings, s.kind FROM jobs j JOIN sources s ON s.id=j.source_id"
+                " WHERE j.status='done' AND j.timings IS NOT NULL ORDER BY j.id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [{"job_id": r["id"], "kind": r["kind"], **json.loads(r["timings"])} for r in rows]
+
     @staticmethod
     def _job_dict(row: sqlite3.Row) -> dict:
         d = dict(row)

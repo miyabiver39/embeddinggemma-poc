@@ -37,6 +37,7 @@ from .schemas import (
     SearchResponse,
     Source,
     SourceList,
+    StatsResponse,
     TextSearchRequest,
     WatchScanResponse,
     errors,
@@ -509,6 +510,17 @@ def build_api_router(ctx: Context) -> APIRouter:
     )
     def list_jobs(limit: int = Query(100, ge=1, le=10_000, description="返す件数(新しい順)")) -> dict:
         return {"jobs": ctx.store.list_jobs(limit)}
+
+    @router.get(
+        "/stats",
+        tags=["状態"],
+        summary="取り込みの処理時間の集計(ベンチマーク)",
+        response_model=StatsResponse,
+        responses=errors(401),
+    )
+    def stats(limit: int = Query(100, ge=1, le=10_000, description="集計する完了ジョブの数(新しい順)")) -> dict:
+        """直近の完了ジョブの処理時間を、種類ごとに合計・平均します。設定を変えて取り込み直し、前後で比べるのに使います。"""
+        return svc.stats(limit)
 
     @router.get(
         "/jobs/{job_id}",

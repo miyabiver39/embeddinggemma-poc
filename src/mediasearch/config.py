@@ -62,6 +62,7 @@ class Settings:
     image_max_side: int  # 推論前に縮小する画像の長辺(px)
     ffmpeg_hwaccel: str  # 動画の復号に使う GPU(auto / none / cuda / vaapi / qsv)
     ffmpeg_hwaccel_device: str  # GPU 復号のデバイス(vaapi なら /dev/dri/renderD128 など。空なら自動)
+    ffmpeg_skip_frames: str  # 復号を省く範囲(none / noref / keyframes。media.DECODE_SKIP)
 
     # --- 保存先 ---
     data_dir: Path
@@ -120,6 +121,11 @@ class Settings:
         api_token = _env("API_TOKEN", "")
 
         watch_preset = _env("WATCH_PRESET", "")
+        skip_frames = _env("FFMPEG_SKIP_FRAMES", "noref").lower()
+        if skip_frames not in ("none", "noref", "keyframes"):
+            raise ValueError(
+                f"FFMPEG_SKIP_FRAMES は none / noref / keyframes のいずれかにしてください: {skip_frames!r}"
+            )
         if watch_preset and watch_preset not in PRESETS:
             raise ValueError(f"WATCH_PRESET は {list(PRESETS)} のいずれかにしてください: {watch_preset!r}")
 
@@ -137,6 +143,7 @@ class Settings:
             image_max_side=_env_int("IMAGE_MAX_SIDE", 448),
             ffmpeg_hwaccel=_env("FFMPEG_HWACCEL", "auto"),
             ffmpeg_hwaccel_device=_env("FFMPEG_HWACCEL_DEVICE", ""),
+            ffmpeg_skip_frames=skip_frames,
             data_dir=data_dir,
             window_sec=_env_int("WINDOW_SEC", PRESETS["object"]["window_sec"]),
             frames_per_window=_env_int("FRAMES_PER_WINDOW", PRESETS["object"]["frames_per_window"]),

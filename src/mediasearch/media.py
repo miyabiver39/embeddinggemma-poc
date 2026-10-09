@@ -203,6 +203,19 @@ def select_hwaccel(setting: str, device: str = "") -> tuple[str | None, str | No
     return setting, device or None
 
 
+# 復号を省く範囲(FFMPEG_SKIP_FRAMES)。ffmpeg のデコーダの skip_frame に渡す
+#   none:      全フレームを復号する(最も正確・最も遅い)
+#   noref:     他のフレームから参照されないフレーム(B フレームなど)を復号しない。
+#              取り出し時刻のずれは 1〜2 フレーム程度で、1080p の H.264 で約 25% 速い(既定)。
+#              参照されないフレームが無い形式では、none と同じ
+#   keyframes: キーフレームだけを復号する。数倍速いが、取り出し時刻が最大でキーフレームの間隔(数秒のことが多い)ずれる
+DECODE_SKIP: dict[str, list[str]] = {
+    "none": [],
+    "noref": ["-skip_frame", "noref"],
+    "keyframes": ["-skip_frame", "nokey"],
+}
+
+
 class VideoFrameReader:
     """1 つの ffmpeg プロセスで動画を先頭から復号し、一定間隔のフレームを順に返します。
 
@@ -221,8 +234,13 @@ class VideoFrameReader:
         max_side: int = 448,
         hwaccel: str | None = None,
         hwaccel_device: str | None = None,
+        skip: str = "noref",
     ) -> None:
+        if skip not in DECODE_SKIP:
+            raise ValueError(f"復号の省略の指定は {list(DECODE_SKIP)} のいずれかにしてください: {skip!r}")
         self.path = str(path)
+        self.skip = skip
+        self.skip_used = skip
         self.step_ms = max(int(step_ms), 1)
         self.width, self.height = output_size(*video_size(path), max_side)
         self.hwaccel = hwaccel
@@ -230,8 +248,8 @@ class VideoFrameReader:
         self.decoder = "cpu"
         self.frames = 0
 
-    def _command(self, hwaccel: str | None) -> list[str]:
-        cmd = ["ffmpeg", "-v", "error", "-nostdin"]
+    def _command(self, hwaccel: str | None, skip: str) -> list[str]:
+        cmd = ["ffmpeg", "-v", "error", "-nostdin", *DECODE_SKIP[skip]]
         if hwaccel:
             cmd += ["-hwaccel", hwaccel]
             if self.hwaccel_device:
@@ -245,12 +263,21 @@ class VideoFrameReader:
         ]  # fmt: skip
         return cmd
 
+    def _attempts(self) -> list[tuple[str | None, str]]:
+        """試す順の (GPU 復号, 省略の範囲)。GPU で始められない場合は CPU で、省略して 1 枚も取れない場合
+        (キーフレームが先頭の 1 枚だけの短い動画など)は全フレームの復号でやり直す。"""
+        out: list[tuple[str | None, str]] = []
+        for item in ((self.hwaccel, self.skip), (None, self.skip), (None, "none")):
+            if item not in out:
+                out.append(item)
+        return out
+
     def __iter__(self):
         """(フレームの時刻 ms, RGB 配列) を順に返します。"""
-        attempts = [self.hwaccel, None] if self.hwaccel else [None]
-        for hw in attempts:
+        err = ""
+        for hw, skip in self._attempts():
             yielded = 0
-            proc = subprocess.Popen(self._command(hw), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc = subprocess.Popen(self._command(hw, skip), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             size = self.width * self.height * 3
             try:
                 while True:
@@ -259,6 +286,7 @@ class VideoFrameReader:
                         break
                     frame = np.frombuffer(buf, dtype=np.uint8).reshape(self.height, self.width, 3)
                     self.decoder = hw or "cpu"
+                    self.skip_used = skip
                     yield yielded * self.step_ms, frame
                     yielded += 1
                     self.frames += 1
@@ -267,11 +295,14 @@ class VideoFrameReader:
                     proc.kill()
                 proc.wait()
                 err = proc.stderr.read().decode("utf-8", "replace").strip() if proc.stderr else ""
-            if yielded > 0 or proc.returncode == 0:
+            if yielded > 0:
                 return
-            if hw is None:
-                raise MediaError(f"ffmpeg で映像を復号できません: {' / '.join(err.splitlines()[-3:])}")
-            log.warning("GPU(%s)で復号できないため、CPU で復号し直します: %s", hw, err.splitlines()[-1:] or "")
+            log.warning(
+                "復号(GPU=%s, 省略=%s)でフレームを取り出せないため、条件を変えてやり直します: %s",
+                hw or "なし", skip, err.splitlines()[-1:] or "",
+            )  # fmt: skip
+        reason = " / ".join(err.splitlines()[-3:]) or "フレームがありません"
+        raise MediaError(f"ffmpeg で映像を復号できません: {reason}")
 
 
 class AudioTrack:

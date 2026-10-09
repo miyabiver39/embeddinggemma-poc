@@ -1650,6 +1650,73 @@
         ]
       }
     },
+    "/api/stats": {
+      "get": {
+        "tags": [
+          "状態"
+        ],
+        "summary": "取り込みの処理時間の集計(ベンチマーク)",
+        "description": "直近の完了ジョブの処理時間を、種類ごとに合計・平均します。設定を変えて取り込み直し、前後で比べるのに使います。",
+        "operationId": "stats_api_stats_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 1,
+              "description": "集計する完了ジョブの数(新しい順)",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "集計する完了ジョブの数(新しい順)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
     "/api/jobs/{job_id}": {
       "get": {
         "tags": [
@@ -3518,6 +3585,80 @@
         "title": "JobTimings",
         "description": "取り込みの処理時間。高速化の効果を確かめるために使います。"
       },
+      "KindStats": {
+        "properties": {
+          "jobs": {
+            "type": "integer",
+            "title": "Jobs",
+            "description": "集計したジョブの数"
+          },
+          "windows": {
+            "type": "integer",
+            "title": "Windows",
+            "description": "作った窓の合計"
+          },
+          "media_ms": {
+            "type": "integer",
+            "title": "Media Ms",
+            "description": "取り込んだ映像・音声の長さの合計(ms)"
+          },
+          "total_ms": {
+            "type": "number",
+            "title": "Total Ms",
+            "description": "処理時間の合計(ms)"
+          },
+          "stages_ms": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Stages Ms",
+            "description": "段階ごとの時間の合計(ms。段階の意味は Job の timings と同じ)"
+          },
+          "per_window_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Window Ms",
+            "description": "窓 1 つあたりの平均(ms)"
+          },
+          "realtime_factor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realtime Factor",
+            "description": "実時間比(全体)"
+          },
+          "decoders": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Decoders",
+            "description": "映像の復号に使った方式ごとのジョブ数"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobs",
+          "windows",
+          "media_ms",
+          "total_ms",
+          "stages_ms",
+          "decoders"
+        ],
+        "title": "KindStats"
+      },
       "Reindexed": {
         "properties": {
           "source_id": {
@@ -3919,6 +4060,29 @@
           "sources"
         ],
         "title": "SourceList"
+      },
+      "StatsResponse": {
+        "properties": {
+          "jobs": {
+            "type": "integer",
+            "title": "Jobs",
+            "description": "集計したジョブの数(処理時間を記録した完了済みのもの)"
+          },
+          "by_kind": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KindStats"
+            },
+            "type": "object",
+            "title": "By Kind",
+            "description": "取り込み元の種類(video / audio / image)ごとの集計"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobs",
+          "by_kind"
+        ],
+        "title": "StatsResponse"
       },
       "TextSearchRequest": {
         "properties": {

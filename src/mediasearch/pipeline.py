@@ -427,7 +427,9 @@ class Ingestor:
             self._settings.ffmpeg_hwaccel, self._settings.ffmpeg_hwaccel_device
         )
         with timer.stage("probe"):
-            reader = media.VideoFrameReader(path, step, self._settings.image_max_side, hwaccel, device)
+            reader = media.VideoFrameReader(
+                path, step, self._settings.image_max_side, hwaccel, device, self._settings.ffmpeg_skip_frames
+            )
         need = [[round(t / step) for t in plan.sample_ms] for plan in plans]
         with tempfile.TemporaryDirectory(prefix="mediasearch-") as tmp:
             audio = media.AudioTrack(path, tmp) if use_audio else None
@@ -457,7 +459,9 @@ class Ingestor:
                 stream.close()
                 if audio is not None:
                     audio.close()
-        timer.extra.update(decoder=reader.decoder, decode_step_ms=step, decoded_frames=reader.frames)
+        timer.extra.update(
+            decoder=reader.decoder, skip_frames=reader.skip_used, decode_step_ms=step, decoded_frames=reader.frames
+        )
         return timer.result(len(plans), info.duration_ms)
 
     def _embed_window(

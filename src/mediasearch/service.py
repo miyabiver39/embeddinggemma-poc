@@ -184,6 +184,33 @@ class Service:
         # 音声クエリの auto は、音声のみで取り込んだ窓(audio)を探す
         return self.search(qvec, filters, auto_kinds=["audio"], embed_ms=int((time.time() - t0) * 1000))
 
+    def stats(self, limit: int = 100) -> dict:
+        """直近の完了ジョブの処理時間を、取り込み元の種類(video / audio / image)ごとに集計します。
+
+        高速化の前後で比べられるよう、合計と平均だけを返します(個々の値は GET /api/jobs の timings)。
+        """
+        rows = self.ctx.store.finished_timings(limit)
+        groups: dict[str, dict] = {}
+        for r in rows:
+            g = groups.setdefault(
+                r["kind"], {"jobs": 0, "windows": 0, "media_ms": 0, "total_ms": 0.0, "stages_ms": {}, "decoders": {}}
+            )
+            g["jobs"] += 1
+            g["windows"] += int(r.get("windows") or 0)
+            g["media_ms"] += int(r.get("media_ms") or 0)
+            g["total_ms"] += float(r.get("total_ms") or 0)
+            for k, v in (r.get("stages_ms") or {}).items():
+                g["stages_ms"][k] = g["stages_ms"].get(k, 0.0) + float(v)
+            if r.get("decoder"):
+                g["decoders"][r["decoder"]] = g["decoders"].get(r["decoder"], 0) + 1
+        for g in groups.values():
+            total = g["total_ms"]
+            g["total_ms"] = round(total, 1)
+            g["stages_ms"] = {k: round(v, 1) for k, v in g["stages_ms"].items()}
+            g["per_window_ms"] = round(total / g["windows"], 1) if g["windows"] else None
+            g["realtime_factor"] = round(g["media_ms"] / total, 2) if g["media_ms"] and total > 0 else None
+        return {"jobs": len(rows), "by_kind": groups}
+
     def info(self) -> dict:
         ctx, s = self.ctx, self.ctx.settings
         try:

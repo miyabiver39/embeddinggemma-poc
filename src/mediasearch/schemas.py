@@ -276,6 +276,22 @@ class JobList(BaseModel):
     jobs: list[Job]
 
 
+class KindStats(BaseModel):
+    jobs: int = Field(description="集計したジョブの数")
+    windows: int = Field(description="作った窓の合計")
+    media_ms: int = Field(description="取り込んだ映像・音声の長さの合計(ms)")
+    total_ms: float = Field(description="処理時間の合計(ms)")
+    stages_ms: dict[str, float] = Field(description="段階ごとの時間の合計(ms。段階の意味は Job の timings と同じ)")
+    per_window_ms: float | None = Field(None, description="窓 1 つあたりの平均(ms)")
+    realtime_factor: float | None = Field(None, description="実時間比(全体)")
+    decoders: dict[str, int] = Field(description="映像の復号に使った方式ごとのジョブ数")
+
+
+class StatsResponse(BaseModel):
+    jobs: int = Field(description="集計したジョブの数(処理時間を記録した完了済みのもの)")
+    by_kind: dict[str, KindStats] = Field(description="取り込み元の種類(video / audio / image)ごとの集計")
+
+
 class Deleted(BaseModel):
     deleted: int
 

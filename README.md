@@ -141,6 +141,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `IMAGE_MAX_SIDE` | `448` | 画像を縮小する長辺(px) |
 | `FFMPEG_HWACCEL` | `auto` | 動画の復号に使う GPU(`auto` / `cuda` / `vaapi` / `qsv` / `none`)。使えない場合は CPU に切り替える(`docs/gpu.md`) |
 | `FFMPEG_HWACCEL_DEVICE` | (空) | GPU 復号のデバイス(例 `/dev/dri/renderD128`)。空なら自動 |
+| `FFMPEG_SKIP_FRAMES` | `noref` | 動画の復号を省く範囲。`noref`(参照されないフレームを省く。時刻のずれは 1〜2 フレーム)/ `none`(全フレーム)/ `keyframes`(キーフレームのみ。数倍速いが、時刻が数秒ずれることがある) |
 | `IMAGE_MAX_TOKENS` | `0` | 画像1枚あたりのトークン上限(0=モデル既定) |
 | `TOP_K` | `10` | 検索の既定件数 |
 | `DATA_DIR` | `/data` | DB・サムネイル・アップロード動画の保存先 |
@@ -181,6 +182,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `POST /api/ingest/frames` | 加工済みフレーム(+音声)の取り込み |
 | `POST /api/search/text` / `image` / `audio` | 検索(グループ ID・場所・期間・種別・最小スコアで絞り込み) |
 | `GET /api/jobs`, `/api/sources`, `/api/sources/{id}` ほか | ジョブ・取り込み元の確認、削除、再取り込み |
+| `GET /api/stats` | 取り込みの処理時間の集計(ジョブごとの内訳は `GET /api/jobs/{id}` の `timings`。`scripts/benchmark.py` で計測) |
 | `GET /api/media/{id}`, `/api/thumb/{id}` | 元動画(Range 対応)とサムネイル |
 | `/compute/*` | ベクトル化 API(ROLE=compute / all) |
 | `/mcp` | MCP サーバー(AI エージェント向け。ROLE=all / app) |

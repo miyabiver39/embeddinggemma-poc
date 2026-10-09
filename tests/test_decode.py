@@ -40,3 +40,11 @@ def test_audio_track_slices(tmp_path):
         assert track.slice(10_000, 11_000).size == 0  # 範囲外は空
     finally:
         track.close()
+
+
+@needs_ffmpeg
+def test_skip_modes_still_return_frames(tmp_path):
+    video = tmp_path / "v.mp4"
+    make_video(video, "red", seconds=2)
+    for skip in ("none", "noref", "keyframes"):
+        assert len(list(media.VideoFrameReader(video, step_ms=500, max_side=64, skip=skip))) >= 3
