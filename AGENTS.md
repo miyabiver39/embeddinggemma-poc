@@ -98,7 +98,9 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 ├── docs/                  design.md(設計書) operations.md(運用) gpu.md(GPU確認手順) security.md(セキュリティ対策) release.md(リリース)
 ├── src/mediasearch/
 │   ├── main.py            アプリ生成(ROLE で構成が変わる)
-│   ├── api.py             取り込み・検索・参照 API
+│   ├── api.py             取り込み・検索・参照 API(HTTP の入出力だけ)
+│   ├── service.py         検索・状態の処理(REST と MCP で共通)
+│   ├── schemas.py         API の要求・応答の型(OpenAPI に反映)
 │   ├── compute_api.py     ベクトル化 API(/compute/*)
 │   ├── pipeline.py        窓の計画と取り込みワーカー
 │   ├── ingest_files.py    取り込みの受付(検証・重複確認・フォルダ一括・ファイル名の日時)
@@ -110,7 +112,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 │   ├── embedders/         Embedder インターフェースと local / remote / dummy
 │   └── web/index.html     開発用 WebUI
 ├── tests/                 pytest(実モデルのテストは RUN_MODEL_TESTS=1 のときだけ)
-├── scripts/               release_report.py(脆弱性検査の結果をリリースノートにまとめる) badges.py(README のバッジ用データ)
+├── scripts/               release_report.py(脆弱性検査の結果をリリースノートにまとめる) badges.py(README のバッジ用データ) export_openapi.py(docs/openapi.json の書き出し)
 ├── docker/                Dockerfile(VARIANT=slim|cpu|cuda|rocm|intel)と entrypoint
 └── .github/               workflows/build.yml(テスト・ビルド・公開)、security.yml(SBOM・脆弱性検査)、codeql.yml(静的解析)、scorecard.yml(OpenSSF Scorecard)、dependabot.yml
 ```
@@ -153,6 +155,7 @@ EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:creat
 - 1つのコミットで1つの変更にします。ドキュメントだけの変更は分けます。
 - コミットメッセージの末尾には、利用環境の指示(Co-Authored-By など)に従った行を付けます。
 - 設計に関わる変更では、`docs/design.md` を同じコミットで更新します。
+- API を変更したら `python scripts/export_openapi.py` で `docs/openapi.json` を更新します(古いとテストが失敗します)。
 - リリースはタグ `v*` の push で作成します。SBOM と脆弱性検査の結果は自動で添付されます(`docs/release.md`)。
 - README のバッジのうち、テスト件数・カバレッジ・脆弱性の件数は、CI が `badges` ブランチに書き出す JSON を表示しています(`scripts/badges.py`)。`badges` ブランチは手で編集しません。
 - 同梱物を追加・変更したときは、`THIRD_PARTY_NOTICES.md` のライセンスの一覧も更新します。

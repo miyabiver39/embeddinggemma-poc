@@ -1,0 +1,4125 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "mediasearch",
+    "summary": "EmbeddingGemma 2 を使った録画映像・音声・画像のマルチモーダル検索 API(開発用)",
+    "description": "\n録画映像・音声・画像を取り込み、**文章・画像・音声**で該当する場面を探すための API です。\n\n- 取り込み(`/api/ingest/*`)はバックグラウンドのジョブで行い、応答の `job_id` で進み具合を確認します\n  (`GET /api/jobs/{job_id}`)。\n- 検索(`/api/search/*`)は、スコア(コサイン類似度)の高い順に窓(時間の区切り、または静止画 1 枚)を返します。\n- 元ファイルは `GET /api/media/{source_id}`(Range 対応)、サムネイルは `GET /api/thumb/{window_id}` で取得します。\n- エラーは `{\"detail\": \"...\"}` の形で返します(説明は日本語)。\n\n**認証**: サーバに `API_TOKEN` が設定されている場合、`Authorization: Bearer <トークン>` か\n`X-API-Key: <トークン>` が必要です\n(右上の Authorize から設定できます)。設定されていない場合は不要です。\n\nAI エージェントからは、同じ機能を MCP(`/mcp`)で利用できます。\n開発者向けの説明は docs/api.md と docs/mcp.md を参照してください。\n",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/compute/info": {
+      "get": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "推論側の情報",
+        "operationId": "info_compute_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComputeInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/compute/embed/texts": {
+      "post": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "文章をベクトルにする",
+        "operationId": "embed_texts_compute_embed_texts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vectors"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/compute/embed/images": {
+      "post": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "画像をベクトルにする",
+        "operationId": "embed_images_compute_embed_images_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "files": {
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    },
+                    "type": "array",
+                    "description": "画像(JPEG など)"
+                  },
+                  "dims": {
+                    "type": "integer"
+                  },
+                  "high": {
+                    "type": "string",
+                    "description": "1 なら検索用の優先度で処理"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vectors"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/compute/embed/audio": {
+      "post": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "音声をベクトルにする",
+        "operationId": "embed_audio_compute_embed_audio_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "16bit PCM・16kHz・モノラル(リトルエンディアン)"
+                  },
+                  "dims": {
+                    "type": "integer"
+                  },
+                  "high": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vectors"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/compute/embed/parts": {
+      "post": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "文字・画像・音声を並べた順序のまま 1 ベクトルにする",
+        "description": "文字・画像・音声を、並べた順序のまま1ベクトルにします。",
+        "operationId": "embed_parts_compute_embed_parts_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "manifest": {
+                    "type": "string",
+                    "description": "JSON。[{\"type\": \"text\", \"text\": \"00:00\"}, {\"type\": \"image\", \"file\": \"f0\"}, ...]"
+                  },
+                  "dims": {
+                    "type": "integer"
+                  },
+                  "high": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vectors"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/info": {
+      "get": {
+        "tags": [
+          "状態"
+        ],
+        "summary": "状態・版・既定値・索引の件数",
+        "description": "推論側(モデル・デバイス)、アプリの版、取り込みの既定値とプリセット、索引の件数、監視フォルダの状態を返します。",
+        "operationId": "info_api_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfoResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/ingest/video": {
+      "post": {
+        "tags": [
+          "取り込み"
+        ],
+        "summary": "動画をアップロードして取り込む",
+        "description": "動画を受け付け、バックグラウンドの取り込みジョブを作ります。\n\n進み具合は `GET /api/jobs/{job_id}` で確認します。",
+        "operationId": "ingest_video_api_ingest_video_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_video_api_ingest_video_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "映像・音声・画像として扱えないファイル、または入力の検証エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/ingest/audio": {
+      "post": {
+        "tags": [
+          "取り込み"
+        ],
+        "summary": "音声をアップロードして取り込む",
+        "description": "音声を区切りごとにベクトルにします(窓の種類は audio)。",
+        "operationId": "ingest_audio_api_ingest_audio_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_audio_api_ingest_audio_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "映像・音声・画像として扱えないファイル、または入力の検証エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/ingest/image": {
+      "post": {
+        "tags": [
+          "取り込み"
+        ],
+        "summary": "画像をアップロードして取り込む(複数可)",
+        "description": "静止画を取り込みます。画像 1 枚が 1 件の取り込み元になります(動画から切り出せない場合など)。\n\n1 枚ずつ受け付け、取り込めない画像があっても残りは処理します(結果は items と errors に分けて返します)。",
+        "operationId": "ingest_image_api_ingest_image_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_image_api_ingest_image_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageBatchResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/ingest/path": {
+      "post": {
+        "tags": [
+          "取り込み"
+        ],
+        "summary": "コンテナ内のファイルを取り込む",
+        "description": "録画フォルダなどをマウントし、コンテナ内のパスで指定して取り込みます(アップロードより速い)。\n\n取り込み済みのファイルは重複として既存の取り込み元を返します(`force=true` で取り込み直し)。",
+        "operationId": "ingest_path_api_ingest_path_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestPathRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "許可していないフォルダ・別サイトからのリクエスト・ホスト名",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "映像・音声・画像として扱えないファイル、または入力の検証エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/ingest/dir": {
+      "post": {
+        "tags": [
+          "取り込み"
+        ],
+        "summary": "コンテナ内のフォルダを一括で取り込む",
+        "description": "フォルダの中の映像・音声・画像を、まとめて受け付けます。\n\n取り込み済みのファイルは飛ばすので、同じフォルダに何度実行しても重複しません。",
+        "operationId": "ingest_dir_api_ingest_dir_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestDirRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirIngestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "許可していないフォルダ・別サイトからのリクエスト・ホスト名",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "映像・音声・画像として扱えないファイル、または入力の検証エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/ingest/frames": {
+      "post": {
+        "tags": [
+          "取り込み"
+        ],
+        "summary": "加工済みのフレーム(と音声)を 1 窓として登録する",
+        "description": "利用側で切り出したフレームを渡して、その場で 1 つの窓にします(キューを通さない)。",
+        "operationId": "ingest_frames_api_ingest_frames_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_frames_api_ingest_frames_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FramesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "映像・音声・画像として扱えないファイル、または入力の検証エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/watch/scan": {
+      "post": {
+        "tags": [
+          "取り込み"
+        ],
+        "summary": "監視フォルダを今すぐ走査する",
+        "description": "次の定期走査を待たずに、監視フォルダ(WATCH_DIRS)の新しいファイルを受け付けます。",
+        "operationId": "watch_scan_api_watch_scan_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchScanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/search/text": {
+      "post": {
+        "tags": [
+          "検索"
+        ],
+        "summary": "文章で探す",
+        "description": "文章に近い場面(窓)を、スコアの高い順に返します。`kind=auto` は映像の窓と静止画を探します。",
+        "operationId": "search_text_api_search_text_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "推論側(compute)に接続できない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/search/image": {
+      "post": {
+        "tags": [
+          "検索"
+        ],
+        "summary": "画像で探す",
+        "description": "画像に似た場面を探します。`kind=auto` は映像の窓と静止画を探します。",
+        "operationId": "search_image_api_search_image_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_search_image_api_search_image_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "推論側(compute)に接続できない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/search/audio": {
+      "post": {
+        "tags": [
+          "検索"
+        ],
+        "summary": "音声で探す",
+        "description": "音声に似た区間を探します。`kind=auto` は音声のみで取り込んだ窓(audio)を探します。",
+        "operationId": "search_audio_api_search_audio_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_search_audio_api_search_audio_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "映像・音声・画像として扱えないファイル、または入力の検証エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "推論側(compute)に接続できない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/sources": {
+      "get": {
+        "tags": [
+          "取り込み元・ジョブ"
+        ],
+        "summary": "取り込み元の一覧",
+        "operationId": "list_sources_api_sources_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 1,
+              "description": "返す件数(新しい順)",
+              "default": 200,
+              "title": "Limit"
+            },
+            "description": "返す件数(新しい順)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/sources/{source_id}": {
+      "get": {
+        "tags": [
+          "取り込み元・ジョブ"
+        ],
+        "summary": "取り込み元の詳細",
+        "operationId": "get_source_api_sources__source_id__get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Source"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      },
+      "delete": {
+        "tags": [
+          "取り込み元・ジョブ"
+        ],
+        "summary": "取り込み元とベクトルを削除する",
+        "description": "取り込み元と、その窓(ベクトル)を削除します。アップロードしたファイルは消し、パス指定の元ファイルは消しません。",
+        "operationId": "delete_source_api_sources__source_id__delete",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deleted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/sources/{source_id}/reindex": {
+      "post": {
+        "tags": [
+          "取り込み元・ジョブ"
+        ],
+        "summary": "取り込み直す",
+        "description": "同じ設定で取り込み直します(古い窓は削除されます)。",
+        "operationId": "reindex_source_api_sources__source_id__reindex_post",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reindexed"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "許可していないフォルダ・別サイトからのリクエスト・ホスト名",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "tags": [
+          "取り込み元・ジョブ"
+        ],
+        "summary": "ジョブの一覧",
+        "operationId": "list_jobs_api_jobs_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 1,
+              "description": "返す件数(新しい順)",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "返す件数(新しい順)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "取り込み元・ジョブ"
+        ],
+        "summary": "ジョブの状態",
+        "description": "取り込みの進み具合(progress / total)と状態(queued / running / done / failed)を返します。",
+        "operationId": "get_job_api_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/media/{source_id}": {
+      "get": {
+        "tags": [
+          "配信"
+        ],
+        "summary": "元ファイル(Range 対応)",
+        "description": "元の動画・音声・画像を返します。Range リクエストに対応するため、動画は `#t=秒` で頭出し再生できます。",
+        "operationId": "get_media_api_media__source_id__get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "元のファイル(Content-Type はファイルの種類に合わせる。Range 指定時は 206)",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/thumb/{window_id}": {
+      "get": {
+        "tags": [
+          "配信"
+        ],
+        "summary": "窓のサムネイル(JPEG)",
+        "operationId": "get_thumb_api_thumb__window_id__get",
+        "parameters": [
+          {
+            "name": "window_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Window Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "長辺 320px の JPEG",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "tags": [
+          "状態"
+        ],
+        "summary": "死活監視(認証不要)",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Accepted": {
+        "properties": {
+          "source_id": {
+            "type": "integer",
+            "title": "Source Id",
+            "description": "取り込み元の ID"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "取り込みジョブの ID(重複のときは null)"
+          },
+          "duplicate": {
+            "type": "boolean",
+            "title": "Duplicate",
+            "description": "取り込み済みのファイルだった(新しいジョブは作っていない)"
+          },
+          "start_ts": {
+            "type": "string",
+            "title": "Start Ts",
+            "description": "録画開始(撮影)の日時。ISO 8601"
+          },
+          "start_ts_from": {
+            "type": "string",
+            "enum": [
+              "request",
+              "filename",
+              "exif",
+              "now",
+              "existing"
+            ],
+            "title": "Start Ts From",
+            "description": "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 受付時刻 / 取り込み済みの値)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "job_id",
+          "duplicate",
+          "start_ts",
+          "start_ts_from"
+        ],
+        "title": "Accepted",
+        "examples": [
+          {
+            "duplicate": false,
+            "job_id": 34,
+            "source_id": 12,
+            "start_ts": "2026-01-01T09:00:00",
+            "start_ts_from": "filename"
+          }
+        ]
+      },
+      "Body_ingest_audio_api_ingest_audio_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "音声ファイル(音声つきの動画も可。音声だけを使う)"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "任意のグループ ID"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "任意の場所の名前"
+          },
+          "start_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ts",
+            "description": "録音開始の日時"
+          },
+          "chunk_sec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Sec",
+            "description": "区切りの長さ(秒。既定は AUDIO_CHUNK_SEC)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_ingest_audio_api_ingest_audio_post"
+      },
+      "Body_ingest_frames_api_ingest_frames_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "フレームの画像(時刻の順)"
+          },
+          "times_ms": {
+            "type": "string",
+            "title": "Times Ms",
+            "description": "各画像の時刻(ミリ秒)。カンマ区切り"
+          },
+          "audio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio",
+            "description": "同じ区間の音声(任意)"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "取り込み元の名前"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "任意のグループ ID"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "任意の場所の名前"
+          },
+          "start_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ts",
+            "description": "区間の開始の日時"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files",
+          "times_ms"
+        ],
+        "title": "Body_ingest_frames_api_ingest_frames_post"
+      },
+      "Body_ingest_image_api_ingest_image_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "画像ファイル(複数可。JPEG / PNG / WebP / BMP / TIFF)"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "任意のグループ ID"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "任意の場所の名前"
+          },
+          "start_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ts",
+            "description": "撮影日時(省略時はファイル名・EXIF・受付時刻の順)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_ingest_image_api_ingest_image_post"
+      },
+      "Body_ingest_video_api_ingest_video_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "動画ファイル"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "任意のグループ ID"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "任意の場所の名前"
+          },
+          "start_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ts",
+            "description": "録画開始の日時(省略時はファイル名の日時、なければ受付時刻)"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset",
+            "description": "取り込みのプリセット(object / action / speech)"
+          },
+          "window_sec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Sec",
+            "description": "時間窓(秒)"
+          },
+          "frames_per_window": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frames Per Window",
+            "description": "窓あたりのフレーム数"
+          },
+          "overlap_sec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Sec",
+            "description": "窓の重なり(秒)"
+          },
+          "include_audio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Audio",
+            "description": "音声も同じベクトルに含める(true / false)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_ingest_video_api_ingest_video_post"
+      },
+      "Body_search_audio_api_search_audio_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "クエリの音声(先頭 60 秒まで使う)"
+          },
+          "top_k": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top K",
+            "description": "返す件数(省略時は TOP_K)"
+          },
+          "min_score": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Score",
+            "description": "これより低いスコアは返さない"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "グループ ID で絞り込む"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "場所で絞り込む"
+          },
+          "from_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Ts",
+            "description": "この日時以降(UNIX 秒か ISO 8601)"
+          },
+          "to_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Ts",
+            "description": "この日時以前(UNIX 秒か ISO 8601)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "all",
+              "frames",
+              "tav",
+              "audio",
+              "image"
+            ],
+            "title": "Kind",
+            "description": "探す窓の種類(auto は音声のみの窓)",
+            "default": "auto"
+          },
+          "merge": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merge",
+            "description": "隣り合う窓を区間にまとめた intervals も返す(既定 true)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_search_audio_api_search_audio_post"
+      },
+      "Body_search_image_api_search_image_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "クエリの画像(JPEG / PNG など)"
+          },
+          "top_k": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top K",
+            "description": "返す件数(省略時は TOP_K)"
+          },
+          "min_score": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Score",
+            "description": "これより低いスコアは返さない"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "グループ ID で絞り込む"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "場所で絞り込む"
+          },
+          "from_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Ts",
+            "description": "この日時以降(UNIX 秒か ISO 8601)"
+          },
+          "to_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Ts",
+            "description": "この日時以前(UNIX 秒か ISO 8601)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "all",
+              "frames",
+              "tav",
+              "audio",
+              "image"
+            ],
+            "title": "Kind",
+            "description": "探す窓の種類(auto は映像の窓と静止画)",
+            "default": "auto"
+          },
+          "merge": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merge",
+            "description": "隣り合う窓を区間にまとめた intervals も返す(既定 true)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_search_image_api_search_image_post"
+      },
+      "ComputeInfo": {
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "title": "Model Id"
+          },
+          "dims": {
+            "type": "integer",
+            "title": "Dims"
+          },
+          "dtype": {
+            "type": "string",
+            "title": "Dtype"
+          },
+          "device": {
+            "type": "string",
+            "title": "Device"
+          },
+          "accelerator": {
+            "type": "string",
+            "title": "Accelerator"
+          },
+          "modalities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Modalities"
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "model_id",
+          "dims",
+          "dtype",
+          "device",
+          "accelerator",
+          "modalities",
+          "backend"
+        ],
+        "title": "ComputeInfo"
+      },
+      "Deleted": {
+        "properties": {
+          "deleted": {
+            "type": "integer",
+            "title": "Deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deleted"
+        ],
+        "title": "Deleted"
+      },
+      "DirError": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "error"
+        ],
+        "title": "DirError"
+      },
+      "DirIngestResponse": {
+        "properties": {
+          "dir": {
+            "type": "string",
+            "title": "Dir"
+          },
+          "queued": {
+            "type": "integer",
+            "title": "Queued",
+            "description": "新しく受け付けた件数"
+          },
+          "duplicates": {
+            "type": "integer",
+            "title": "Duplicates",
+            "description": "取り込み済みのため対象外にした件数"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending",
+            "description": "書き込み中の可能性があるため後回しにした件数(監視フォルダのみ)"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/DirError"
+            },
+            "type": "array",
+            "title": "Errors",
+            "description": "取り込めなかったファイル"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DirItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dir",
+          "queued",
+          "duplicates",
+          "pending",
+          "errors",
+          "items"
+        ],
+        "title": "DirIngestResponse"
+      },
+      "DirItem": {
+        "properties": {
+          "source_id": {
+            "type": "integer",
+            "title": "Source Id",
+            "description": "取り込み元の ID"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "取り込みジョブの ID(重複のときは null)"
+          },
+          "duplicate": {
+            "type": "boolean",
+            "title": "Duplicate",
+            "description": "取り込み済みのファイルだった(新しいジョブは作っていない)"
+          },
+          "start_ts": {
+            "type": "string",
+            "title": "Start Ts",
+            "description": "録画開始(撮影)の日時。ISO 8601"
+          },
+          "start_ts_from": {
+            "type": "string",
+            "enum": [
+              "request",
+              "filename",
+              "exif",
+              "now",
+              "existing"
+            ],
+            "title": "Start Ts From",
+            "description": "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 受付時刻 / 取り込み済みの値)"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "job_id",
+          "duplicate",
+          "start_ts",
+          "start_ts_from",
+          "path"
+        ],
+        "title": "DirItem",
+        "examples": [
+          {
+            "duplicate": false,
+            "job_id": 34,
+            "source_id": 12,
+            "start_ts": "2026-01-01T09:00:00",
+            "start_ts_from": "filename"
+          }
+        ]
+      },
+      "EmbedderStatus": {
+        "properties": {
+          "backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backend",
+            "description": "local / remote / dummy"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "dims": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dims",
+            "description": "保存するベクトルの次元"
+          },
+          "dtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dtype"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device"
+          },
+          "accelerator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accelerator",
+            "description": "cpu / nvidia-cuda / amd-rocm / intel-xpu / dummy"
+          },
+          "modalities": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modalities"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "推論側に接続できない場合の理由"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "EmbedderStatus"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "description": "エラーの内容(日本語の説明。入力の検証エラーでは項目ごとの一覧)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorResponse",
+        "examples": [
+          {
+            "detail": "取り込み元が見つかりません"
+          }
+        ]
+      },
+      "FramesResponse": {
+        "properties": {
+          "source_id": {
+            "type": "integer",
+            "title": "Source Id"
+          },
+          "window_id": {
+            "type": "integer",
+            "title": "Window Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "frames",
+              "tav",
+              "audio",
+              "image"
+            ],
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "window_id",
+          "kind"
+        ],
+        "title": "FramesResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Health": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "title": "Status"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "all",
+              "app",
+              "compute"
+            ],
+            "title": "Role"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "role",
+          "version"
+        ],
+        "title": "Health"
+      },
+      "ImageBatchError": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "ファイル名"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "error"
+        ],
+        "title": "ImageBatchError"
+      },
+      "ImageBatchResponse": {
+        "properties": {
+          "queued": {
+            "type": "integer",
+            "title": "Queued",
+            "description": "受け付けた枚数"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Accepted"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ImageBatchError"
+            },
+            "type": "array",
+            "title": "Errors",
+            "description": "取り込めなかった画像"
+          }
+        },
+        "type": "object",
+        "required": [
+          "queued",
+          "items",
+          "errors"
+        ],
+        "title": "ImageBatchResponse"
+      },
+      "IndexStatus": {
+        "properties": {
+          "sources": {
+            "type": "integer",
+            "title": "Sources"
+          },
+          "windows": {
+            "type": "integer",
+            "title": "Windows"
+          },
+          "windows_by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Windows By Kind"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id",
+            "description": "DB を作ったときのモデル(未作成なら null)"
+          },
+          "dims": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dims"
+          },
+          "queue_size": {
+            "type": "integer",
+            "title": "Queue Size",
+            "description": "取り込みを待っているジョブの数"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "sources",
+          "windows",
+          "windows_by_kind",
+          "queue_size"
+        ],
+        "title": "IndexStatus"
+      },
+      "InfoResponse": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "version": {
+            "$ref": "#/components/schemas/VersionInfo"
+          },
+          "embedder": {
+            "$ref": "#/components/schemas/EmbedderStatus"
+          },
+          "defaults": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Defaults",
+            "description": "取り込みの既定値(窓の長さなど)"
+          },
+          "presets": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Presets",
+            "description": "取り込みのプリセット"
+          },
+          "index": {
+            "$ref": "#/components/schemas/IndexStatus"
+          },
+          "watch": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Watch",
+            "description": "監視フォルダの状態"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "role",
+          "version",
+          "embedder",
+          "defaults",
+          "presets",
+          "index",
+          "watch"
+        ],
+        "title": "InfoResponse"
+      },
+      "IngestDirRequest": {
+        "properties": {
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset",
+            "description": "取り込みのプリセット(object / action / speech)"
+          },
+          "window_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Sec",
+            "description": "1 つのベクトルにする時間窓(秒)"
+          },
+          "frames_per_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frames Per Window",
+            "description": "窓あたりのフレーム数"
+          },
+          "overlap_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Sec",
+            "description": "窓の重なり(秒)"
+          },
+          "include_audio": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Audio",
+            "description": "動画の音声も同じベクトルに含める"
+          },
+          "dir": {
+            "type": "string",
+            "title": "Dir",
+            "description": "コンテナ内のフォルダのパス(INGEST_ROOTS で許可したフォルダの下)"
+          },
+          "recursive": {
+            "type": "boolean",
+            "title": "Recursive",
+            "description": "下位のフォルダも対象にする",
+            "default": true
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "video",
+              "audio",
+              "image"
+            ],
+            "title": "Kind",
+            "description": "対象にする種類(auto は拡張子で判定し、映像・音声・画像のすべて)",
+            "default": "auto"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "任意のグループ ID"
+          },
+          "group_from_dir": {
+            "type": "boolean",
+            "title": "Group From Dir",
+            "description": "ファイルが入っているフォルダ名をグループ ID にする",
+            "default": false
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "任意の場所の名前"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "description": "取り込み済みでも、もう一度取り込む",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "dir"
+        ],
+        "title": "IngestDirRequest",
+        "examples": [
+          {
+            "dir": "/recordings",
+            "group_from_dir": true
+          }
+        ]
+      },
+      "IngestPathRequest": {
+        "properties": {
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset",
+            "description": "取り込みのプリセット(object / action / speech)"
+          },
+          "window_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Sec",
+            "description": "1 つのベクトルにする時間窓(秒)"
+          },
+          "frames_per_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frames Per Window",
+            "description": "窓あたりのフレーム数"
+          },
+          "overlap_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Sec",
+            "description": "窓の重なり(秒)"
+          },
+          "include_audio": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Audio",
+            "description": "動画の音声も同じベクトルに含める"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "コンテナ内のファイルのパス(INGEST_ROOTS で許可したフォルダの下)"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "任意のグループ ID(検索の絞り込みに使う)"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "任意の場所の名前(検索の絞り込みに使う)"
+          },
+          "start_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ts",
+            "description": "録画開始(撮影)の日時。UNIX 秒か ISO 8601。省略時はファイル名・EXIF・受付時刻の順"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "video",
+              "audio",
+              "image"
+            ],
+            "title": "Kind",
+            "description": "取り込む種類(auto は拡張子で判定)",
+            "default": "auto"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "description": "取り込み済みでも、もう一度取り込む",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "IngestPathRequest",
+        "examples": [
+          {
+            "path": "/recordings/group-a/20260101_090000.mp4"
+          }
+        ]
+      },
+      "Job": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "source_id": {
+            "type": "integer",
+            "title": "Source Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "progress": {
+            "type": "integer",
+            "title": "Progress",
+            "description": "処理済みの窓の数"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "窓の総数"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "number",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "source_id",
+          "status",
+          "progress",
+          "total",
+          "created_at"
+        ],
+        "title": "Job"
+      },
+      "JobList": {
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            },
+            "type": "array",
+            "title": "Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobs"
+        ],
+        "title": "JobList"
+      },
+      "Reindexed": {
+        "properties": {
+          "source_id": {
+            "type": "integer",
+            "title": "Source Id"
+          },
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "job_id"
+        ],
+        "title": "Reindexed"
+      },
+      "SearchHit": {
+        "properties": {
+          "window_id": {
+            "type": "integer",
+            "title": "Window Id",
+            "description": "窓(ベクトル)の ID。サムネイルの取得に使う"
+          },
+          "source_id": {
+            "type": "integer",
+            "title": "Source Id",
+            "description": "取り込み元の ID。元ファイルの取得に使う"
+          },
+          "start_ms": {
+            "type": "integer",
+            "title": "Start Ms",
+            "description": "取り込み元の先頭からの開始位置(ミリ秒)。静止画は 0"
+          },
+          "end_ms": {
+            "type": "integer",
+            "title": "End Ms",
+            "description": "終了位置(ミリ秒)。静止画は 0"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "frames",
+              "tav",
+              "audio",
+              "image"
+            ],
+            "title": "Kind"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "abs_ts": {
+            "type": "number",
+            "title": "Abs Ts",
+            "description": "窓の開始の日時(UNIX 秒)"
+          },
+          "abs_time": {
+            "type": "string",
+            "title": "Abs Time",
+            "description": "窓の開始の日時(ISO 8601)"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score",
+            "description": "コサイン類似度(-1〜1。大きいほど近い)"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "media_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Url",
+            "description": "元ファイルの URL(Range 対応。動画は #t=秒 で頭出しできる)"
+          },
+          "thumb_url": {
+            "type": "string",
+            "title": "Thumb Url",
+            "description": "サムネイル(JPEG)の URL"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "window_id",
+          "source_id",
+          "start_ms",
+          "end_ms",
+          "kind",
+          "abs_ts",
+          "abs_time",
+          "score",
+          "media_url",
+          "thumb_url"
+        ],
+        "title": "SearchHit"
+      },
+      "SearchInterval": {
+        "properties": {
+          "source_id": {
+            "type": "integer",
+            "title": "Source Id"
+          },
+          "start_ms": {
+            "type": "integer",
+            "title": "Start Ms"
+          },
+          "end_ms": {
+            "type": "integer",
+            "title": "End Ms"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score",
+            "description": "区間に含まれる窓の最大のスコア"
+          },
+          "window_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Window Ids"
+          },
+          "abs_ts": {
+            "type": "number",
+            "title": "Abs Ts"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "source_id",
+          "start_ms",
+          "end_ms",
+          "score",
+          "window_ids",
+          "abs_ts"
+        ],
+        "title": "SearchInterval"
+      },
+      "SearchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "type": "array",
+            "title": "Results",
+            "description": "スコアの高い順の窓"
+          },
+          "intervals": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SearchInterval"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intervals",
+            "description": "同じ取り込み元で隣り合う窓をまとめた区間(merge=true のとき)"
+          },
+          "took_ms": {
+            "type": "integer",
+            "title": "Took Ms",
+            "description": "DB の検索にかかった時間(ミリ秒)"
+          },
+          "embed_ms": {
+            "type": "integer",
+            "title": "Embed Ms",
+            "description": "クエリのベクトル化にかかった時間(ミリ秒)"
+          },
+          "searched_kinds": {
+            "type": "string",
+            "title": "Searched Kinds",
+            "description": "指定された kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results",
+          "took_ms",
+          "embed_ms",
+          "searched_kinds"
+        ],
+        "title": "SearchResponse"
+      },
+      "Source": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "video",
+              "audio",
+              "image",
+              "frames"
+            ],
+            "title": "Kind"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path",
+            "description": "ファイルのパス(加工済みフレームは null)"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "start_ts": {
+            "type": "number",
+            "title": "Start Ts",
+            "description": "録画開始(撮影)の日時(UNIX 秒)"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params",
+            "description": "取り込みの設定(窓の長さなど)"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "created_at": {
+            "type": "number",
+            "title": "Created At"
+          },
+          "window_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Count",
+            "description": "窓の数(一覧のときのみ)"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "path",
+          "name",
+          "start_ts",
+          "status",
+          "params",
+          "created_at"
+        ],
+        "title": "Source"
+      },
+      "SourceList": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources"
+        ],
+        "title": "SourceList"
+      },
+      "TextSearchRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Query",
+            "description": "探したい内容を表す文章(日本語・英語など)"
+          },
+          "top_k": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top K",
+            "description": "返す件数(省略時は TOP_K)"
+          },
+          "min_score": {
+            "type": "number",
+            "title": "Min Score",
+            "description": "これより低いスコアは返さない(該当なしを判定するため)",
+            "default": 0.0
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "グループ ID で絞り込む"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "場所で絞り込む"
+          },
+          "from_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Ts",
+            "description": "この日時以降(UNIX 秒か ISO 8601)"
+          },
+          "to_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Ts",
+            "description": "この日時以前(UNIX 秒か ISO 8601)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "all",
+              "frames",
+              "tav",
+              "audio",
+              "image"
+            ],
+            "title": "Kind",
+            "description": "探す窓の種類",
+            "default": "auto"
+          },
+          "merge": {
+            "type": "boolean",
+            "title": "Merge",
+            "description": "隣り合う窓を区間にまとめた intervals も返す",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "TextSearchRequest",
+        "examples": [
+          {
+            "from_ts": "2026-01-01T00:00:00",
+            "min_score": 0.3,
+            "query": "赤い車が通り過ぎる",
+            "top_k": 10
+          }
+        ]
+      },
+      "TextsRequest": {
+        "properties": {
+          "texts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Texts",
+            "description": "ベクトル化する文章"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "query",
+              "document"
+            ],
+            "title": "Kind",
+            "description": "検索文(query)か、検索される側の文書(document)か",
+            "default": "query"
+          },
+          "dims": {
+            "type": "integer",
+            "title": "Dims",
+            "description": "返す次元(768 / 512 / 256 / 128)",
+            "default": 768
+          }
+        },
+        "type": "object",
+        "required": [
+          "texts"
+        ],
+        "title": "TextsRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Vectors": {
+        "properties": {
+          "vectors": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Vectors",
+            "description": "L2 正規化済みのベクトル"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vectors"
+        ],
+        "title": "Vectors"
+      },
+      "VersionInfo": {
+        "properties": {
+          "app": {
+            "type": "string",
+            "title": "App",
+            "description": "アプリの版"
+          },
+          "variant": {
+            "type": "string",
+            "title": "Variant",
+            "description": "イメージの種類(slim / cpu / cuda / rocm / intel。ソースから動かすと source)"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision",
+            "description": "ビルド元のコミット"
+          },
+          "build_ref": {
+            "type": "string",
+            "title": "Build Ref",
+            "description": "ビルド元のタグ・ブランチ"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "app",
+          "variant",
+          "revision",
+          "build_ref"
+        ],
+        "title": "VersionInfo"
+      },
+      "WatchScanResponse": {
+        "properties": {
+          "queued": {
+            "type": "integer",
+            "title": "Queued"
+          },
+          "watch": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Watch"
+          }
+        },
+        "type": "object",
+        "required": [
+          "queued",
+          "watch"
+        ],
+        "title": "WatchScanResponse"
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API_TOKEN の値"
+      },
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "API_TOKEN の値"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "状態",
+      "description": "サーバの状態と版の確認"
+    },
+    {
+      "name": "取り込み",
+      "description": "映像・音声・画像の登録(アップロード、コンテナ内のパス、フォルダ一括、監視フォルダ)"
+    },
+    {
+      "name": "検索",
+      "description": "文章・画像・音声による検索。グループ ID・場所・期間・種類・最小スコアで絞り込めます"
+    },
+    {
+      "name": "取り込み元・ジョブ",
+      "description": "登録したファイルと取り込みジョブの確認・削除・取り込み直し"
+    },
+    {
+      "name": "配信",
+      "description": "元ファイルとサムネイルの取得"
+    },
+    {
+      "name": "compute",
+      "description": "ベクトル化だけを行う API(ROLE=compute / all)。app から内部的に使います"
+    }
+  ]
+}

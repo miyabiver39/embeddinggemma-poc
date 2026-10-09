@@ -181,11 +181,12 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `GET /api/media/{id}`, `/api/thumb/{id}` | 元動画(Range 対応)とサムネイル |
 | `/compute/*` | ベクトル化 API(ROLE=compute / all) |
 
-詳細は `/docs`(Swagger UI)と [docs/design.md](docs/design.md)。
+詳細は `/docs`(Swagger UI)、`/redoc`、[docs/api.md](docs/api.md)(開発者向けガイド)、[docs/openapi.json](docs/openapi.json)(OpenAPI の仕様書)を参照してください。
 
 ## ドキュメント
 
 - [docs/design.md](docs/design.md) — 設計書(構成、窓の設計、DB、API、ネイティブ化の計画)
+- [docs/api.md](docs/api.md) — API ガイド(認証、エラー、使い方の例、クライアントの自動生成)
 - [docs/operations.md](docs/operations.md) — 運用メモ(容量見積もり、チューニング、トラブルシュート)
 - [docs/gpu.md](docs/gpu.md) — GPU モード(RTX 3060 / RX 9060 XT / Intel)の確認手順
 - [docs/release.md](docs/release.md) — リリースの手順と、添付する SBOM・脆弱性検査結果

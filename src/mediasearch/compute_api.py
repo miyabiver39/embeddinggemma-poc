@@ -13,16 +13,20 @@ import json
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
 
 from .embedders import AudioPart, Embedder, ImagePart, Part, TextPart, finalize
 from .embedders.wire import bytes_to_pcm, jpeg_to_image
+from .schemas import ComputeInfo, TextsRequest, Vectors, errors
 
 
-class TextsRequest(BaseModel):
-    texts: list[str]
-    kind: str = Field(default="query", pattern="^(query|document)$")
-    dims: int = 768
+def _multipart(properties: dict) -> dict:
+    """multipart で受け取る項目を OpenAPI の仕様書に載せます(本文を自前で解析しているため、自動では載らない)。"""
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {"multipart/form-data": {"schema": {"type": "object", "properties": properties}}},
+        }
+    }
 
 
 def build_compute_router(embedder: Embedder) -> APIRouter:
@@ -38,16 +42,14 @@ def build_compute_router(embedder: Embedder) -> APIRouter:
         if requested not in (768, 512, 256, 128):
             raise HTTPException(400, "dims は 768 / 512 / 256 / 128 のいずれかにしてください")
         if requested > own_dims:
-            raise HTTPException(
-                400, f"dims={requested} は compute の次元({own_dims})より大きいため返せません"
-            )
+            raise HTTPException(400, f"dims={requested} は compute の次元({own_dims})より大きいため返せません")
         return requested
 
     def _vectors(array: np.ndarray, dims: int) -> dict:
         array = np.atleast_2d(array)
         return {"vectors": finalize(array, dims).tolist()}
 
-    @router.get("/info")
+    @router.get("/info", summary="推論側の情報", response_model=ComputeInfo, responses=errors(401))
     def info() -> dict:
         i = embedder.info()
         return {
@@ -60,13 +62,29 @@ def build_compute_router(embedder: Embedder) -> APIRouter:
             "backend": i.backend,
         }
 
-    @router.post("/embed/texts")
+    @router.post("/embed/texts", summary="文章をベクトルにする", response_model=Vectors, responses=errors(400, 401))
     async def embed_texts(body: TextsRequest) -> dict:
         dims = _dims(body.dims)
         vectors = await run_in_threadpool(embedder.embed_texts, body.texts, body.kind)
         return _vectors(vectors, dims)
 
-    @router.post("/embed/images")
+    @router.post(
+        "/embed/images",
+        summary="画像をベクトルにする",
+        response_model=Vectors,
+        responses=errors(400, 401, 413),
+        openapi_extra=_multipart(
+            {
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string", "format": "binary"},
+                    "description": "画像(JPEG など)",
+                },
+                "dims": {"type": "integer"},
+                "high": {"type": "string", "description": "1 なら検索用の優先度で処理"},
+            }
+        ),
+    )
     async def embed_images(request: Request) -> dict:
         form = await request.form()
         dims = _dims(form.get("dims", own_dims))
@@ -77,7 +95,23 @@ def build_compute_router(embedder: Embedder) -> APIRouter:
         vectors = await run_in_threadpool(embedder.embed_images, images, high)
         return _vectors(vectors, dims)
 
-    @router.post("/embed/audio")
+    @router.post(
+        "/embed/audio",
+        summary="音声をベクトルにする",
+        response_model=Vectors,
+        responses=errors(400, 401, 413),
+        openapi_extra=_multipart(
+            {
+                "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "16bit PCM・16kHz・モノラル(リトルエンディアン)",
+                },
+                "dims": {"type": "integer"},
+                "high": {"type": "string"},
+            }
+        ),
+    )
     async def embed_audio(request: Request) -> dict:
         form = await request.form()
         dims = _dims(form.get("dims", own_dims))
@@ -89,7 +123,22 @@ def build_compute_router(embedder: Embedder) -> APIRouter:
         vector = await run_in_threadpool(embedder.embed_audio, pcm, high)
         return _vectors(vector, dims)
 
-    @router.post("/embed/parts")
+    @router.post(
+        "/embed/parts",
+        summary="文字・画像・音声を並べた順序のまま 1 ベクトルにする",
+        response_model=Vectors,
+        responses=errors(400, 401, 413),
+        openapi_extra=_multipart(
+            {
+                "manifest": {
+                    "type": "string",
+                    "description": 'JSON。[{"type": "text", "text": "00:00"}, {"type": "image", "file": "f0"}, ...]',
+                },
+                "dims": {"type": "integer"},
+                "high": {"type": "string"},
+            }
+        ),
+    )
     async def embed_parts(request: Request) -> dict:
         """文字・画像・音声を、並べた順序のまま1ベクトルにします。"""
         form = await request.form()
