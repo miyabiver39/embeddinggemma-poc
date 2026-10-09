@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
@@ -264,6 +265,12 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     @app.exception_handler(InvalidInput)
     async def _invalid_input(_: Request, exc: InvalidInput) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    @app.exception_handler(sqlite3.Error)
+    async def _db_error(_: Request, exc: sqlite3.Error) -> JSONResponse:
+        # 想定外の DB のエラーも、原因の手がかりを返す(素の 500 では利用側が切り分けられないため)
+        log.exception("DB の処理に失敗しました")
+        return JSONResponse({"detail": f"DB の処理に失敗しました: {exc}"}, status_code=500)
 
     @app.exception_handler(IndexMismatch)
     async def _index_mismatch(_: Request, exc: IndexMismatch) -> JSONResponse:

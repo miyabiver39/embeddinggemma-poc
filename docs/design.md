@@ -50,10 +50,12 @@
 
 | テーブル | 内容 |
 |---|---|
-| `meta` | `model_id`, `dims`, スキーマ版。**不一致は `IndexMismatch`(HTTP 409)で拒否** |
+| `meta` | `model_id`, `dims`, `schema_version`(DB の形式の版)。**モデル・次元の不一致は `IndexMismatch`(HTTP 409)で拒否** |
 | `sources` | 取り込み元(動画/音声)。パス、グループ ID、場所、開始絶対時刻、設定、状態。パスに索引(重複確認用) |
 | `windows` | `source_id`, `start_ms`, `end_ms`, `kind`, `vector`(float32 BLOB) |
 | `jobs` | 取り込みジョブ(進捗・エラー)。再起動時に未完了ジョブを再開 |
+
+起動時に、以前の版で作った DB を現在の形式に移行する(`Store._migrate()`。列の改名など)。移行できない形式なら、理由を示して起動を止める。
 
 検索: kind ごとの行列を numpy にキャッシュし、`行列 @ クエリ` の総当たりでコサイン類似度(正規化済み)。
 絞り込み(グループ ID・場所・期間・source_id・最小スコア)は配列マスクで適用。隣接する窓は結果の `intervals` に連結して返す。

@@ -38,8 +38,6 @@ CREATE TABLE IF NOT EXISTS sources (
   error TEXT,
   created_at REAL NOT NULL
 );
--- 同じファイルの重複取り込みを確認するため(監視フォルダでは定期的に全件を照合する)
-CREATE INDEX IF NOT EXISTS idx_sources_path ON sources(path);
 
 CREATE TABLE IF NOT EXISTS windows (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +49,6 @@ CREATE TABLE IF NOT EXISTS windows (
   abs_ts REAL NOT NULL,          -- 窓の開始時刻(UNIX 秒) = source.start_ts + start_ms / 1000
   vec BLOB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_windows_source ON windows(source_id);
 
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +63,31 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 """
 
+# 索引は、以前の版の DB を移行した後に作る(移行前の列名のままだと作れないため)
+INDEXES = """
+-- 同じファイルの重複取り込みを確認するため(監視フォルダでは定期的に全件を照合する)
+CREATE INDEX IF NOT EXISTS idx_sources_path ON sources(path);
+CREATE INDEX IF NOT EXISTS idx_windows_source ON windows(source_id);
+"""
+
 WINDOW_KINDS = ("frames", "tav", "audio", "image")
+
+# DB の形式の版。列の追加・改名をしたら上げ、_migrate() に移行の処理を足す
+SCHEMA_VERSION = 2
+# 旧い版で使っていた列名 → 現在の列名(以前の版の DB をそのまま使い続けられるよう、起動時に改名する)
+_RENAMED_COLUMNS = {
+    "sources": {"camera_id": "group_id"},
+    "windows": {"camera_id": "group_id"},
+}
+_REQUIRED_COLUMNS = {
+    "sources": {"id", "kind", "path", "name", "group_id", "location", "start_ts", "status", "params"},
+    "windows": {"id", "source_id", "start_ms", "end_ms", "kind", "group_id", "abs_ts", "vec"},
+    "jobs": {"id", "source_id", "status", "progress", "total"},
+}
+
+
+class SchemaError(RuntimeError):
+    """DB の形式が、この版で扱えないときのエラー。"""
 
 
 class IndexMismatch(RuntimeError):
@@ -83,8 +104,47 @@ class Store:
         self._db.execute("PRAGMA foreign_keys=ON")
         self._db.executescript(SCHEMA)
         self._db.commit()
+        self._migrate()
+        self._db.executescript(INDEXES)
+        self._db.commit()
         self.path = path
         self._cache: dict[str, Any] | None = None
+
+    # ------------------------------------------------------------------ DB の形式の移行
+    def _columns(self, table: str) -> set[str]:
+        return {r["name"] for r in self._db.execute(f"PRAGMA table_info({table})")}
+
+    def _migrate(self) -> None:
+        """以前の版で作った DB を、現在の形式に合わせます(起動時に 1 回)。
+
+        CREATE TABLE IF NOT EXISTS は既存の表を変更しないため、列の改名などはここで行います。
+        移行できない形式だった場合は、原因が分かるメッセージで起動を止めます
+        (そのまま動かすと、取り込みや検索のたびに SQL のエラーで 500 になるため)。
+        """
+        renamed = []
+        with self._db:  # 失敗したら途中の変更を取り消す
+            for table, renames in _RENAMED_COLUMNS.items():
+                cols = self._columns(table)
+                for old, new in renames.items():
+                    if old in cols and new not in cols:
+                        self._db.execute(f"ALTER TABLE {table} RENAME COLUMN {old} TO {new}")
+                        renamed.append(f"{table}.{old} → {new}")
+            for table, required in _REQUIRED_COLUMNS.items():
+                missing = required - self._columns(table)
+                if missing:
+                    raise SchemaError(
+                        f"DB({table} 表)に必要な列がありません: {', '.join(sorted(missing))}。"
+                        "別のアプリの DB か、壊れている可能性があります。DATA_DIR を確認してください"
+                    )
+            self._db.execute(
+                "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(SCHEMA_VERSION),),
+            )
+        if renamed:
+            import logging
+
+            logging.getLogger(__name__).warning("以前の版の DB を現在の形式に移行しました: %s", ", ".join(renamed))
 
     # ------------------------------------------------------------------ メタ情報
     def get_meta(self, key: str) -> str | None:
