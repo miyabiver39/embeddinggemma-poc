@@ -17,6 +17,8 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # main への push 時に、README のバッジ(テスト件数・カバレッジ)を badges ブランチに書くため
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,8 +26,16 @@ jobs:
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pip install -e ".[dev]"
-      - run: ruff check src tests
-      - run: pytest -q -m "not model"
+      - run: ruff check src tests scripts
+      - run: pytest -q -m "not model" --cov=mediasearch --cov-report=term --cov-report=json:coverage.json --junitxml=junit.xml
+      - name: README のバッジを更新する(main への push のときだけ)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/badges.py coverage coverage.json badges/coverage.json
+          python3 scripts/badges.py tests junit.xml badges/tests.json
+          python3 scripts/badges.py publish badges --message "テスト件数とカバレッジを更新(${GITHUB_SHA::7})"
 
   image:
     needs: test
