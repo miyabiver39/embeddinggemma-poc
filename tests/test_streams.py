@@ -14,6 +14,7 @@ from conftest import make_video, needs_ffmpeg
 from fastapi.testclient import TestClient
 
 from mediasearch import streams
+from mediasearch.embedders.dummy import DummyEmbedder
 from mediasearch.main import create_app
 from mediasearch.pipeline import IngestParams
 from mediasearch.streams import StreamError, decode_step_for, mask_url, validate_url
@@ -85,3 +86,40 @@ def test_stream_worker_creates_windows_while_receiving(settings, tmp_path, monke
         stopped = c.post(f"/api/streams/{stream_id}/stop").json()
         assert stopped["enabled"] is False and stopped["state"]["status"] == "stopped"
 
+
+
+class _SlowEmbedder(DummyEmbedder):
+    """推論が遅い環境(CPU など)を再現する。"""
+
+    def embed_parts(self, parts, high=False):
+        time.sleep(4)  # 2 秒の窓に 4 秒かかる(実時間に追いつけない)
+        return super().embed_parts(parts, high=high)
+
+
+@needs_ffmpeg
+def test_slow_inference_drops_old_windows_instead_of_piling_up(settings, tmp_path, monkeypatch):
+    monkeypatch.setattr(streams, "PROTOCOL_WHITELIST", streams.PROTOCOL_WHITELIST + ",file")
+    monkeypatch.setattr(streams, "LAG_WINDOWS", 1)
+    monkeypatch.setattr(streams, "MIN_LAG_MS", 0)
+    video = tmp_path / "cam.mp4"
+    make_video(video, "blue", seconds=10)
+    with TestClient(create_app(settings, embedder=_SlowEmbedder(768))) as c:
+        manager = c.app.state.ctx.streams
+        store = manager._store
+        params = IngestParams(2, 1, 0, False)
+        source_id = store.add_source(kind="stream", path=None, name="slow", group_id=None, location=None,
+                                     start_ts=time.time(), params=params.to_dict(), status="running")  # fmt: skip
+        stream_id = store.add_stream(name="slow", url=f"file:{video}", group_id=None, location=None,
+                                     params=params.to_dict(), source_id=source_id)  # fmt: skip
+        manager._start_worker(store.get_stream(stream_id))
+        deadline = time.time() + 30
+        state = {}
+        while time.time() < deadline:
+            state = c.get(f"/api/streams/{stream_id}").json()["state"]
+            if state["status"] == "retrying":  # ファイルの終わりまで受信した
+                break
+            time.sleep(0.3)
+        # フレームは推論の速さに関係なく受け取り続け、追いつけない窓は捨てる(溜め込まない)
+        assert state["frames"] >= 9, state  # 10 秒・1 秒ごと
+        assert state["dropped_windows"] >= 1 and state["windows"] >= 1, state
+        c.post(f"/api/streams/{stream_id}/stop")

@@ -40,6 +40,9 @@ ALLOWED_SCHEMES = ("rtsp", "rtsps")
 PROTOCOL_WHITELIST = "rtsp,rtsps,tcp,udp,tls,rtp,srtp,crypto"
 CONNECT_TIMEOUT_SEC = 15
 STALL_SEC = 30  # この秒数フレームが届かなければ、切断とみなして接続し直す
+# 窓の作成がこれだけ遅れたら、古い窓を捨てる(窓の長さの倍数と、下限 ms の大きい方)
+LAG_WINDOWS = 3
+MIN_LAG_MS = 10_000
 MAX_BACKOFF_SEC = 60
 
 
@@ -259,34 +262,65 @@ class StreamWorker:
         held: dict[int, np.ndarray] = {}
         n = 0  # 次に作る窓
         latest = -1
+        ended = False
+
+        def take(item) -> None:
+            nonlocal latest, wall0, ended
+            if item is None:
+                ended = True
+                return
+            k, frame = item
+            if wall0 is None:
+                wall0 = time.time()
+                self.state.update(status="running", connected_at=wall0, error=None)
+            latest = k
+            held[k] = frame
+            self.state["frames"] += 1
+            self.state["last_frame_at"] = time.time()
+
+        def prune() -> None:
+            """次の窓より前のフレームと音声を捨てる。"""
+            nonlocal audio_base
+            keep = (n * stride) // step
+            for i in [i for i in held if i < keep]:
+                del held[i]
+            if use_audio:
+                with audio_lock:
+                    drop = (n * stride) * SAMPLE_RATE // 1000 - audio_base
+                    if drop > 0:
+                        del audio_buf[: 2 * drop]
+                        audio_base += drop
+
         try:
             while not self._stop.is_set():
                 try:
-                    item = frames.get(timeout=STALL_SEC)
+                    take(frames.get(timeout=STALL_SEC))
                 except queue.Empty:
                     raise media.MediaError(f"{STALL_SEC} 秒間フレームが届きません") from None
-                if item is None:
+                # 推論の間に届いたフレームを、まとめて受け取る(遅れを正しく測り、古い窓を捨てるため)
+                while not ended:
+                    try:
+                        take(frames.get_nowait())
+                    except queue.Empty:
+                        break
+                if ended and latest < 0:
                     err = proc.stderr.read().decode("utf-8", "replace").strip() if proc.stderr else ""
-                    if latest < 0 and hw:
+                    if hw:
                         self._hw_failed = True  # GPU で復号できなかった。次の接続から CPU で復号する
                     raise media.MediaError(" / ".join(err.splitlines()[-2:]) or "ストリームが終了しました")
-                k, frame = item
-                if wall0 is None:
-                    wall0 = time.time()
-                    self.state.update(status="running", connected_at=wall0, error=None)
-                latest = k
-                held[k] = frame
-                self.state["frames"] += 1
-                self.state["last_frame_at"] = time.time()
 
                 # 推論が遅れている場合は、古い窓を捨てて追いつく
-                max_lag = max(3 * window_ms, 10_000)
+                max_lag = max(LAG_WINDOWS * window_ms, MIN_LAG_MS)
+                dropped = 0
                 while (latest * step) - (n * stride + window_ms) > max_lag:
                     n += 1
-                    self.state["dropped_windows"] += 1
+                    dropped += 1
+                if dropped:
+                    self.state["dropped_windows"] += dropped
+                    prune()
                 self.state["lag_ms"] = max(0, latest * step - (n * stride + window_ms))
 
-                while True:
+                while not self._stop.is_set():
                     start = n * stride
                     need = [(start + off) // step for off in offsets]
                     if latest < max(need):
@@ -303,16 +337,13 @@ class StreamWorker:
                     if picked:
                         self._store_window(source, wall0, start, window_ms, picked, slices)
                     n += 1
-                    # 次の窓で使わないフレームと音声を捨てる
-                    keep = (n * stride) // step
-                    for i in [i for i in held if i < keep]:
-                        del held[i]
-                    if use_audio:
-                        with audio_lock:
-                            drop = (n * stride) * SAMPLE_RATE // 1000 - audio_base
-                            if drop > 0:
-                                del audio_buf[: 2 * drop]
-                                audio_base += drop
+                    prune()
+                    # 推論の間に届いたフレームを取り込み、遅れていれば次のループで古い窓を捨てる
+                    if not frames.empty():
+                        break
+                if ended:
+                    err = proc.stderr.read().decode("utf-8", "replace").strip() if proc.stderr else ""
+                    raise media.MediaError(" / ".join(err.splitlines()[-2:]) or "ストリームが終了しました")
         finally:
             if proc.poll() is None:
                 proc.kill()
