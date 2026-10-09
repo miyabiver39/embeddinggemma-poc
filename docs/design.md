@@ -91,6 +91,13 @@
 以前は任意のパスを登録でき、取り込みに失敗しても登録が残るため、コンテナ内の任意のファイル(`/etc/shadow` など)を返せてしまっていた。
 あわせて、パス指定で取り込めるのは `INGEST_ROOTS`(既定 `/recordings` と `DATA_DIR`、監視フォルダは自動で追加)の下だけとし、配信時にも同じ範囲を確認する。
 
+### MCP サーバー(`mcp_server.py`)
+
+- `/mcp` に Streamable HTTP の MCP サーバーを置く(ROLE=all / app)。状態を持たない方式(stateless)・JSON 応答にして、セッション管理を不要にする。
+- 処理は REST と同じ `service.py` / `ingest_files.py` を使う。認証・CSRF・本文の上限は同じミドルウェアがかかる。
+- SDK の DNS リバインディング対策は無効にし、`security.py` の `ALLOWED_HOSTS` に一本化する(SDK の既定は localhost 以外を拒否し、コンテナの外から使えないため)。
+- 削除は MCP に出さない(エージェントの誤操作を避けるため)。検索結果は判断に要る項目だけに絞り、サムネイルは画像として返す。
+
 ### HTTP の入口(`security.py`)
 
 認証(`API_TOKEN`)・CSRF の防止・Host の確認・本文の上限・応答ヘッダーを、1 つの ASGI ミドルウェアで行う。

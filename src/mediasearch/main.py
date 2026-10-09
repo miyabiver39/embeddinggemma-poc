@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -152,8 +152,13 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
         watcher = FolderWatcher(s, store, intake)
         _warn_if_incompatible(store, emb)
 
+    mcp_run = None  # MCP サーバーの起動・停止(ROLE=all / app のとき、下で設定する)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        stack = AsyncExitStack()
+        if mcp_run:
+            await stack.enter_async_context(mcp_run())
         if ingestor:
             ingestor.start()
         if watcher:
@@ -162,6 +167,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
         try:
             yield
         finally:
+            await stack.aclose()
             if watcher:
                 watcher.stop()
             if ingestor:
@@ -187,7 +193,12 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     if s.role in ("all", "compute"):
         app.include_router(build_compute_router(emb))
     if store and ingestor and intake and watcher:
-        app.include_router(build_api_router(Context(s, store, emb, ingestor, intake, watcher)))
+        ctx = Context(s, store, emb, ingestor, intake, watcher)
+        app.include_router(build_api_router(ctx))
+        # AI エージェント向けの MCP サーバー(/mcp)。REST と同じ処理・同じ認証で動く
+        from .mcp_server import build_mcp_server, mount_mcp
+
+        mcp_run = mount_mcp(app, build_mcp_server(ctx), s.max_upload_mb * 1024 * 1024)
 
     @app.get("/healthz", tags=["状態"], summary="死活監視(認証不要)", response_model=Health)
     def healthz() -> dict:

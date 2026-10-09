@@ -25,7 +25,8 @@ Google の [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) �
 
 - 取り込み(ffmpeg で時間窓に分割 → ベクトル化 → SQLite に保存)と検索を **1つのコンテナ**で提供
 - 動画・音声・画像・テキストを**同じベクトル空間**で検索(テキスト→映像、画像→映像、音声→音声 など)
-- 開発確認用の **WebUI** 付き(`http://localhost:8000/`)、API 仕様は `/docs`(Swagger UI)
+- 開発確認用の **WebUI** 付き(`http://localhost:8000/`)、API 仕様は `/docs`(Swagger UI)と [docs/openapi.json](docs/openapi.json)
+- **MCP サーバー**を内蔵(`http://localhost:8000/mcp`)。AI エージェントから検索・取り込みができます([docs/mcp.md](docs/mcp.md))
 - CPU / NVIDIA GPU / AMD GPU / Intel GPU に対応(イメージを選ぶだけ)
 - ビルドは GitHub Actions が行います。利用者は **`docker pull` / `docker run` だけ**です
 
@@ -180,6 +181,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `GET /api/jobs`, `/api/sources`, `/api/sources/{id}` ほか | ジョブ・取り込み元の確認、削除、再取り込み |
 | `GET /api/media/{id}`, `/api/thumb/{id}` | 元動画(Range 対応)とサムネイル |
 | `/compute/*` | ベクトル化 API(ROLE=compute / all) |
+| `/mcp` | MCP サーバー(AI エージェント向け。ROLE=all / app) |
 
 詳細は `/docs`(Swagger UI)、`/redoc`、[docs/api.md](docs/api.md)(開発者向けガイド)、[docs/openapi.json](docs/openapi.json)(OpenAPI の仕様書)を参照してください。
 
@@ -187,6 +189,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 
 - [docs/design.md](docs/design.md) — 設計書(構成、窓の設計、DB、API、ネイティブ化の計画)
 - [docs/api.md](docs/api.md) — API ガイド(認証、エラー、使い方の例、クライアントの自動生成)
+- [docs/mcp.md](docs/mcp.md) — MCP サーバー(AI エージェントからの利用)
 - [docs/operations.md](docs/operations.md) — 運用メモ(容量見積もり、チューニング、トラブルシュート)
 - [docs/gpu.md](docs/gpu.md) — GPU モード(RTX 3060 / RX 9060 XT / Intel)の確認手順
 - [docs/release.md](docs/release.md) — リリースの手順と、添付する SBOM・脆弱性検査結果

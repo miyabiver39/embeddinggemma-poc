@@ -38,6 +38,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 - 切り替えは環境変数 `EMBEDDING_BACKEND=local|remote` と `EMBEDDING_URL` で行います。
 - 映像・音声の加工(ffmpeg での分割・フレーム抽出・16kHzモノラル変換)は **app で行う**のが基本です。加工済みの入力を app に渡すことも許可します。
 - 用途ごとに細かく API を分けます(例: `/ingest/video`, `/ingest/frames`, `/ingest/audio`, `/search/text`, `/search/image`)。
+- AI エージェント向けに、同じ機能を MCP(`/mcp`、`mcp_server.py`)でも提供します。処理は `service.py` を共有し、REST と MCP で結果を変えません。新しい機能は、必要に応じて両方に追加します。
 - 取り込みと検索は**同じコンテナ**で動かします。取り込み中に検索が遅くならないよう、推論の並列数を制限し、検索用の経路を空けておきます。
 
 ## 4. ベクトルとDBのルール(重要)
@@ -101,6 +102,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 │   ├── api.py             取り込み・検索・参照 API(HTTP の入出力だけ)
 │   ├── service.py         検索・状態の処理(REST と MCP で共通)
 │   ├── schemas.py         API の要求・応答の型(OpenAPI に反映)
+│   ├── mcp_server.py      MCP サーバー(/mcp。AI エージェント向け)
 │   ├── compute_api.py     ベクトル化 API(/compute/*)
 │   ├── pipeline.py        窓の計画と取り込みワーカー
 │   ├── ingest_files.py    取り込みの受付(検証・重複確認・フォルダ一括・ファイル名の日時)

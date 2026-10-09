@@ -21,6 +21,7 @@
 | NumPy | 数値計算 | BSD-3-Clause ほか(同梱ライブラリを含む) |
 | Pillow | 画像処理 | MIT-CMU |
 | HTTPX | compute との通信 | BSD-3-Clause |
+| MCP Python SDK(`mcp`)と依存パッケージ(httpx2、sse-starlette など) | MCP サーバー | MIT(依存パッケージは BSD-3-Clause / MIT など) |
 
 ## モデルを同梱するイメージ(cpu / cuda / rocm / intel)
 
