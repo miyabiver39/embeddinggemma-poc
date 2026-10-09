@@ -4,8 +4,8 @@
 
 ## 起動と永続化
 
-- 保存先は `-v ./data:/data` で永続化します。中身: `mediasearch.db`(SQLite)、`thumbs/`、`media/`(アップロードした動画・音声)。
-- バックアップは `data/` を丸ごとコピー(停止中が安全。WAL を使うので稼働中は `mediasearch.db*` の3ファイルをまとめて)。
+- 保存先は `-v ./data:/data` で永続化します。中身: `mediasearch.db`(SQLite。設定・取り込み元・窓・ジョブ)、`vectors.usearch`(ベクトル DB)、`thumbs/`、`media/`(アップロードした動画・音声)。
+- バックアップは `data/` を丸ごとコピー(停止中が安全。ベクトル DB は停止時に必ず書き出すため、`mediasearch.db*` と `vectors.usearch` は停止してからまとめてコピーしてください)。
 - 停止・再起動しても未完了の取り込みジョブは再開されます。
 
 ## 取り込みのコツ

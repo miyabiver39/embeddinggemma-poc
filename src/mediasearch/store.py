@@ -1,15 +1,17 @@
-"""SQLite によるメタデータとベクトルの保存、およびベクトル検索。
+"""メタデータ(SQLite)とベクトル(USearch)の保存、およびベクトル検索。
 
-- ベクトルは BLOB(float32)として SQLite に保存します。
-- 検索は、全ベクトルをメモリに載せた総当たり(行列の内積)で行います。
-  ベクトルは正規化済みなので、内積はコサイン類似度と同じです。
-  数十万件程度までは十分速い想定です。それ以上は、専用のベクトル DB への移行を検討してください。
-- グループ ID や時刻などのメタデータは、ベクトルに埋め込まず、別の列として保存して絞り込みに使います。
+- 取り込み元・窓・ジョブ・設定は SQLite(DATA_DIR/mediasearch.db)に保存します。
+- ベクトルは、組み込み型のベクトル DB の USearch(DATA_DIR/vectors.usearch。vectors.py)に、
+  窓の ID をキーにして保存します。
+- グループ ID や時刻などのメタデータは、ベクトルに埋め込まず、SQLite の列として保存して絞り込みに使います。
+- 以前の版(ベクトルを SQLite の BLOB に保存していた)の DB は、起動時にベクトルを USearch へ移し、
+  SQLite から列を削除します。
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -17,6 +19,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from .vectors import IndexMismatch, VectorIndex
+
+__all__ = ["IndexMismatch", "SchemaError", "Store", "WINDOW_KINDS", "SCHEMA_VERSION"]
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -46,8 +53,7 @@ CREATE TABLE IF NOT EXISTS windows (
   end_ms INTEGER NOT NULL,
   kind TEXT NOT NULL,            -- frames(映像のみ) / tav(映像+音声) / audio(音声のみ) / image(静止画 1 枚)
   group_id TEXT,
-  abs_ts REAL NOT NULL,          -- 窓の開始時刻(UNIX 秒) = source.start_ts + start_ms / 1000
-  vec BLOB NOT NULL
+  abs_ts REAL NOT NULL           -- 窓の開始時刻(UNIX 秒) = source.start_ts + start_ms / 1000
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
@@ -74,7 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_windows_source ON windows(source_id);
 WINDOW_KINDS = ("frames", "tav", "audio", "image")
 
 # DB の形式の版。列の追加・改名をしたら上げ、_migrate() に移行の処理を足す
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 # 旧い版で使っていた列名 → 現在の列名(以前の版の DB をそのまま使い続けられるよう、起動時に改名する)
 _RENAMED_COLUMNS = {
     "sources": {"camera_id": "group_id"},
@@ -86,7 +92,7 @@ _ADDED_COLUMNS = {
 }
 _REQUIRED_COLUMNS = {
     "sources": {"id", "kind", "path", "name", "group_id", "location", "start_ts", "status", "params"},
-    "windows": {"id", "source_id", "start_ms", "end_ms", "kind", "group_id", "abs_ts", "vec"},
+    "windows": {"id", "source_id", "start_ms", "end_ms", "kind", "group_id", "abs_ts"},
     "jobs": {"id", "source_id", "status", "progress", "total"},
 }
 
@@ -95,12 +101,8 @@ class SchemaError(RuntimeError):
     """DB の形式が、この版で扱えないときのエラー。"""
 
 
-class IndexMismatch(RuntimeError):
-    """DB に記録されたモデル・次元と、現在の設定が一致しないときのエラー。"""
-
-
 class Store:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, vector_path: Path | None = None, save_interval_sec: float = 10.0) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._db = sqlite3.connect(path, check_same_thread=False)
@@ -114,6 +116,11 @@ class Store:
         self._db.commit()
         self.path = path
         self._cache: dict[str, Any] | None = None
+        self._pending: list[tuple] = []  # 検索用のメタデータに、まだ反映していない追加分
+        self.vectors = VectorIndex(vector_path or path.with_name("vectors.usearch"), save_interval_sec)
+        self._move_legacy_vectors()
+        # 異常終了で、ベクトルを書き出す前に止まった取り込み元(Ingestor が起動時に取り込み直す)
+        self.lost_sources: list[int] = self._reconcile()
 
     # ------------------------------------------------------------------ DB の形式の移行
     def _columns(self, table: str) -> set[str]:
@@ -153,9 +160,59 @@ class Store:
                 (str(SCHEMA_VERSION),),
             )
         if renamed:
-            import logging
+            log.warning("以前の版の DB を現在の形式に移行しました: %s", ", ".join(renamed))
 
-            logging.getLogger(__name__).warning("以前の版の DB を現在の形式に移行しました: %s", ", ".join(renamed))
+    def _move_legacy_vectors(self) -> None:
+        """以前の版の DB(windows.vec に BLOB でベクトルを保存)から、ベクトルを USearch へ移します。
+
+        移した後にファイルへ書き出してから SQLite の列を削除するため、途中で止まっても、次の起動でやり直せます。
+        """
+        if "vec" not in self._columns("windows"):
+            return
+        moved = 0
+        with self._lock:
+            rows = self._db.execute("SELECT id, vec FROM windows ORDER BY id")
+            while batch := rows.fetchmany(10_000):
+                existing = set(self.vectors.keys().tolist())
+                keep = [(r["id"], r["vec"]) for r in batch if r["id"] not in existing]
+                if keep:
+                    vecs = np.stack([np.frombuffer(v, dtype=np.float32) for _, v in keep])
+                    self.vectors.add([k for k, _ in keep], vecs)
+                    moved += len(keep)
+            self.vectors.save(force=True)
+            self._db.execute("ALTER TABLE windows DROP COLUMN vec")
+            self._db.commit()
+            self._db.execute("VACUUM")  # ベクトルが占めていた領域を解放する
+        log.warning("以前の版の DB から、%d 件のベクトルをベクトル DB(%s)へ移しました", moved, self.vectors.path.name)
+
+    def _reconcile(self) -> list[int]:
+        """SQLite の窓と、ベクトル DB の内容を突き合わせます。
+
+        ベクトルはまとめて書き出すため、書き出す前に異常終了すると、SQLite にだけ窓が残ります。
+        その窓は削除し、取り込み元の ID を返します(ファイルがある取り込み元は、Ingestor が取り込み直す)。
+        逆に、ベクトル DB にだけ残ったもの(削除の直後に止まった場合)は、ベクトル DB から削除します。
+        """
+        with self._lock:
+            rows = self._db.execute("SELECT id, source_id FROM windows").fetchall()
+        in_db = {r["id"]: r["source_id"] for r in rows}
+        in_index = set(self.vectors.keys().tolist())
+        missing = [wid for wid in in_db if wid not in in_index]
+        orphans = [k for k in in_index if k not in in_db]
+        if orphans:
+            self.vectors.remove(orphans)
+            self.vectors.save()
+        if not missing:
+            return []
+        lost = sorted({in_db[w] for w in missing})
+        with self._lock:
+            self._db.executemany("DELETE FROM windows WHERE id=?", [(w,) for w in missing])
+            self._db.commit()
+        log.warning(
+            "ベクトル DB に無い窓が %d 件ありました(前回、ベクトルを書き出す前に停止した可能性があります)。"
+            "該当の取り込み元(%d 件)は、取り込み直します",
+            len(missing), len(lost),
+        )  # fmt: skip
+        return lost
 
     # ------------------------------------------------------------------ メタ情報
     def get_meta(self, key: str) -> str | None:
@@ -263,8 +320,10 @@ class Store:
 
     def delete_source(self, source_id: int) -> None:
         with self._lock:
+            ids = self._window_ids(source_id)
             self._db.execute("DELETE FROM sources WHERE id=?", (source_id,))
             self._db.commit()
+            self.vectors.remove(ids)
             self._cache = None
 
     @staticmethod
@@ -286,21 +345,30 @@ class Store:
         vec: np.ndarray,
     ) -> int:
         assert kind in WINDOW_KINDS, kind
-        blob = np.asarray(vec, dtype=np.float32).tobytes()
         with self._lock:
             cur = self._db.execute(
-                "INSERT INTO windows(source_id, start_ms, end_ms, kind, group_id, abs_ts, vec)"
-                " VALUES(?,?,?,?,?,?,?)",
-                (source_id, start_ms, end_ms, kind, group_id, abs_ts, blob),
+                "INSERT INTO windows(source_id, start_ms, end_ms, kind, group_id, abs_ts) VALUES(?,?,?,?,?,?)",
+                (source_id, start_ms, end_ms, kind, group_id, abs_ts),
             )
             self._db.commit()
-            self._cache = None  # 次の検索で作り直す
-            return int(cur.lastrowid)
+            window_id = int(cur.lastrowid)
+            self.vectors.add([window_id], vec)  # すぐに検索の対象になる(取り込み中でも探せる)
+            if self._cache is not None:
+                row = self._db.execute("SELECT location FROM sources WHERE id=?", (source_id,)).fetchone()
+                location = row["location"] if row else None
+                self._pending.append((window_id, source_id, start_ms, end_ms, kind, group_id, location, abs_ts))
+            return window_id
+
+    def _window_ids(self, source_id: int) -> list[int]:
+        rows = self._db.execute("SELECT id FROM windows WHERE source_id=?", (source_id,)).fetchall()
+        return [r["id"] for r in rows]
 
     def delete_windows(self, source_id: int) -> int:
         with self._lock:
+            ids = self._window_ids(source_id)
             cur = self._db.execute("DELETE FROM windows WHERE source_id=?", (source_id,))
             self._db.commit()
+            self.vectors.remove(ids)
             self._cache = None
             return cur.rowcount
 
@@ -320,7 +388,18 @@ class Store:
                 for r in self._db.execute("SELECT kind, COUNT(*) AS n FROM windows GROUP BY kind")
             }
             sources = self._db.execute("SELECT COUNT(*) AS n FROM sources").fetchone()["n"]
-        return {"sources": sources, "windows": sum(by_kind.values()), "windows_by_kind": by_kind}
+        path = self.vectors.path
+        vector_db = {
+            "engine": "usearch",
+            "vectors": len(self.vectors),
+            "file_bytes": path.stat().st_size if path.exists() else 0,
+        }
+        return {
+            "sources": sources,
+            "windows": sum(by_kind.values()),
+            "windows_by_kind": by_kind,
+            "vector_db": vector_db,
+        }
 
     # ------------------------------------------------------------------ ジョブ
     def create_job(self, source_id: int) -> int:
@@ -385,33 +464,33 @@ class Store:
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------ 検索
-    def _build_cache(self, dims: int) -> dict[str, Any]:
+    _COLUMNS = ("ids", "source_ids", "start_ms", "end_ms", "kinds", "groups", "locations", "abs_ts")
+    _DTYPES = (np.int64, np.int64, np.int64, np.int64, object, object, object, np.float64)
+
+    def _columnar(self, rows: list[tuple]) -> dict[str, np.ndarray]:
+        cols = list(zip(*rows, strict=True)) if rows else [[] for _ in self._COLUMNS]
+        out = {}
+        for name, dtype, values in zip(self._COLUMNS, self._DTYPES, cols, strict=True):
+            if dtype is object:
+                values = [v or "" for v in values]
+            out[name] = np.array(values, dtype=dtype)
+        return out
+
+    def _meta(self) -> dict[str, np.ndarray]:
+        """絞り込みに使うメタデータ(ベクトルは含まない)。追加分は、次の検索のときにまとめて反映します。"""
         with self._lock:
-            rows = self._db.execute(
-                "SELECT w.id, w.source_id, w.start_ms, w.end_ms, w.kind, w.group_id, w.abs_ts,"
-                " w.vec, s.location FROM windows w JOIN sources s ON s.id = w.source_id"
-            ).fetchall()
-        n = len(rows)
-        vecs = np.zeros((n, dims), dtype=np.float32)
-        for i, r in enumerate(rows):
-            v = np.frombuffer(r["vec"], dtype=np.float32)
-            if v.shape[0] != dims:
-                raise IndexMismatch(
-                    f"窓 id={r['id']} のベクトルの次元({v.shape[0]})が、設定({dims})と違います"
-                )
-            vecs[i] = v
-        return {
-            "dims": dims,
-            "ids": np.array([r["id"] for r in rows], dtype=np.int64),
-            "source_ids": np.array([r["source_id"] for r in rows], dtype=np.int64),
-            "start_ms": np.array([r["start_ms"] for r in rows], dtype=np.int64),
-            "end_ms": np.array([r["end_ms"] for r in rows], dtype=np.int64),
-            "kinds": np.array([r["kind"] for r in rows], dtype=object),
-            "groups": np.array([r["group_id"] or "" for r in rows], dtype=object),
-            "locations": np.array([r["location"] or "" for r in rows], dtype=object),
-            "abs_ts": np.array([r["abs_ts"] for r in rows], dtype=np.float64),
-            "vecs": vecs,
-        }
+            if self._cache is None:
+                rows = self._db.execute(
+                    "SELECT w.id, w.source_id, w.start_ms, w.end_ms, w.kind, w.group_id, s.location, w.abs_ts"
+                    " FROM windows w JOIN sources s ON s.id = w.source_id ORDER BY w.id"
+                ).fetchall()
+                self._cache = self._columnar([tuple(r) for r in rows])
+                self._pending = []
+            elif self._pending:
+                add = self._columnar(self._pending)
+                self._cache = {k: np.concatenate([self._cache[k], add[k]]) for k in self._COLUMNS}
+                self._pending = []
+            return self._cache
 
     def search(
         self,
@@ -425,39 +504,45 @@ class Store:
         ts_to: float | None = None,
         source_id: int | None = None,
         min_score: float = 0.0,
+        after_id: int | None = None,
     ) -> list[dict]:
-        """メタデータで絞り込んだうえで、コサイン類似度の高い順に返します。"""
-        query = np.asarray(query, dtype=np.float32).reshape(-1)
-        with self._lock:
-            if self._cache is None or self._cache["dims"] != query.shape[0]:
-                self._cache = self._build_cache(query.shape[0])
-            c = self._cache
-        if len(c["ids"]) == 0:
+        """メタデータで絞り込んだうえで、コサイン類似度の高い順に返します。
+
+        after_id を渡すと、その ID より後に追加された窓だけを探します(取り込み中の新しい窓の通知に使う)。
+        """
+        c = self._meta()
+        n = len(c["ids"])
+        if n == 0:
             return []
-        mask = np.ones(len(c["ids"]), dtype=bool)
-        if kinds:
-            mask &= np.isin(c["kinds"], kinds)
-        if group_id:
-            mask &= c["groups"] == group_id
-        if location:
-            mask &= c["locations"] == location
-        if ts_from is not None:
-            mask &= c["abs_ts"] >= ts_from
-        if ts_to is not None:
-            mask &= c["abs_ts"] <= ts_to
-        if source_id is not None:
-            mask &= c["source_ids"] == source_id
+        mask = np.ones(n, dtype=bool)
+        filtered = False
+        for cond, m in (
+            (kinds, lambda: np.isin(c["kinds"], kinds)),
+            (group_id, lambda: c["groups"] == group_id),
+            (location, lambda: c["locations"] == location),
+            (ts_from is not None, lambda: c["abs_ts"] >= ts_from),
+            (ts_to is not None, lambda: c["abs_ts"] <= ts_to),
+            (source_id is not None, lambda: c["source_ids"] == source_id),
+            (after_id is not None, lambda: c["ids"] > after_id),
+        ):
+            if cond:
+                mask &= m()
+                filtered = True
         idx = np.nonzero(mask)[0]
         if len(idx) == 0:
             return []
-        scores = c["vecs"][idx] @ query
-        order = np.argsort(-scores)[:top_k]
+        hits = self.vectors.search(query, top_k, candidates=c["ids"][idx] if filtered else None)
+        pos = {int(k): i for i, k in enumerate(c["ids"][idx])} if filtered else None
         results = []
-        for j in order:
-            score = float(scores[j])
+        for key, score in hits:
             if score < min_score:
                 break
-            i = idx[j]
+            if pos is not None:
+                i = idx[pos[key]]
+            else:
+                i = int(np.searchsorted(c["ids"], key))  # ids は昇順
+                if i >= n or c["ids"][i] != key:
+                    continue  # メタデータの反映前に追加された窓(次の検索で見つかる)
             results.append(
                 {
                     "window_id": int(c["ids"][i]),
@@ -473,6 +558,11 @@ class Store:
             )
         return results
 
+    def flush(self) -> None:
+        """ベクトルをすぐにファイルへ書き出します(通常は一定の間隔で自動的に書き出す)。"""
+        self.vectors.save()
+
     def close(self) -> None:
+        self.vectors.close()
         with self._lock:
             self._db.close()

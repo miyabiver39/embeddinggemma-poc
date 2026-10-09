@@ -72,6 +72,11 @@ def test_old_database_is_migrated_and_keeps_data(settings, tmp_path):
     s = Store(settings.data_dir / "mediasearch.db")
     assert s.get_meta("schema_version") == str(SCHEMA_VERSION)
     s.close()
+    # ベクトルは SQLite から、ベクトル DB のファイルへ移っている
+    db = sqlite3.connect(settings.data_dir / "mediasearch.db")
+    assert "vec" not in {r[1] for r in db.execute("PRAGMA table_info(windows)")}
+    db.close()
+    assert (settings.data_dir / "vectors.usearch").is_file()
 
 
 def test_unknown_database_is_refused_with_clear_message(tmp_path):

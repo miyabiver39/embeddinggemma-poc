@@ -109,7 +109,8 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 │   ├── ingest_files.py    取り込みの受付(検証・重複確認・フォルダ一括・ファイル名の日時)
 │   ├── watcher.py         監視フォルダの自動取り込み(WATCH_DIRS)
 │   ├── security.py        認証・CSRF・Host・本文の上限・応答ヘッダー(ASGI ミドルウェア)
-│   ├── store.py           SQLite + 総当たり検索
+│   ├── store.py           SQLite(設定・取り込み元・窓・ジョブ)と検索
+│   ├── vectors.py         ベクトル DB(USearch。vectors.usearch)
 │   ├── media.py           ffmpeg / ffprobe
 │   ├── config.py          環境変数とプリセット
 │   ├── embedders/         Embedder インターフェースと local / remote / dummy

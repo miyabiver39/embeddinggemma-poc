@@ -3053,6 +3053,19 @@
             "type": "integer",
             "title": "Queue Size",
             "description": "取り込みを待っているジョブの数"
+          },
+          "vector_db": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Db",
+            "description": "ベクトル DB の状態(engine: 方式、vectors: 件数、file_bytes: ファイルの大きさ)"
           }
         },
         "additionalProperties": true,

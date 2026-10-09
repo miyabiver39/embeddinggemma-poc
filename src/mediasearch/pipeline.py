@@ -296,6 +296,16 @@ class Ingestor:
             log.info("途中で止まったジョブを再開します: job=%s", job["id"])
             self._store.update_job(job["id"], status="queued", progress=0)
             self._queue.put(job["id"])
+        # ベクトルを書き出す前に停止して、窓の一部が失われた取り込み元を、取り込み直す
+        running = {j["source_id"] for j in self._store.unfinished_jobs()}
+        for source_id in self._store.lost_sources:
+            source = self._store.get_source(source_id)
+            if source is None or source_id in running:
+                continue
+            if source["path"] and source["kind"] in ("video", "audio", "image") and Path(source["path"]).is_file():
+                log.warning("ベクトルが失われた取り込み元を取り込み直します: %s", source["name"])
+                self._store.update_source(source_id, status="queued", error=None)
+                self.submit(source_id)
         self._thread = threading.Thread(target=self._loop, name="ingestor", daemon=True)
         self._thread.start()
 
