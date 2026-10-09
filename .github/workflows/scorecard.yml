@@ -1,0 +1,40 @@
+# OpenSSF Scorecard: OSS としてのセキュリティ上の取り組み(ブランチ保護、依存の固定、署名など)を点数化します。
+# 結果は公開され(publish_results)、README のバッジと https://scorecard.dev のページに表示されます。
+# Scorecard の制約で、このワークフローには最上位の env / defaults を置けず、使える Action も限られます。
+name: scorecard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 21 * * 2" # 毎週水曜 06:23(日本時間)
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # 結果を Code scanning に登録するため
+      id-token: write # 結果の公開(publish_results)に必要
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@v2.4.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 30
+
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif

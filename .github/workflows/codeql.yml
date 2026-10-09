@@ -1,0 +1,36 @@
+# CodeQL によるソースコードの静的解析(脆弱性につながる書き方の検出)。
+# 結果は GitHub の Security タブ(Code scanning)に表示され、README のバッジにも反映されます。
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "41 20 * * 0" # 毎週月曜 05:41(日本時間)。新しく追加された検出ルールで再検査する
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # 結果を Code scanning に登録するため
+    strategy:
+      fail-fast: false
+      matrix:
+        # python: アプリ本体とスクリプト / actions: GitHub Actions のワークフロー
+        language: [python, actions]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
