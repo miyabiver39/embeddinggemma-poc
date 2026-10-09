@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   error TEXT,
   created_at REAL NOT NULL,
   started_at REAL,
-  finished_at REAL
+  finished_at REAL,
+  timings TEXT                   -- 処理時間の内訳(JSON。ベンチマーク用)
 );
 """
 
@@ -73,11 +74,15 @@ CREATE INDEX IF NOT EXISTS idx_windows_source ON windows(source_id);
 WINDOW_KINDS = ("frames", "tav", "audio", "image")
 
 # DB の形式の版。列の追加・改名をしたら上げ、_migrate() に移行の処理を足す
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 # 旧い版で使っていた列名 → 現在の列名(以前の版の DB をそのまま使い続けられるよう、起動時に改名する)
 _RENAMED_COLUMNS = {
     "sources": {"camera_id": "group_id"},
     "windows": {"camera_id": "group_id"},
+}
+# 後の版で追加した列(以前の版の DB には、起動時に ALTER TABLE で足す)。版 3: jobs.timings
+_ADDED_COLUMNS = {
+    "jobs": {"timings": "TEXT"},
 }
 _REQUIRED_COLUMNS = {
     "sources": {"id", "kind", "path", "name", "group_id", "location", "start_ts", "status", "params"},
@@ -129,6 +134,12 @@ class Store:
                     if old in cols and new not in cols:
                         self._db.execute(f"ALTER TABLE {table} RENAME COLUMN {old} TO {new}")
                         renamed.append(f"{table}.{old} → {new}")
+            for table, added in _ADDED_COLUMNS.items():
+                cols = self._columns(table)
+                for name, decl in added.items():
+                    if cols and name not in cols:
+                        self._db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                        renamed.append(f"{table}.{name} を追加")
             for table, required in _REQUIRED_COLUMNS.items():
                 missing = required - self._columns(table)
                 if missing:
@@ -322,8 +333,10 @@ class Store:
             return int(cur.lastrowid)
 
     def update_job(self, job_id: int, **fields: Any) -> None:
-        allowed = {"status", "progress", "total", "error", "started_at", "finished_at"}
+        allowed = {"status", "progress", "total", "error", "started_at", "finished_at", "timings"}
         assert set(fields) <= allowed, f"更新できない列です: {set(fields) - allowed}"
+        if isinstance(fields.get("timings"), dict):
+            fields["timings"] = json.dumps(fields["timings"], ensure_ascii=False)
         sets = ", ".join(f"{k}=?" for k in fields)
         with self._lock:
             self._db.execute(f"UPDATE jobs SET {sets} WHERE id=?", (*fields.values(), job_id))
@@ -336,7 +349,7 @@ class Store:
                 " WHERE j.id=?",
                 (job_id,),
             ).fetchone()
-        return dict(row) if row else None
+        return self._job_dict(row) if row else None
 
     def list_jobs(self, limit: int = 100) -> list[dict]:
         with self._lock:
@@ -345,7 +358,13 @@ class Store:
                 " ORDER BY j.id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [self._job_dict(r) for r in rows]
+
+    @staticmethod
+    def _job_dict(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        d["timings"] = json.loads(d["timings"]) if d.get("timings") else None
+        return d
 
     def unfinished_jobs(self) -> list[dict]:
         """起動時に、途中で止まった(queued / running)ジョブを取り出します。"""

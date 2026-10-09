@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ import numpy as np
 from PIL import Image
 
 from .embedders.base import SAMPLE_RATE
+
+log = logging.getLogger(__name__)
 
 
 class MediaError(RuntimeError):
@@ -126,6 +129,189 @@ def extract_audio(path: str | Path, start_ms: int, duration_ms: int) -> np.ndarr
     return np.frombuffer(out, dtype="<i2").astype(np.float32) / 32768.0
 
 
+# ---------------------------------------------------------------------- 連続復号(取り込み用)
+def _even(n: float) -> int:
+    """yuv 系の形式は幅・高さが偶数でないと変換できないため、偶数に丸める。"""
+    return max(2, int(round(n / 2)) * 2)
+
+
+def output_size(width: int, height: int, max_side: int) -> tuple[int, int]:
+    """長辺を max_side 以下に縮小した大きさ(縦横比は保つ)。"""
+    if max_side <= 0 or max(width, height) <= max_side:
+        return _even(width), _even(height)
+    scale = max_side / max(width, height)
+    return _even(width * scale), _even(height * scale)
+
+
+def video_size(path: str | Path) -> tuple[int, int]:
+    """映像の幅と高さ(回転の指定を反映)。"""
+    out = _run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_streams", "-print_format", "json", str(path)]
+    )
+    streams = json.loads(out).get("streams") or []
+    if not streams:
+        raise MediaError("映像トラックがありません")
+    s = streams[0]
+    width, height = int(s.get("width") or 0), int(s.get("height") or 0)
+    rotation = 0
+    for side in s.get("side_data_list") or []:
+        rotation = int(side.get("rotation") or 0) or rotation
+    if abs(rotation) in (90, 270):  # スマートフォンの縦撮りなど。ffmpeg は自動で回転するため、出力の縦横も入れ替える
+        width, height = height, width
+    if width <= 0 or height <= 0:
+        raise MediaError("映像の大きさを取得できません")
+    return width, height
+
+
+_HWACCELS: set[str] | None = None
+
+
+def available_hwaccels() -> set[str]:
+    """この ffmpeg が対応している GPU 復号の方式(ffmpeg -hwaccels の結果。1 回だけ調べる)。"""
+    global _HWACCELS
+    if _HWACCELS is None:
+        try:
+            out = subprocess.run(["ffmpeg", "-hide_banner", "-hwaccels"], capture_output=True, text=True, timeout=30)
+            _HWACCELS = {line.strip() for line in out.stdout.splitlines()[1:] if line.strip()}
+        except (OSError, subprocess.TimeoutExpired):
+            _HWACCELS = set()
+    return _HWACCELS
+
+
+def select_hwaccel(setting: str, device: str = "") -> tuple[str | None, str | None]:
+    """FFMPEG_HWACCEL の設定から、使う GPU 復号の方式とデバイスを決めます。使わない場合は (None, None)。
+
+    auto: NVIDIA の GPU がコンテナに渡されていれば cuda、/dev/dri(AMD / Intel)があれば vaapi、どちらもなければ CPU。
+    GPU で復号できなかった場合は、VideoFrameReader が CPU でやり直すため、誤って選んでも取り込みは止まらない。
+    """
+    setting = (setting or "auto").strip().lower()
+    if setting in ("none", "cpu", "off", "false", "0"):
+        return None, None
+    render_nodes = sorted(str(p) for p in Path("/dev/dri").glob("renderD*")) if Path("/dev/dri").is_dir() else []
+    if setting == "auto":
+        if Path("/dev/nvidiactl").exists() or Path("/dev/nvidia0").exists():
+            setting = "cuda"
+        elif render_nodes:
+            setting = "vaapi"
+        else:
+            return None, None
+    if setting not in available_hwaccels():
+        log.warning("ffmpeg が GPU 復号 %s に対応していないため、CPU で復号します", setting)
+        return None, None
+    if setting == "vaapi" and not device:
+        device = render_nodes[0] if render_nodes else ""
+    return setting, device or None
+
+
+class VideoFrameReader:
+    """1 つの ffmpeg プロセスで動画を先頭から復号し、一定間隔のフレームを順に返します。
+
+    フレームごとに ffmpeg を起動して頭出しする方式では、起動のたびにキーフレームから復号し直すため、
+    1 枚あたり数十〜数百ミリ秒かかる。ここでは 1 回の起動で最後まで流し、ffmpeg の fps フィルタで
+    一定間隔のフレームだけを縮小して受け取る(JPEG への変換もしない)。
+
+    hwaccel に cuda / vaapi などを渡すと、復号を GPU で行う(縮小は CPU)。GPU で始められなかった場合は、
+    ソフトウェアの復号でやり直す(fallback が真のとき)。
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        step_ms: int,
+        max_side: int = 448,
+        hwaccel: str | None = None,
+        hwaccel_device: str | None = None,
+    ) -> None:
+        self.path = str(path)
+        self.step_ms = max(int(step_ms), 1)
+        self.width, self.height = output_size(*video_size(path), max_side)
+        self.hwaccel = hwaccel
+        self.hwaccel_device = hwaccel_device
+        self.decoder = "cpu"
+        self.frames = 0
+
+    def _command(self, hwaccel: str | None) -> list[str]:
+        cmd = ["ffmpeg", "-v", "error", "-nostdin"]
+        if hwaccel:
+            cmd += ["-hwaccel", hwaccel]
+            if self.hwaccel_device:
+                cmd += ["-hwaccel_device", self.hwaccel_device]
+        fps = 1000.0 / self.step_ms
+        cmd += [
+            "-i", self.path, "-an", "-sn", "-dn",
+            # round=near: 各出力時刻に最も近い元のフレームを使う。area: 縮小のときに画質がよい
+            "-vf", f"fps=fps={fps:.6f}:round=near,scale={self.width}:{self.height}:flags=area",
+            "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
+        ]  # fmt: skip
+        return cmd
+
+    def __iter__(self):
+        """(フレームの時刻 ms, RGB 配列) を順に返します。"""
+        attempts = [self.hwaccel, None] if self.hwaccel else [None]
+        for hw in attempts:
+            yielded = 0
+            proc = subprocess.Popen(self._command(hw), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            size = self.width * self.height * 3
+            try:
+                while True:
+                    buf = proc.stdout.read(size)
+                    if len(buf) < size:
+                        break
+                    frame = np.frombuffer(buf, dtype=np.uint8).reshape(self.height, self.width, 3)
+                    self.decoder = hw or "cpu"
+                    yield yielded * self.step_ms, frame
+                    yielded += 1
+                    self.frames += 1
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait()
+                err = proc.stderr.read().decode("utf-8", "replace").strip() if proc.stderr else ""
+            if yielded > 0 or proc.returncode == 0:
+                return
+            if hw is None:
+                raise MediaError(f"ffmpeg で映像を復号できません: {' / '.join(err.splitlines()[-3:])}")
+            log.warning("GPU(%s)で復号できないため、CPU で復号し直します: %s", hw, err.splitlines()[-1:] or "")
+
+
+class AudioTrack:
+    """動画の音声を 1 回の ffmpeg で 16kHz モノラルに変換し、区間ごとに取り出せるようにします。
+
+    窓ごとに ffmpeg を起動して頭出しする代わりに、全体を一時ファイルに書き出してメモリマップで読む
+    (長い動画でもメモリを圧迫しない)。変換は別プロセスで、映像の復号と並行して進める。
+    """
+
+    def __init__(self, path: str | Path, tmp_dir: str | Path) -> None:
+        self._file = Path(tmp_dir) / "audio.s16le"
+        cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(path), "-vn", "-ac", "1",
+               "-ar", str(SAMPLE_RATE), "-f", "s16le", str(self._file)]  # fmt: skip
+        self._proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        self._data: np.ndarray | None = None
+
+    def _ready(self) -> np.ndarray:
+        if self._data is None:
+            _, err = self._proc.communicate(timeout=3600)
+            if self._proc.returncode != 0:
+                raise MediaError(f"ffmpeg で音声を変換できません: {err.decode('utf-8', 'replace').strip()[-300:]}")
+            if self._file.stat().st_size == 0:
+                self._data = np.zeros(0, dtype="<i2")
+            else:
+                self._data = np.memmap(self._file, dtype="<i2", mode="r")
+        return self._data
+
+    def slice(self, start_ms: int, end_ms: int) -> np.ndarray:
+        data = self._ready()
+        lo = max(start_ms, 0) * SAMPLE_RATE // 1000
+        hi = max(end_ms, start_ms) * SAMPLE_RATE // 1000
+        return np.asarray(data[lo:hi], dtype=np.float32) / 32768.0
+
+    def close(self) -> None:
+        if self._proc.poll() is None:
+            self._proc.kill()
+            self._proc.wait()
+        self._data = None
+
+
 def make_thumbnail(path: str | Path, at_ms: int, out_path: Path, width: int = 320) -> None:
     """サムネイル(JPEG)を作ります。"""
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,6 +337,9 @@ def load_image(path: str | Path, max_side: int = 448) -> np.ndarray:
 
     try:
         with Image.open(path) as img:
+            if max_side and img.format == "JPEG":
+                # JPEG は縮小しながら復号できる(1/2〜1/8)。大きな写真ほど読み込みが速くなる
+                img.draft("RGB", (max_side * 2, max_side * 2))
             img = ImageOps.exif_transpose(img).convert("RGB")
             if max_side and max(img.size) > max_side:
                 img.thumbnail((max_side, max_side))

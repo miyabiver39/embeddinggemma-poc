@@ -139,6 +139,8 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `INCLUDE_AUDIO` | `false` | 動画の音声も同じベクトルに含める |
 | `AUDIO_CHUNK_SEC` | `10` | 音声ファイルの分割長(秒) |
 | `IMAGE_MAX_SIDE` | `448` | 画像を縮小する長辺(px) |
+| `FFMPEG_HWACCEL` | `auto` | 動画の復号に使う GPU(`auto` / `cuda` / `vaapi` / `qsv` / `none`)。使えない場合は CPU に切り替える(`docs/gpu.md`) |
+| `FFMPEG_HWACCEL_DEVICE` | (空) | GPU 復号のデバイス(例 `/dev/dri/renderD128`)。空なら自動 |
 | `IMAGE_MAX_TOKENS` | `0` | 画像1枚あたりのトークン上限(0=モデル既定) |
 | `TOP_K` | `10` | 検索の既定件数 |
 | `DATA_DIR` | `/data` | DB・サムネイル・アップロード動画の保存先 |

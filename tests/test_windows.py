@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from mediasearch.config import Settings
-from mediasearch.pipeline import IngestParams, plan_windows
+from mediasearch.pipeline import IngestParams, decode_step_ms, plan_windows
 
 
 def params(**kw) -> IngestParams:
@@ -31,3 +31,17 @@ def test_overlap_makes_more_windows():
 def test_token_budget_rejected():
     with pytest.raises(ValueError):
         params(frames_per_window=40)
+
+
+def test_samples_are_centers_of_sub_intervals():
+    wins = plan(10_000)
+    assert wins[0].sample_ms == [500, 1500] and wins[1].sample_ms == [2500, 3500]
+    assert all(t < 10_000 for w in wins for t in w.sample_ms)  # 末尾ちょうどは使わない
+    assert plan(10_000, window_sec=1, frames=1)[0].sample_ms == [500]
+
+
+def test_decode_step_divides_all_samples():
+    wins = plan(60_000)
+    step = decode_step_ms(wins)
+    assert step == 500 and all(t % step == 0 for w in wins for t in w.sample_ms)
+    assert decode_step_ms(plan(10_000, window_sec=3, frames=3)) >= 100  # 割り切れなくても下限を守る

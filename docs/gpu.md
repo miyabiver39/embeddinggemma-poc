@@ -48,6 +48,33 @@ curl -s localhost:8000/api/info | python3 -m json.tool | grep -A8 embedder
 - 確認: `python -c "import torch;print(torch.xpu.is_available())"`。
 - 古い Intel 内蔵 GPU を使いたい場合の代替は OpenVINO(フェーズ 2 の「ネイティブ化」候補。未実装・未検証)。
 
+## 動画の復号を GPU で行う(FFMPEG_HWACCEL)
+
+動画の取り込みでは、ffmpeg を 1 回だけ起動して先頭から連続で復号します。GPU が使える場合は、復号も GPU で行います(推論とは別の回路を使うため、推論の速度は落ちません)。
+
+| 設定 `FFMPEG_HWACCEL` | 動作 |
+|---|---|
+| `auto`(既定) | NVIDIA の GPU が渡されていれば `cuda`、`/dev/dri` があれば `vaapi`(AMD / Intel)、どちらもなければ CPU |
+| `cuda` / `vaapi` / `qsv` | 指定の方式を使う |
+| `none` | 常に CPU で復号する |
+
+- GPU で復号できなかった場合(ドライバが無い、形式に対応していないなど)は、警告を出して CPU で復号し直します。取り込みは止まりません。
+- 実際に使った方式は、ジョブの `timings.decoder`(`GET /api/jobs/{id}`)で確認できます。
+- `vaapi` のデバイスは `/dev/dri/renderD128` などを自動で選びます。複数ある場合は `FFMPEG_HWACCEL_DEVICE` で指定します。
+- イメージには、`rocm` に AMD 用(mesa)、`intel` に Intel 用(iHD)の VA-API ドライバを入れています。`cuda` は、NVIDIA Container Toolkit が
+  ドライバの復号ライブラリを渡すよう、イメージに `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` を設定しています。
+- **実機の GPU での復号は未確認です。** GPU が無い環境では、GPU を指定しても CPU に切り替わること(テスト `tests/test_decode.py`)までを確認しています。
+
+実機での確認:
+
+```bash
+# 取り込んだジョブの decoder が cuda / vaapi になっていれば GPU で復号している
+curl -s localhost:8000/api/jobs/1 | python3 -m json.tool | grep -A12 timings
+# コンテナ内で、ffmpeg 単体で GPU の復号を試す
+ffmpeg -v error -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -i <動画> -f null -   # AMD / Intel
+ffmpeg -v error -hwaccel cuda -i <動画> -f null -                                       # NVIDIA
+```
+
 ## 一般ユーザーでの実行と GPU
 
 アプリは起動直後に一般ユーザー(uid 1000)へ切り替えて動きます(`docs/security.md`)。

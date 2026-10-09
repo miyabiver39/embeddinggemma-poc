@@ -237,6 +237,27 @@ class SourceList(BaseModel):
     sources: list[Source]
 
 
+class JobTimings(_Open):
+    """取り込みの処理時間。高速化の効果を確かめるために使います。"""
+
+    total_ms: float = Field(description="ジョブ全体の処理時間(ms)")
+    stages_ms: dict[str, float] = Field(
+        description=(
+            "段階ごとの時間(ms)。probe: ffprobe / decode: 映像の復号の待ち / audio: 音声の変換の待ち / "
+            "image: 画像の読み込み / embed: 推論 / store: DB への保存 / thumb: サムネイルの保存。"
+            "復号は推論と並行するため、decode が小さいほど推論が律速です"
+        )
+    )
+    windows: int = Field(description="作った窓の数")
+    media_ms: int = Field(description="取り込んだ映像・音声の長さ(ms。画像は 0)")
+    per_window_ms: float | None = Field(None, description="窓 1 つあたりの時間(ms)")
+    realtime_factor: float | None = Field(
+        None, description="実時間比(1 秒の処理で取り込めた映像・音声の秒数。1 より大きければ実時間より速い)"
+    )
+    decoder: str | None = Field(None, description="映像の復号に使った方式(cpu / cuda / vaapi / qsv)")
+    accelerator: str | None = Field(None, description="推論に使ったデバイス")
+
+
 class Job(_Open):
     id: int
     source_id: int
@@ -248,6 +269,7 @@ class Job(_Open):
     started_at: float | None = None
     finished_at: float | None = None
     source_name: str | None = None
+    timings: JobTimings | None = Field(None, description="処理時間の内訳(完了したジョブのみ。ベンチマーク用)")
 
 
 class JobList(BaseModel):

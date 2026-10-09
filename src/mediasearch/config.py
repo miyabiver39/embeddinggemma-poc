@@ -60,6 +60,8 @@ class Settings:
     dims: int  # 出力次元(MRL で 768 / 512 / 256 / 128 に切り詰め)
     image_max_tokens: int  # 画像1枚あたりの上限トークン。0 ならモデルの既定
     image_max_side: int  # 推論前に縮小する画像の長辺(px)
+    ffmpeg_hwaccel: str  # 動画の復号に使う GPU(auto / none / cuda / vaapi / qsv)
+    ffmpeg_hwaccel_device: str  # GPU 復号のデバイス(vaapi なら /dev/dri/renderD128 など。空なら自動)
 
     # --- 保存先 ---
     data_dir: Path
@@ -133,6 +135,8 @@ class Settings:
             dims=dims,
             image_max_tokens=_env_int("IMAGE_MAX_TOKENS", 0),
             image_max_side=_env_int("IMAGE_MAX_SIDE", 448),
+            ffmpeg_hwaccel=_env("FFMPEG_HWACCEL", "auto"),
+            ffmpeg_hwaccel_device=_env("FFMPEG_HWACCEL_DEVICE", ""),
             data_dir=data_dir,
             window_sec=_env_int("WINDOW_SEC", PRESETS["object"]["window_sec"]),
             frames_per_window=_env_int("FRAMES_PER_WINDOW", PRESETS["object"]["frames_per_window"]),

@@ -12,7 +12,7 @@ from test_e2e_dummy import wait_done
 
 from mediasearch.embedders.dummy import DummyEmbedder
 from mediasearch.main import create_app
-from mediasearch.store import SchemaError, Store
+from mediasearch.store import SCHEMA_VERSION, SchemaError, Store
 
 # 0.1.0 の初期の版の形式(グループ ID の列が別の名前だった)
 OLD_SCHEMA = """
@@ -65,11 +65,12 @@ def test_old_database_is_migrated_and_keeps_data(settings, tmp_path):
         # 新しい取り込みも動く(以前はここで 500 になっていた)
         r = c.post("/api/ingest/path", json={"path": str(video), "group_id": "new-group"})
         assert r.status_code == 200, r.text
-        assert wait_done(c, r.json()["job_id"])["status"] == "done"
+        job = wait_done(c, r.json()["job_id"])
+        assert job["status"] == "done" and job["timings"]["windows"] >= 1  # 後の版で足した列も使える
         found = c.post("/api/search/text", json={"query": "x", "group_id": "new-group"}).json()["results"]
         assert found and {h["group_id"] for h in found} == {"new-group"}
     s = Store(settings.data_dir / "mediasearch.db")
-    assert s.get_meta("schema_version") == "2"
+    assert s.get_meta("schema_version") == str(SCHEMA_VERSION)
     s.close()
 
 

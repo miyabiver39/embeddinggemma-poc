@@ -40,11 +40,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # ---- OS パッケージ(ffmpeg は動画・音声の加工に必須)
 #      intel のみ、Intel GPU 用の実行環境(Level Zero / OpenCL ドライバ)も入れる
+#      rocm / intel は、ffmpeg が GPU で動画を復号するための VA-API ドライバも入れる(AMD: mesa、Intel: iHD)。
+#      cuda は、NVIDIA のドライバがコンテナに渡す復号ライブラリ(NVDEC)を使う(NVIDIA_DRIVER_CAPABILITIES の video)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       python3 python3-venv python3-pip ffmpeg ca-certificates tzdata curl \
  && if [ "$VARIANT" = "intel" ]; then \
-      apt-get install -y --no-install-recommends libze1 libze-intel-gpu1 intel-opencl-icd; \
+      apt-get install -y --no-install-recommends libze1 libze-intel-gpu1 intel-opencl-icd intel-media-va-driver; \
+    fi \
+ && if [ "$VARIANT" = "rocm" ]; then \
+      apt-get install -y --no-install-recommends mesa-va-drivers; \
     fi \
  && rm -rf /var/lib/apt/lists/* \
  && python3 -m venv /opt/venv \
@@ -95,7 +100,10 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
  && mkdir -p /data /recordings /home/mediasearch \
  && chown mediasearch:mediasearch /data /home/mediasearch
 
-ENV VARIANT=${VARIANT}
+ENV VARIANT=${VARIANT} \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+# NVIDIA_DRIVER_CAPABILITIES: 推論(compute)に加え、GPU での動画の復号(video)に必要なライブラリをコンテナに渡す。
+# NVIDIA 以外の環境では使われない
 # ビルド元のコミットと参照(タグ・ブランチ)。/api/info に表示し、不具合報告で版を特定できるようにする。
 # 毎回値が変わるため、ビルドキャッシュを壊さないよう最後の層で受け取る
 ARG MEDIASEARCH_REVISION=unknown

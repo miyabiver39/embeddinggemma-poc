@@ -92,3 +92,17 @@ def test_image_taken_at(tmp_path):
     q = tmp_path / "y.png"
     q.write_bytes(_png((1, 2, 3)))
     assert media.image_taken_at(q) is None
+
+
+def test_many_images_are_embedded_in_batches(client, tmp_path):
+    root = tmp_path / "batch"
+    root.mkdir()
+    for i in range(6):
+        (root / f"img{i}.png").write_bytes(_png((40 * i, 30, 200)))
+    d = client.post("/api/ingest/dir", json={"dir": str(root)}).json()
+    assert d["queued"] == 6
+    jobs = [wait_done(client, item["job_id"]) for item in d["items"]]
+    assert {j["status"] for j in jobs} == {"done"}
+    # 各ジョブに処理時間が残り、続けて登録された画像はまとめて推論している
+    assert all(j["timings"]["windows"] >= 1 and "embed" in j["timings"]["stages_ms"] for j in jobs)
+    assert max(j["timings"]["batch"] for j in jobs) > 1
