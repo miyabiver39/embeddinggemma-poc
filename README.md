@@ -1,5 +1,24 @@
 # mediasearch — EmbeddingGemma 2 で動画・音声・画像・文章を横断検索する(開発用)
 
+[![build](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/build.yml)
+[![tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmiyabiver39%2Fembeddinggemma-poc%2Fbadges%2Ftests.json)](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/build.yml)
+[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmiyabiver39%2Fembeddinggemma-poc%2Fbadges%2Fcoverage.json)](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/build.yml)
+[![security scan](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/security.yml)
+[![vulnerabilities](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmiyabiver39%2Fembeddinggemma-poc%2Fbadges%2Fvulnerabilities.json)](docs/release.md)
+[![CodeQL](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/miyabiver39/embeddinggemma-poc/badge)](https://scorecard.dev/viewer/?uri=github.com/miyabiver39/embeddinggemma-poc)
+
+[![License](https://img.shields.io/github/license/miyabiver39/embeddinggemma-poc)](LICENSE)
+[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fmiyabiver39%2Fembeddinggemma-poc%2Fmain%2Fpyproject.toml)](pyproject.toml)
+[![Release](https://img.shields.io/github/v/release/miyabiver39/embeddinggemma-poc?include_prereleases&sort=semver)](https://github.com/miyabiver39/embeddinggemma-poc/releases)
+[![Container](https://img.shields.io/badge/container-ghcr.io-blue?logo=docker&logoColor=white)](https://github.com/miyabiver39/embeddinggemma-poc/pkgs/container/embeddinggemma-poc)
+[![SBOM](https://img.shields.io/badge/SBOM-SPDX%20%7C%20CycloneDX-blue)](docs/release.md)
+[![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?logo=dependabot)](.github/dependabot.yml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Platform](https://img.shields.io/badge/platform-linux%2Famd64-lightgrey)](docker/Dockerfile)
+[![GPU](https://img.shields.io/badge/GPU-CUDA%20%7C%20ROCm%20%7C%20Intel%20XPU-informational)](docs/gpu.md)
+[![Last commit](https://img.shields.io/github/last-commit/miyabiver39/embeddinggemma-poc)](https://github.com/miyabiver39/embeddinggemma-poc/commits/main)
+
 「赤い車が映っている場面」「サイレンが鳴っている区間」のような**言葉(または画像・音声)**で、録画映像の**該当時刻**を探すための
 バックエンド基盤です。他のシステムへの組み込みを想定した開発用で、
 Google の [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) を使います。
@@ -170,6 +189,8 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 - [docs/gpu.md](docs/gpu.md) — GPU モード(RTX 3060 / RX 9060 XT / Intel)の確認手順
 - [docs/release.md](docs/release.md) — リリースの手順と、添付する SBOM・脆弱性検査結果
 - [docs/security.md](docs/security.md) — セキュリティ対策と、残っているリスク
+- [SECURITY.md](SECURITY.md) — 脆弱性の報告方法
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — サードパーティのソフトウェアとライセンス
 - [AGENTS.md](AGENTS.md) — AI エージェント向けの作業ガイド
 
 ## 開発
@@ -189,6 +210,15 @@ EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:creat
 全イメージの **SBOM(SPDX / CycloneDX)と脆弱性検査の結果**を添付した GitHub のリリースを作成します。
 main の最新イメージは毎週検査し、結果を GitHub Actions の実行結果に残します。詳細は [docs/release.md](docs/release.md) を参照してください。
 
+## セキュリティ
+
+- 脆弱性を見つけた場合は、公開の Issue ではなく、GitHub の非公開の報告機能でお知らせください(手順は [SECURITY.md](SECURITY.md))。
+- 実施している対策と、利用者側で必要な設定は [docs/security.md](docs/security.md) を参照してください。
+- 公開イメージの SBOM と脆弱性検査の結果は、各リリースに添付しています。上の「vulnerabilities」バッジは、main の最新イメージを毎週検査した結果(全イメージのうち最も多い件数)です。
+
 ## ライセンス
 
-コードは Apache License 2.0。モデル(EmbeddingGemma 2)のライセンスは Hugging Face のモデルページを確認してください。
+- 本リポジトリのソースコード: [Apache License 2.0](LICENSE)
+- モデル(EmbeddingGemma 2、Google): Apache-2.0(モデルカードの記載による)。公開イメージに同梱しています。
+- 公開イメージには、FFmpeg(GPL-2.0 以降)、PyTorch などのオープンソースのソフトウェアのほか、GPU 用のイメージには
+  NVIDIA(CUDA)と Intel(oneAPI)の独自ライセンスのライブラリが含まれます。一覧は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。

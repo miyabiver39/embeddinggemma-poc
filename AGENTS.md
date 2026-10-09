@@ -94,7 +94,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 
 ```
 .
-├── AGENTS.md / README.md / LICENSE / docker-compose.yml
+├── AGENTS.md / README.md / LICENSE / SECURITY.md / THIRD_PARTY_NOTICES.md / docker-compose.yml
 ├── docs/                  design.md(設計書) operations.md(運用) gpu.md(GPU確認手順) security.md(セキュリティ対策) release.md(リリース)
 ├── src/mediasearch/
 │   ├── main.py            アプリ生成(ROLE で構成が変わる)
@@ -110,9 +110,9 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 │   ├── embedders/         Embedder インターフェースと local / remote / dummy
 │   └── web/index.html     開発用 WebUI
 ├── tests/                 pytest(実モデルのテストは RUN_MODEL_TESTS=1 のときだけ)
-├── scripts/               release_report.py(脆弱性検査の結果をリリースノートにまとめる)
+├── scripts/               release_report.py(脆弱性検査の結果をリリースノートにまとめる) badges.py(README のバッジ用データ)
 ├── docker/                Dockerfile(VARIANT=slim|cpu|cuda|rocm|intel)と entrypoint
-└── .github/               workflows/build.yml(テスト・ビルド・公開)、workflows/security.yml(SBOM・脆弱性検査)、dependabot.yml
+└── .github/               workflows/build.yml(テスト・ビルド・公開)、security.yml(SBOM・脆弱性検査)、codeql.yml(静的解析)、scorecard.yml(OpenSSF Scorecard)、dependabot.yml
 ```
 
 ## 7.1 デバイスの対応表
@@ -154,6 +154,8 @@ EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:creat
 - コミットメッセージの末尾には、利用環境の指示(Co-Authored-By など)に従った行を付けます。
 - 設計に関わる変更では、`docs/design.md` を同じコミットで更新します。
 - リリースはタグ `v*` の push で作成します。SBOM と脆弱性検査の結果は自動で添付されます(`docs/release.md`)。
+- README のバッジのうち、テスト件数・カバレッジ・脆弱性の件数は、CI が `badges` ブランチに書き出す JSON を表示しています(`scripts/badges.py`)。`badges` ブランチは手で編集しません。
+- 同梱物を追加・変更したときは、`THIRD_PARTY_NOTICES.md` のライセンスの一覧も更新します。
 
 ## 11. 作業するときの注意
 

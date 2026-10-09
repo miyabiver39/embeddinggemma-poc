@@ -6,6 +6,7 @@
 |---|---|---|
 | タグ `v*` の push | 版付きイメージの公開、全イメージの SBOM 作成と脆弱性検査 | GitHub のリリース(本文と添付ファイル) |
 | 毎週月曜 06:17(日本時間) | main の最新イメージ(`:cpu` など)の SBOM 作成と脆弱性検査 | GitHub Actions の実行結果(サマリーと成果物。90 日保存) |
+| main の最新イメージの検査後(定期・手動) | README の「vulnerabilities」バッジの更新(全イメージのうち最も多い Critical / High の件数) | `badges` ブランチの `vulnerabilities.json` |
 | 手動実行(Actions の「security」→ Run workflow) | 指定した版、または main の最新イメージの検査。`release` を有効にすると既存リリースの添付を更新 | 同上(`release` 有効時はリリースも) |
 
 ワークフローは `.github/workflows/security.yml`、タグの push 時に呼び出す設定は `.github/workflows/build.yml` の `security` ジョブです。
