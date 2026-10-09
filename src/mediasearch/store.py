@@ -4,7 +4,7 @@
 - 検索は、全ベクトルをメモリに載せた総当たり(行列の内積)で行います。
   ベクトルは正規化済みなので、内積はコサイン類似度と同じです。
   数十万件程度までは十分速い想定です。それ以上は、専用のベクトル DB への移行を検討してください。
-- カメラや時刻などのメタデータは、ベクトルに埋め込まず、別の列として保存して絞り込みに使います。
+- グループ ID や時刻などのメタデータは、ベクトルに埋め込まず、別の列として保存して絞り込みに使います。
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS sources (
   kind TEXT NOT NULL,            -- video / audio / frames
   path TEXT,                     -- 映像・音声ファイルのパス(frames は NULL)
   name TEXT NOT NULL,
-  camera_id TEXT,
+  group_id TEXT,
   location TEXT,
   start_ts REAL NOT NULL,        -- 録画開始の時刻(UNIX 秒)
   duration_ms INTEGER,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS windows (
   start_ms INTEGER NOT NULL,
   end_ms INTEGER NOT NULL,
   kind TEXT NOT NULL,            -- frames(映像のみ) / tav(映像+音声) / audio(音声のみ)
-  camera_id TEXT,
+  group_id TEXT,
   abs_ts REAL NOT NULL,          -- 窓の開始時刻(UNIX 秒) = source.start_ts + start_ms / 1000
   vec BLOB NOT NULL
 );
@@ -128,7 +128,7 @@ class Store:
         kind: str,
         path: str | None,
         name: str,
-        camera_id: str | None,
+        group_id: str | None,
         location: str | None,
         start_ts: float,
         params: dict,
@@ -137,13 +137,13 @@ class Store:
     ) -> int:
         with self._lock:
             cur = self._db.execute(
-                "INSERT INTO sources(kind, path, name, camera_id, location, start_ts, duration_ms,"
+                "INSERT INTO sources(kind, path, name, group_id, location, start_ts, duration_ms,"
                 " status, params, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (
                     kind,
                     path,
                     name,
-                    camera_id,
+                    group_id,
                     location,
                     start_ts,
                     duration_ms,
@@ -210,7 +210,7 @@ class Store:
         start_ms: int,
         end_ms: int,
         kind: str,
-        camera_id: str | None,
+        group_id: str | None,
         abs_ts: float,
         vec: np.ndarray,
     ) -> int:
@@ -218,9 +218,9 @@ class Store:
         blob = np.asarray(vec, dtype=np.float32).tobytes()
         with self._lock:
             cur = self._db.execute(
-                "INSERT INTO windows(source_id, start_ms, end_ms, kind, camera_id, abs_ts, vec)"
+                "INSERT INTO windows(source_id, start_ms, end_ms, kind, group_id, abs_ts, vec)"
                 " VALUES(?,?,?,?,?,?,?)",
-                (source_id, start_ms, end_ms, kind, camera_id, abs_ts, blob),
+                (source_id, start_ms, end_ms, kind, group_id, abs_ts, blob),
             )
             self._db.commit()
             self._cache = None  # 次の検索で作り直す
@@ -236,7 +236,7 @@ class Store:
     def get_window(self, window_id: int) -> dict | None:
         with self._lock:
             row = self._db.execute(
-                "SELECT id, source_id, start_ms, end_ms, kind, camera_id, abs_ts FROM windows"
+                "SELECT id, source_id, start_ms, end_ms, kind, group_id, abs_ts FROM windows"
                 " WHERE id=?",
                 (window_id,),
             ).fetchone()
@@ -299,7 +299,7 @@ class Store:
     def _build_cache(self, dims: int) -> dict[str, Any]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT w.id, w.source_id, w.start_ms, w.end_ms, w.kind, w.camera_id, w.abs_ts,"
+                "SELECT w.id, w.source_id, w.start_ms, w.end_ms, w.kind, w.group_id, w.abs_ts,"
                 " w.vec, s.location FROM windows w JOIN sources s ON s.id = w.source_id"
             ).fetchall()
         n = len(rows)
@@ -318,7 +318,7 @@ class Store:
             "start_ms": np.array([r["start_ms"] for r in rows], dtype=np.int64),
             "end_ms": np.array([r["end_ms"] for r in rows], dtype=np.int64),
             "kinds": np.array([r["kind"] for r in rows], dtype=object),
-            "cameras": np.array([r["camera_id"] or "" for r in rows], dtype=object),
+            "groups": np.array([r["group_id"] or "" for r in rows], dtype=object),
             "locations": np.array([r["location"] or "" for r in rows], dtype=object),
             "abs_ts": np.array([r["abs_ts"] for r in rows], dtype=np.float64),
             "vecs": vecs,
@@ -330,7 +330,7 @@ class Store:
         *,
         top_k: int = 10,
         kinds: list[str] | None = None,
-        camera_id: str | None = None,
+        group_id: str | None = None,
         location: str | None = None,
         ts_from: float | None = None,
         ts_to: float | None = None,
@@ -348,8 +348,8 @@ class Store:
         mask = np.ones(len(c["ids"]), dtype=bool)
         if kinds:
             mask &= np.isin(c["kinds"], kinds)
-        if camera_id:
-            mask &= c["cameras"] == camera_id
+        if group_id:
+            mask &= c["groups"] == group_id
         if location:
             mask &= c["locations"] == location
         if ts_from is not None:
@@ -376,7 +376,7 @@ class Store:
                     "start_ms": int(c["start_ms"][i]),
                     "end_ms": int(c["end_ms"][i]),
                     "kind": str(c["kinds"][i]),
-                    "camera_id": str(c["cameras"][i]) or None,
+                    "group_id": str(c["groups"][i]) or None,
                     "location": str(c["locations"][i]) or None,
                     "abs_ts": float(c["abs_ts"][i]),
                     "score": score,

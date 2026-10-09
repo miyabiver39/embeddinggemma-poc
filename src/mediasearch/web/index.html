@@ -72,7 +72,7 @@
       <option value="audio">audio(音声のみ)</option></select></label>
     <label>件数<input id="f-topk" type="number" min="1" value="10" style="width:70px"></label>
     <label>最小スコア<input id="f-min" type="number" step="0.01" value="0" style="width:80px"></label>
-    <label>カメラID<input id="f-cam" style="width:120px"></label>
+    <label>グループID<input id="f-grp" style="width:120px"></label>
     <label>場所<input id="f-loc" style="width:120px"></label>
     <label>開始日時<input id="f-from" type="datetime-local"></label>
     <label>終了日時<input id="f-to" type="datetime-local"></label>
@@ -88,7 +88,7 @@
 <section id="ingest">
   <h3 style="margin-top:0">共通の設定</h3>
   <div class="row">
-    <label>カメラID<input id="i-cam"></label>
+    <label>グループID<input id="i-grp"></label>
     <label>場所<input id="i-loc"></label>
     <label>録画開始日時(空欄の場合はファイル名の日時、なければ受付時刻)<input id="i-ts" type="datetime-local"></label>
     <label>プリセット<select id="i-preset"><option value="">(既定)</option></select></label>
@@ -110,7 +110,7 @@
 
   <h3>コンテナ内のパスを指定(録画ディレクトリをマウントして使う)</h3>
   <div class="row">
-    <label class="grow">パス(コンテナ内)<input id="i-path" placeholder="/recordings/cam01/20260101_000000.mp4"></label>
+    <label class="grow">パス(コンテナ内)<input id="i-path" placeholder="/recordings/group-a/20260101_000000.mp4"></label>
     <label>種類<select id="i-pkind"><option>video</option><option>audio</option></select></label>
     <button id="btn-path" class="primary" style="margin-bottom:8px">取り込む</button>
   </div>
@@ -120,7 +120,7 @@
     <label class="grow">フォルダ(コンテナ内)<input id="i-dir" placeholder="/recordings"></label>
     <label>種類<select id="i-dkind"><option value="auto">拡張子で判定</option><option value="video">video のみ</option><option value="audio">audio のみ</option></select></label>
     <label style="flex-direction:row;align-items:center;gap:4px"><input type="checkbox" id="i-rec" checked> 下位フォルダも対象にする</label>
-    <label style="flex-direction:row;align-items:center;gap:4px"><input type="checkbox" id="i-camdir"> フォルダ名をカメラIDにする</label>
+    <label style="flex-direction:row;align-items:center;gap:4px"><input type="checkbox" id="i-grpdir"> フォルダ名をグループIDにする</label>
     <button id="btn-dir" class="primary" style="margin-bottom:8px">一括で取り込む</button>
   </div>
   <div class="note">取り込み済みのファイルは対象外になるため、同じフォルダに繰り返し実行しても重複しません。録画を自動で取り込む場合は、環境変数 WATCH_DIRS で監視フォルダを設定してください(「状態」タブで確認できます)。</div>
@@ -213,7 +213,7 @@ async function loadInfo() {
 
 // ---- 検索
 function filters() {
-  return { top_k: +$("f-topk").value || null, min_score: +$("f-min").value || 0, camera_id: $("f-cam").value || null,
+  return { top_k: +$("f-topk").value || null, min_score: +$("f-min").value || 0, group_id: $("f-grp").value || null,
     location: $("f-loc").value || null, from_ts: tsOrEmpty("f-from") || null, to_ts: tsOrEmpty("f-to") || null,
     kind: $("f-kind").value, merge: $("f-merge").value === "true" };
 }
@@ -249,7 +249,7 @@ function renderHits(res) {
       <img loading="lazy" src="${esc(thumb)}" alt="">
       <div class="meta"><span class="score">${it.score.toFixed(3)}</span>
       ${esc(it.source_name)} ${fmt(it.start_ms)}–${fmt(it.end_ms)}<br>
-      <span class="mute">${esc(it.camera_id || "")} ${esc(it.location || "")} ${esc(first.abs_time || "")} ${first.kind ? "["+esc(first.kind)+"]" : ""}</span></div></div>`;
+      <span class="mute">${esc(it.group_id || "")} ${esc(it.location || "")} ${esc(first.abs_time || "")} ${first.kind ? "["+esc(first.kind)+"]" : ""}</span></div></div>`;
   }).join("");
   document.querySelectorAll(".hit").forEach((el) => el.onclick = () => {
     const it = items[+el.dataset.i], url = (byWin[it.window_ids[0]] || {}).media_url;
@@ -266,7 +266,7 @@ $("qaud").onchange = () => $("qaud").files[0] && runSearch("audio");
 
 // ---- 取り込み
 function ingestFields(fd) {
-  const m = { camera_id: "i-cam", location: "i-loc", start_ts: "i-ts", preset: "i-preset", window_sec: "i-win",
+  const m = { group_id: "i-grp", location: "i-loc", start_ts: "i-ts", preset: "i-preset", window_sec: "i-win",
     frames_per_window: "i-fr", overlap_sec: "i-ov", include_audio: "i-aud" };
   for (const [k, id] of Object.entries(m)) if ($(id).value) fd.append(k, $(id).value);
   return fd;
@@ -291,7 +291,7 @@ $("btn-vup").onclick = () => ingest("video");
 $("btn-aup").onclick = () => ingest("audio");
 $("btn-path").onclick = async () => {
   const body = { path: $("i-path").value, kind: $("i-pkind").value };
-  const m = { camera_id: "i-cam", location: "i-loc", start_ts: "i-ts", preset: "i-preset" };
+  const m = { group_id: "i-grp", location: "i-loc", start_ts: "i-ts", preset: "i-preset" };
   for (const [k, id] of Object.entries(m)) if ($(id).value) body[k] = $(id).value;
   for (const [k, id] of Object.entries({ window_sec: "i-win", frames_per_window: "i-fr", overlap_sec: "i-ov" })) if ($(id).value) body[k] = +$(id).value;
   if ($("i-aud").value) body.include_audio = $("i-aud").value === "true";
@@ -304,8 +304,8 @@ $("btn-path").onclick = async () => {
 $("btn-dir").onclick = async () => {
   if (!$("i-dir").value.trim()) { $("i-msg").innerHTML = '<span class="err">フォルダを入力してください。</span>'; return; }
   const body = { dir: $("i-dir").value.trim(), kind: $("i-dkind").value, recursive: $("i-rec").checked,
-    camera_from_dir: $("i-camdir").checked, force: $("i-force").checked };
-  for (const [k, id] of Object.entries({ camera_id: "i-cam", location: "i-loc", preset: "i-preset" })) if ($(id).value) body[k] = $(id).value;
+    group_from_dir: $("i-grpdir").checked, force: $("i-force").checked };
+  for (const [k, id] of Object.entries({ group_id: "i-grp", location: "i-loc", preset: "i-preset" })) if ($(id).value) body[k] = $(id).value;
   for (const [k, id] of Object.entries({ window_sec: "i-win", frames_per_window: "i-fr", overlap_sec: "i-ov" })) if ($(id).value) body[k] = +$(id).value;
   if ($("i-aud").value) body.include_audio = $("i-aud").value === "true";
   $("i-msg").textContent = "フォルダを確認しています…";
@@ -322,8 +322,8 @@ async function loadJobs() {
     const [j, s] = await Promise.all([api("/api/jobs"), api("/api/sources")]);
     $("t-jobs").innerHTML = "<tr><th>ID</th><th>ソース</th><th>状態</th><th>進捗</th><th>エラー</th></tr>" + j.jobs.map((x) =>
       `<tr><td>${x.id}</td><td>${esc(x.source_name)}</td><td class="st-${esc(x.status)}">${esc(x.status)}</td><td>${x.progress}/${x.total}</td><td class="err">${esc(x.error || "")}</td></tr>`).join("");
-    $("t-src").innerHTML = "<tr><th>ID</th><th>名前</th><th>種類</th><th>カメラ</th><th>場所</th><th>窓数</th><th>状態</th><th></th></tr>" + s.sources.map((x) =>
-      `<tr><td>${x.id}</td><td>${esc(x.name)}</td><td>${esc(x.kind)}</td><td>${esc(x.camera_id || "")}</td><td>${esc(x.location || "")}</td><td>${x.window_count}</td><td class="st-${esc(x.status)}">${esc(x.status)}</td>
+    $("t-src").innerHTML = "<tr><th>ID</th><th>名前</th><th>種類</th><th>グループ</th><th>場所</th><th>窓数</th><th>状態</th><th></th></tr>" + s.sources.map((x) =>
+      `<tr><td>${x.id}</td><td>${esc(x.name)}</td><td>${esc(x.kind)}</td><td>${esc(x.group_id || "")}</td><td>${esc(x.location || "")}</td><td>${x.window_count}</td><td class="st-${esc(x.status)}">${esc(x.status)}</td>
       <td><button data-re="${x.id}">再取り込み</button> <button data-del="${x.id}">削除</button></td></tr>`).join("");
     document.querySelectorAll("[data-re]").forEach((b) => b.onclick = async () => { await api(`/api/sources/${b.dataset.re}/reindex`, { method: "POST" }); loadJobs(); });
     document.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {

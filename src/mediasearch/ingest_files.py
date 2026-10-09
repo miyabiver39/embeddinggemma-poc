@@ -34,7 +34,7 @@ VIDEO_EXTS = frozenset(
 )
 AUDIO_EXTS = frozenset({".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".oga", ".opus", ".wma"})
 
-# ファイル名に含まれる日時。例: 20260101_090000 / 2026-01-01T09-00-00 / cam01-20260101-090000.mp4
+# ファイル名に含まれる日時。例: 20260101_090000 / 2026-01-01T09-00-00 / group-a-20260101-090000.mp4
 _TS_PATTERN = re.compile(
     r"(?<!\d)(20\d{2})[-_]?(\d{2})[-_]?(\d{2})[T_\- ]?(\d{2})[-_:]?(\d{2})[-_:]?(\d{2})(?!\d)"
 )
@@ -138,7 +138,7 @@ class FileIntake:
         *,
         kind: str,
         name: str | None = None,
-        camera_id: str | None = None,
+        group_id: str | None = None,
         location: str | None = None,
         start_ts: float | None = None,
         params: IngestParams,
@@ -175,7 +175,7 @@ class FileIntake:
                 kind=kind,
                 path=str(path),
                 name=name,
-                camera_id=camera_id or None,
+                group_id=group_id or None,
                 location=location or None,
                 start_ts=ts,
                 params=params.to_dict(),
@@ -189,8 +189,8 @@ class FileIntake:
         params: IngestParams,
         recursive: bool = True,
         kind: str = "auto",
-        camera_id: str | None = None,
-        camera_from_dir: bool = False,
+        group_id: str | None = None,
+        group_from_dir: bool = False,
         location: str | None = None,
         force: bool = False,
         retry_failed: bool = True,
@@ -199,8 +199,8 @@ class FileIntake:
     ) -> dict:
         """フォルダの中の映像・音声ファイルを、まとめて受け付けます。
 
-        camera_from_dir が真なら、ファイルが入っているフォルダの名前をカメラ ID にします
-        (cam01/20260101_090000.mp4 → cam01)。root 直下のファイルは camera_id を使います。
+        group_from_dir が真なら、ファイルが入っているフォルダの名前をグループ ID にします
+        (group-a/20260101_090000.mp4 → group-a)。root 直下のファイルは group_id を使います。
         settle_sec を指定すると、最終更新から指定秒数たっていないファイル(録画中の可能性がある)を後回しにします。
         """
         root = root.resolve()
@@ -222,13 +222,13 @@ class FileIntake:
                 if settle_sec and now - path.stat().st_mtime < settle_sec:
                     pending += 1
                     continue
-                cam = camera_id
-                if camera_from_dir and path.parent != root:
-                    cam = path.parent.name
+                grp = group_id
+                if group_from_dir and path.parent != root:
+                    grp = path.parent.name
                 result = self.accept(
                     path,
                     kind=file_kind,
-                    camera_id=cam,
+                    group_id=grp,
                     location=location,
                     params=params,
                     force=force,
@@ -240,7 +240,7 @@ class FileIntake:
             if result.duplicate:
                 duplicates += 1
             else:
-                queued.append({"path": str(path), "camera_id": cam, **result.to_dict()})
+                queued.append({"path": str(path), "group_id": grp, **result.to_dict()})
         return {
             "dir": str(root),
             "queued": len(queued),

@@ -24,8 +24,8 @@ def test_real_model_text_to_video(tmp_path, monkeypatch):
         for color in ("red", "blue", "green"):
             p = tmp_path / f"{color}.mp4"
             make_video(p, color, seconds=4)
-            r = c.post("/api/ingest/path", json={"path": str(p), "camera_id": color})
+            r = c.post("/api/ingest/path", json={"path": str(p), "group_id": color})
             assert wait_done(c, r.json()["job_id"], timeout=600)["status"] == "done"
         res = c.post("/api/search/text", json={"query": "a solid blue screen", "top_k": 3}).json()
-        print([(h["camera_id"], round(h["score"], 3)) for h in res["results"]])
-        assert res["results"][0]["camera_id"] == "blue"
+        print([(h["group_id"], round(h["score"], 3)) for h in res["results"]])
+        assert res["results"][0]["group_id"] == "blue"

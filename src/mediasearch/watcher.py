@@ -38,7 +38,7 @@ class FolderWatcher:
             "dirs": [str(d) for d in settings.watch_dirs],
             "interval_sec": settings.watch_interval_sec,
             "settle_sec": settings.watch_settle_sec,
-            "camera_from_dir": settings.watch_camera_from_dir,
+            "group_from_dir": settings.watch_group_from_dir,
             "preset": settings.watch_preset or None,
             "last_scan_at": None,
             "last_queued": 0,
@@ -98,7 +98,7 @@ class FolderWatcher:
             result = self._intake.accept_dir(
                 Path(d),
                 params=params,
-                camera_from_dir=self._s.watch_camera_from_dir,
+                group_from_dir=self._s.watch_group_from_dir,
                 retry_failed=False,
                 settle_sec=self._s.watch_settle_sec,
                 skip_paths=known,

@@ -55,11 +55,11 @@ docker run -d --name mediasearch -p 8000:8000 -v ./data:/data -v /path/to/record
 
 # 1 ファイルを取り込む(録画開始時刻はファイル名の 20260101_090000 から読み取ります)
 curl -X POST localhost:8000/api/ingest/path -H 'Content-Type: application/json' \
-  -d '{"path":"/recordings/cam01/20260101_090000.mp4","camera_id":"cam01","location":"玄関"}'
+  -d '{"path":"/recordings/group-a/20260101_090000.mp4","group_id":"group-a","location":"玄関"}'
 
-# フォルダをまとめて取り込む(フォルダ名 cam01 などをカメラ ID にする。取り込み済みのファイルは対象外)
+# フォルダをまとめて取り込む(フォルダ名 group-a などをグループ ID にする。取り込み済みのファイルは対象外)
 curl -X POST localhost:8000/api/ingest/dir -H 'Content-Type: application/json' \
-  -d '{"dir":"/recordings","camera_from_dir":true}'
+  -d '{"dir":"/recordings","group_from_dir":true}'
 ```
 
 - `start_ts` を省略すると、ファイル名に含まれる日時(`20260101_090000`、`2026-01-01T09-00-00` など)を録画開始時刻にします。読み取れない場合は受付時刻になります。
@@ -75,7 +75,7 @@ docker run -d --name mediasearch -p 8000:8000 -v ./data:/data -v /path/to/record
 
 `WATCH_DIRS` に指定したフォルダを定期的に走査し、新しい録画ファイルを自動で取り込みます。
 書き込み中のファイルを避けるため、最終更新から `WATCH_SETTLE_SEC` 秒(既定 30 秒)経過したファイルだけを対象にします。
-ファイルが入っているフォルダ名をカメラ ID にします(`/recordings/cam01/...` なら `cam01`)。状態は WebUI の「状態」タブで確認できます。
+ファイルが入っているフォルダ名をグループ ID にします(`/recordings/group-a/...` なら `group-a`)。状態は WebUI の「状態」タブで確認できます。
 
 ## イメージの種類
 
@@ -144,7 +144,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `WATCH_DIRS` | (空) | 自動で取り込む監視フォルダ(カンマ区切り)。空なら無効 |
 | `WATCH_INTERVAL_SEC` | `60` | 監視フォルダを走査する間隔(秒) |
 | `WATCH_SETTLE_SEC` | `30` | 最終更新からこの秒数が経過したファイルだけを取り込む(書き込み中のファイルを避ける) |
-| `WATCH_CAMERA_FROM_DIR` | `true` | ファイルが入っているフォルダ名をカメラ ID にする |
+| `WATCH_GROUP_FROM_DIR` | `true` | ファイルが入っているフォルダ名をグループ ID にする |
 | `WATCH_PRESET` | (空) | 監視フォルダの取り込みに使うプリセット(`object` / `action` / `speech`)。空なら上記の窓の既定値 |
 | `API_TOKEN` | (空) | 設定すると `/api` と `/compute` にトークンが必要になる(`docs/security.md`) |
 | `EMBEDDING_TOKEN` | `API_TOKEN` と同じ | remote のとき、compute に送るトークン |
@@ -160,7 +160,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 
 ## 知っておくべき設計上のルール
 
-- **メタデータ(カメラ・場所・時刻)はベクトルに埋め込みません。** 別の列に保存し、検索時に絞り込みます(ベクトルに混ぜると検索精度と再現性が落ちるため)。
+- **メタデータ(グループ ID・場所・時刻)はベクトルに埋め込みません。** 別の列に保存し、検索時に絞り込みます(ベクトルに混ぜると検索精度と再現性が落ちるため)。
 - DB には**モデルID・次元・窓の設定**を記録し、**違う設定での追記は 409 で拒否**します(ベクトル空間の混在防止)。`DIMS` を変えたいときは `DATA_DIR` を作り直して再取り込みしてください。
 - 「映像のみ(frames)」「映像+音声(tav)」「音声のみ(audio)」は**別のベクトル空間**として別々に検索します(`kind` で指定。`auto` は `INCLUDE_AUDIO` の設定に合わせて tav か frames を探します。音声で検索したときの `auto` は `audio` を探します)。
 - 検索は SQLite に保存したベクトルを numpy の総当たり(コサイン類似度)で探します。件数が増えると検索時間とメモリが線形に増えます(256次元なら100万窓で約1GB)。目安は百万窓程度まで。それ以上は専用のベクトル DB への差し替えを検討してください(設計書参照)。
@@ -175,7 +175,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `POST /api/ingest/dir` | コンテナ内フォルダの一括取り込み |
 | `POST /api/watch/scan` | 監視フォルダを今すぐ走査 |
 | `POST /api/ingest/frames` | 加工済みフレーム(+音声)の取り込み |
-| `POST /api/search/text` / `image` / `audio` | 検索(カメラ・場所・期間・種別・最小スコアで絞り込み) |
+| `POST /api/search/text` / `image` / `audio` | 検索(グループ ID・場所・期間・種別・最小スコアで絞り込み) |
 | `GET /api/jobs`, `/api/sources` ほか | ジョブ・ソースの確認、削除、再取り込み |
 | `GET /api/media/{id}`, `/api/thumb/{id}` | 元動画(Range 対応)とサムネイル |
 | `/compute/*` | ベクトル化 API(ROLE=compute / all) |

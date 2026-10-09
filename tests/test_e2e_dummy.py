@@ -32,10 +32,10 @@ def test_ingest_and_search(client, tmp_path):
     make_video(red, "red")
     make_video(blue, "blue")
     jobs = []
-    for p, cam in ((red, "cam1"), (blue, "cam2")):
+    for p, grp in ((red, "group1"), (blue, "group2")):
         with open(p, "rb") as f:
             r = client.post("/api/ingest/video", files={"file": (p.name, f, "video/mp4")},
-                            data={"camera_id": cam, "location": "玄関", "start_ts": "2026-01-01T09:00:00+09:00"})
+                            data={"group_id": grp, "location": "玄関", "start_ts": "2026-01-01T09:00:00+09:00"})
         assert r.status_code == 200, r.text
         jobs.append(r.json()["job_id"])
     for j in jobs:
@@ -44,17 +44,17 @@ def test_ingest_and_search(client, tmp_path):
 
     res = client.post("/api/search/text", json={"query": "red", "top_k": 5}).json()
     assert res["results"], res
-    assert res["results"][0]["camera_id"] == "cam1"
+    assert res["results"][0]["group_id"] == "group1"
 
-    # カメラIDで絞り込み
-    res = client.post("/api/search/text", json={"query": "red", "camera_id": "cam2"}).json()
-    assert all(h["camera_id"] == "cam2" for h in res["results"])
+    # グループIDで絞り込み
+    res = client.post("/api/search/text", json={"query": "red", "group_id": "group2"}).json()
+    assert all(h["group_id"] == "group2" for h in res["results"])
 
     # 画像検索(青い画像 → 青い動画)
     buf = io.BytesIO()
     Image.new("RGB", (64, 64), (0, 0, 255)).save(buf, "JPEG")
     res = client.post("/api/search/image", files={"file": ("q.jpg", buf.getvalue(), "image/jpeg")}).json()
-    assert res["results"][0]["camera_id"] == "cam2"
+    assert res["results"][0]["group_id"] == "group2"
 
     # 時刻範囲の外では何も返らない
     res = client.post("/api/search/text", json={"query": "red", "from_ts": "2030-01-01T00:00:00+09:00"}).json()

@@ -129,7 +129,7 @@ def _merge_intervals(results: list[dict], gap_ms: int = 500) -> list[dict]:
                     "score": r["score"],
                     "window_ids": [r["window_id"]],
                     "abs_ts": r["abs_ts"],
-                    "camera_id": r["camera_id"],
+                    "group_id": r["group_id"],
                     "location": r["location"],
                     "source_name": r["source_name"],
                 }
@@ -142,7 +142,7 @@ def _merge_intervals(results: list[dict], gap_ms: int = 500) -> list[dict]:
 # ---------------------------------------------------------------------- リクエストの型
 class IngestPathRequest(BaseModel):
     path: str
-    camera_id: str | None = None
+    group_id: str | None = None
     location: str | None = None
     start_ts: str | None = None
     preset: str | None = None
@@ -158,8 +158,8 @@ class IngestDirRequest(BaseModel):
     dir: str
     recursive: bool = True
     kind: str = "auto"  # auto(拡張子で判定) / video / audio
-    camera_id: str | None = None
-    camera_from_dir: bool = False  # ファイルが入っているフォルダ名をカメラ ID にする
+    group_id: str | None = None
+    group_from_dir: bool = False  # ファイルが入っているフォルダ名をグループ ID にする
     location: str | None = None
     preset: str | None = None
     window_sec: int | None = None
@@ -173,7 +173,7 @@ class TextSearchRequest(BaseModel):
     query: str
     top_k: int | None = None
     min_score: float = 0.0
-    camera_id: str | None = None
+    group_id: str | None = None
     location: str | None = None
     from_ts: str | None = None
     to_ts: str | None = None
@@ -246,7 +246,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             qvec,
             top_k=f.get("top_k") or s.top_k_default,
             kinds=_kinds(f.get("kind", "auto"), auto_kinds),
-            camera_id=f.get("camera_id") or None,
+            group_id=f.get("group_id") or None,
             location=f.get("location") or None,
             ts_from=parse_ts(f["from_ts"]) if f.get("from_ts") else None,
             ts_to=parse_ts(f["to_ts"]) if f.get("to_ts") else None,
@@ -317,7 +317,7 @@ def build_api_router(ctx: Context) -> APIRouter:
     @router.post("/ingest/video")
     def ingest_video(
         file: UploadFile = File(...),
-        camera_id: str | None = Form(None),
+        group_id: str | None = Form(None),
         location: str | None = Form(None),
         start_ts: str | None = Form(None),
         preset: str | None = Form(None),
@@ -334,19 +334,19 @@ def build_api_router(ctx: Context) -> APIRouter:
             _opt_int(overlap_sec, "overlap_sec"),
             _opt_bool(include_audio),
         )
-        return _accept_upload(file, "video", start_ts, camera_id=camera_id, location=location, params=params)
+        return _accept_upload(file, "video", start_ts, group_id=group_id, location=location, params=params)
 
     @router.post("/ingest/audio")
     def ingest_audio(
         file: UploadFile = File(...),
-        camera_id: str | None = Form(None),
+        group_id: str | None = Form(None),
         location: str | None = Form(None),
         start_ts: str | None = Form(None),
         chunk_sec: str | None = Form(None),
     ) -> dict:
         """音声ファイル(または音声つきの動画)を、音声だけで取り込みます。"""
         params = _params(None, None, None, None, None, _opt_int(chunk_sec, "chunk_sec"))
-        return _accept_upload(file, "audio", start_ts, camera_id=camera_id, location=location, params=params)
+        return _accept_upload(file, "audio", start_ts, group_id=group_id, location=location, params=params)
 
     @router.post("/ingest/path")
     def ingest_path(body: IngestPathRequest) -> dict:
@@ -372,7 +372,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         return ctx.intake.accept(
             path,
             kind=body.kind,
-            camera_id=body.camera_id,
+            group_id=body.group_id,
             location=body.location,
             start_ts=parse_opt_ts(body.start_ts),
             params=params,
@@ -400,8 +400,8 @@ def build_api_router(ctx: Context) -> APIRouter:
             params=params,
             recursive=body.recursive,
             kind=body.kind,
-            camera_id=body.camera_id,
-            camera_from_dir=body.camera_from_dir,
+            group_id=body.group_id,
+            group_from_dir=body.group_from_dir,
             location=body.location,
             force=body.force,
         )
@@ -419,7 +419,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         times_ms: str = Form(..., description="各画像の時刻(ミリ秒)。カンマ区切り"),
         audio: UploadFile | None = File(None),
         name: str | None = Form(None),
-        camera_id: str | None = Form(None),
+        group_id: str | None = Form(None),
         location: str | None = Form(None),
         start_ts: str | None = Form(None),
     ) -> dict:
@@ -445,7 +445,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             times_ms=times,
             audio=pcm,
             name=name or "frames",
-            camera_id=camera_id or None,
+            group_id=group_id or None,
             location=location or None,
             start_ts=parse_ts(start_ts),
             thumb_dir=ctx.thumb_dir,
@@ -463,7 +463,7 @@ def build_api_router(ctx: Context) -> APIRouter:
     def _form_filters(
         top_k: str | None,
         min_score: str | None,
-        camera_id: str | None,
+        group_id: str | None,
         location: str | None,
         from_ts: str | None,
         to_ts: str | None,
@@ -473,7 +473,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         return {
             "top_k": _opt_int(top_k, "top_k"),
             "min_score": float(min_score) if min_score else 0.0,
-            "camera_id": camera_id,
+            "group_id": group_id,
             "location": location,
             "from_ts": from_ts,
             "to_ts": to_ts,
@@ -486,7 +486,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         file: UploadFile = File(...),
         top_k: str | None = Form(None),
         min_score: str | None = Form(None),
-        camera_id: str | None = Form(None),
+        group_id: str | None = Form(None),
         location: str | None = Form(None),
         from_ts: str | None = Form(None),
         to_ts: str | None = Form(None),
@@ -504,7 +504,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         qvec = ctx.embedder.embed_images([image], high=True)[0]
         return _search(
             qvec,
-            _form_filters(top_k, min_score, camera_id, location, from_ts, to_ts, kind, merge),
+            _form_filters(top_k, min_score, group_id, location, from_ts, to_ts, kind, merge),
             embed_ms=int((time.time() - t0) * 1000),
         )
 
@@ -513,7 +513,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         file: UploadFile = File(...),
         top_k: str | None = Form(None),
         min_score: str | None = Form(None),
-        camera_id: str | None = Form(None),
+        group_id: str | None = Form(None),
         location: str | None = Form(None),
         from_ts: str | None = Form(None),
         to_ts: str | None = Form(None),
@@ -535,7 +535,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         # 音声クエリの auto は、音声のみで取り込んだ窓(audio)を探す
         return _search(
             qvec,
-            _form_filters(top_k, min_score, camera_id, location, from_ts, to_ts, kind, merge),
+            _form_filters(top_k, min_score, group_id, location, from_ts, to_ts, kind, merge),
             auto_kinds=["audio"],
             embed_ms=embed_ms,
         )

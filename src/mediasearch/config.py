@@ -78,7 +78,7 @@ class Settings:
     watch_dirs: tuple[Path, ...]
     watch_interval_sec: int  # 走査の間隔(秒)
     watch_settle_sec: int  # 最終更新からこの秒数たったファイルだけを取り込む(書き込み中を避ける)
-    watch_camera_from_dir: bool  # ファイルが入っているフォルダ名をカメラ ID にする
+    watch_group_from_dir: bool  # ファイルが入っているフォルダ名をグループ ID にする
     watch_preset: str  # 取り込みのプリセット(空なら WINDOW_SEC などの既定値)
 
     # --- サーバ ---
@@ -143,7 +143,7 @@ class Settings:
             watch_dirs=watch_dirs,
             watch_interval_sec=max(_env_int("WATCH_INTERVAL_SEC", 60), 5),
             watch_settle_sec=max(_env_int("WATCH_SETTLE_SEC", 30), 0),
-            watch_camera_from_dir=_env_bool("WATCH_CAMERA_FROM_DIR", True),
+            watch_group_from_dir=_env_bool("WATCH_GROUP_FROM_DIR", True),
             watch_preset=watch_preset,
             host=_env("HOST", "0.0.0.0"),
             port=_env_int("PORT", 8000),
