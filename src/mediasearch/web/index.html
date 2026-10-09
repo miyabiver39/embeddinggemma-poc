@@ -79,8 +79,10 @@
     <label>開始日時<input id="f-from" type="datetime-local"></label>
     <label>終了日時<input id="f-to" type="datetime-local"></label>
     <label>連続区間をまとめる<select id="f-merge"><option value="true">する</option><option value="false">しない</option></select></label>
+    <label>新しい窓を通知(文章の検索のみ)<select id="f-live"><option value="false">しない</option><option value="true">する(取り込み中のリアルタイム検索)</option></select></label>
   </div>
   <div class="note">スコアはコサイン類似度です。テキスト→映像の一致は 0.3〜0.5 程度でも十分に意味があることがあります(最小スコアは実データを見て調整してください)。</div>
+  <div id="live" style="display:none"><div class="mute" id="live-msg"></div><div class="hits" id="live-hits"></div></div>
   <div id="s-msg" class="mute"></div>
   <div class="hits" id="hits"></div>
   <video id="player" controls style="display:none"></video>
@@ -234,6 +236,7 @@ async function runSearch(kind) {
     if (kind === "text") {
       if (!$("q").value.trim()) throw new Error("検索ワードを入力してください。");
       res = await api("/api/search/text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: $("q").value, ...filters() }) });
+      if ($("f-live").value === "true") startLive(); else stopLive();
     } else {
       const file = $(kind === "image" ? "qimg" : "qaud").files[0];
       if (!file) throw new Error("ファイルを選択してください。");
@@ -242,6 +245,31 @@ async function runSearch(kind) {
     }
     renderHits(res);
   } catch (e) { $("s-msg").textContent = e.message; $("s-msg").className = "err"; }
+}
+// ---- リアルタイム検索(取り込み中に追加された窓のうち、文章に合うものを通知する。SSE)
+let LIVE = null;
+function stopLive() { if (LIVE) { LIVE.close(); LIVE = null; } $("live").style.display = "none"; }
+function startLive() {
+  stopLive();
+  const f = filters(), p = new URLSearchParams({ query: $("q").value, min_score: f.min_score, kind: f.kind });
+  if (f.group_id) p.set("group_id", f.group_id);
+  if (f.location) p.set("location", f.location);
+  $("live").style.display = "block"; $("live-hits").innerHTML = "";
+  $("live-msg").textContent = "新しい窓を待っています(取り込みが進むと、ここに追加されます)";
+  let count = 0;
+  LIVE = new EventSource("/api/search/live?" + p.toString());
+  LIVE.addEventListener("hit", (ev) => {
+    const h = JSON.parse(ev.data); count++;
+    $("live-msg").textContent = `新しく見つかった窓: ${count} 件(最新が先頭)`;
+    const el = document.createElement("div"); el.className = "hit";
+    el.innerHTML = `${h.thumb_url ? `<img loading="lazy" src="${esc(h.thumb_url)}" alt="">` : `<div class="nothumb">画像なし</div>`}
+      <div class="meta"><span class="score">${h.score.toFixed(3)}</span> ${esc(h.source_name)} ${fmt(h.start_ms)}–${fmt(h.end_ms)}<br>
+      <span class="mute">${esc(h.group_id || "")} ${esc(h.abs_time || "")} [${esc(h.kind)}]</span></div>`;
+    el.onclick = () => { if (!h.media_url) return; const pl = $("player"); $("viewer").style.display = "none"; pl.style.display = "block";
+      pl.src = h.media_url + "#t=" + (h.start_ms / 1000).toFixed(2); pl.play().catch(() => {}); };
+    $("live-hits").prepend(el);
+  });
+  LIVE.onerror = () => { $("live-msg").textContent = "通知の接続が切れました。自動で再接続します。"; };
 }
 function renderHits(res) {
   const items = res.intervals || res.results.map((r) => ({ ...r, window_ids: [r.window_id] }));

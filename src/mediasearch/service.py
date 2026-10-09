@@ -155,6 +155,7 @@ class Service:
             ts_from=parse_ts(f["from_ts"]) if f.get("from_ts") else None,
             ts_to=parse_ts(f["to_ts"]) if f.get("to_ts") else None,
             min_score=f.get("min_score") or 0.0,
+            after_id=f.get("after_window_id"),
         )
         sources: dict[int, dict] = {}
         for h in hits:
@@ -170,16 +171,21 @@ class Service:
             "took_ms": int((time.time() - started) * 1000),  # DB の検索だけにかかった時間
             "embed_ms": embed_ms,  # クエリのベクトル化にかかった時間
             "searched_kinds": f.get("kind") or "auto",
+            # 次に after_window_id へ渡す値(この検索の時点で、最後に追加されていた窓)
+            "last_window_id": ctx.store.last_window_id,
         }
         if f.get("merge", True):
             out["intervals"] = merge_intervals(hits)
         return out
 
-    def search_text(self, query: str, **filters) -> dict:
+    def text_vector(self, query: str) -> np.ndarray:
         if not query.strip():
             raise InvalidInput("query が空です")
+        return self.ctx.embedder.embed_texts([query], kind="query")[0]
+
+    def search_text(self, query: str, **filters) -> dict:
         t0 = time.time()
-        qvec = self.ctx.embedder.embed_texts([query], kind="query")[0]
+        qvec = self.text_vector(query)
         return self.search(qvec, filters, embed_ms=int((time.time() - t0) * 1000))
 
     def search_image(self, image: np.ndarray, **filters) -> dict:

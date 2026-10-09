@@ -1295,6 +1295,201 @@
         ]
       }
     },
+    "/api/search/live": {
+      "get": {
+        "tags": [
+          "検索"
+        ],
+        "summary": "取り込み中の新しい窓から、文章に合うものを通知する(リアルタイム検索・SSE)",
+        "description": "取り込み中(動画・音声・画像・ストリーム)に追加された窓のうち、文章に合うものを、追加されるたびに通知します。\n\nブラウザでは `new EventSource(\"/api/search/live?query=...\")` で受け取れます(API_TOKEN を設定している場合は、\nWebUI と同じく Cookie で認証します)。クエリのベクトル化は接続時の 1 回だけで、以降は新しい窓だけを照合します。",
+        "operationId": "search_live_api_search_live_get",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "探したい内容を表す文章",
+              "title": "Query"
+            },
+            "description": "探したい内容を表す文章"
+          },
+          {
+            "name": "min_score",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "description": "これ以上のスコアの窓だけを通知する",
+              "default": 0.3,
+              "title": "Min Score"
+            },
+            "description": "これ以上のスコアの窓だけを通知する"
+          },
+          {
+            "name": "group_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "グループ ID で絞り込む",
+              "title": "Group Id"
+            },
+            "description": "グループ ID で絞り込む"
+          },
+          {
+            "name": "location",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "場所で絞り込む",
+              "title": "Location"
+            },
+            "description": "場所で絞り込む"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "auto",
+                "all",
+                "frames",
+                "tav",
+                "audio",
+                "image"
+              ],
+              "type": "string",
+              "description": "探す窓の種類",
+              "default": "auto",
+              "title": "Kind"
+            },
+            "description": "探す窓の種類"
+          },
+          {
+            "name": "after_window_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "この ID より後の窓から通知する(省略時は接続した後に追加された窓だけ。再接続のときに使う)",
+              "title": "After Window Id"
+            },
+            "description": "この ID より後の窓から通知する(省略時は接続した後に追加された窓だけ。再接続のときに使う)"
+          },
+          {
+            "name": "duration_sec",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 86400,
+              "minimum": 1,
+              "description": "この秒数が経つと接続を閉じる(再接続して続ける)",
+              "default": 3600,
+              "title": "Duration Sec"
+            },
+            "description": "この秒数が経つと接続を閉じる(再接続して続ける)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events。`event: ready`(接続時。data は {last_window_id})、`event: hit`(新しく見つかった窓。data は検索結果の 1 件と同じ形)、`event: end`(duration_sec の経過)。15 秒ごとに、接続を保つためのコメント行を送ります",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "推論側(compute)に接続できない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
     "/api/sources": {
       "get": {
         "tags": [
@@ -2486,6 +2681,18 @@
             ],
             "title": "Merge",
             "description": "隣り合う窓を区間にまとめた intervals も返す(既定 true)"
+          },
+          "after_window_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Window Id",
+            "description": "この ID より後に追加された窓だけを探す"
           }
         },
         "type": "object",
@@ -2599,6 +2806,18 @@
             ],
             "title": "Merge",
             "description": "隣り合う窓を区間にまとめた intervals も返す(既定 true)"
+          },
+          "after_window_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Window Id",
+            "description": "この ID より後に追加された窓だけを探す"
           }
         },
         "type": "object",
@@ -3999,6 +4218,11 @@
             "type": "string",
             "title": "Searched Kinds",
             "description": "指定された kind"
+          },
+          "last_window_id": {
+            "type": "integer",
+            "title": "Last Window Id",
+            "description": "検索の時点で最後に追加されていた窓の ID。次の検索の after_window_id に渡すと、その後に増えた窓だけを探せる"
           }
         },
         "type": "object",
@@ -4006,7 +4230,8 @@
           "results",
           "took_ms",
           "embed_ms",
-          "searched_kinds"
+          "searched_kinds",
+          "last_window_id"
         ],
         "title": "SearchResponse"
       },
@@ -4272,6 +4497,18 @@
             "title": "Merge",
             "description": "隣り合う窓を区間にまとめた intervals も返す",
             "default": true
+          },
+          "after_window_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Window Id",
+            "description": "この ID より後に追加された窓だけを探す。取り込み中の新しい結果を定期的に問い合わせるときに、前回の応答の last_window_id を渡す(通知を受け取る場合は GET /api/search/live)"
           }
         },
         "type": "object",

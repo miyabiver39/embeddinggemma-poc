@@ -121,6 +121,8 @@ class Store:
         self._move_legacy_vectors()
         # 異常終了で、ベクトルを書き出す前に止まった取り込み元(Ingestor が起動時に取り込み直す)
         self.lost_sources: list[int] = self._reconcile()
+        row = self._db.execute("SELECT MAX(id) AS m FROM windows").fetchone()
+        self.last_window_id: int = int(row["m"] or 0)  # 最後に追加した窓の ID(リアルタイム検索で新しい窓を見分ける)
 
     # ------------------------------------------------------------------ DB の形式の移行
     def _columns(self, table: str) -> set[str]:
@@ -357,6 +359,7 @@ class Store:
                 row = self._db.execute("SELECT location FROM sources WHERE id=?", (source_id,)).fetchone()
                 location = row["location"] if row else None
                 self._pending.append((window_id, source_id, start_ms, end_ms, kind, group_id, location, abs_ts))
+            self.last_window_id = max(self.last_window_id, window_id)
             return window_id
 
     def _window_ids(self, source_id: int) -> list[int]:

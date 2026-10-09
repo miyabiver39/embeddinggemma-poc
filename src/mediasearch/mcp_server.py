@@ -68,6 +68,7 @@ def _trim_search(res: dict) -> dict:
         ],
         "searched_kinds": res["searched_kinds"],
         "embed_ms": res["embed_ms"],
+        "last_window_id": res.get("last_window_id"),
     }
 
 
@@ -126,6 +127,7 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         from_time: str | None = None,
         to_time: str | None = None,
         kind: str = "auto",
+        after_window_id: int | None = None,
     ) -> dict[str, Any]:
         """文章で、録画映像・音声・画像の該当する場面を探します。
 
@@ -138,9 +140,12 @@ def build_mcp_server(ctx: Context) -> MCPServer:
             from_time: この日時以降(ISO 8601。例 2026-01-01T09:00:00)
             to_time: この日時以前(ISO 8601)
             kind: 探す種類(auto / all / frames / tav / audio / image)。auto は映像の窓と静止画
+            after_window_id: この ID より後に追加された窓だけを探す。取り込み中に、前回の結果の last_window_id を渡して
+                新しく増えた場面だけを確認するのに使う
         """
         top_k = max(1, min(int(top_k), 100))
-        res = _guard(svc.search_text, query, **_filters(top_k, min_score, group_id, location, from_time, to_time, kind))
+        f = _filters(top_k, min_score, group_id, location, from_time, to_time, kind)
+        res = _guard(svc.search_text, query, **f, after_window_id=after_window_id)
         return _trim_search(res)
 
     @server.tool(annotations=_READ_ONLY)

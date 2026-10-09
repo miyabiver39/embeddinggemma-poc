@@ -154,6 +154,29 @@ curl -H 'Range: bytes=0-' -o clip.mp4 http://localhost:8000/api/media/12   # 元
 `media_url` / `thumb_url` が `null` の場合は表示できません(音声の窓のサムネイル、または保存しない設定 `store_media=false` で取り込んだもの)。
 保存しない設定では、検索結果は取り込み元の名前・時刻・スコアなどの情報だけになります。
 
+### 5. 取り込みながら探す(リアルタイム検索)
+
+取り込んだ窓は、ジョブの完了を待たずに、追加された時点で検索の対象になります。新しく増えた窓だけを知りたい場合は、次のどちらかを使います。
+
+```bash
+# (a) 通知を受け取る(Server-Sent Events)。新しい窓のうち、スコアが min_score 以上のものが届く
+curl -N "http://localhost:8000/api/search/live?query=%E8%B5%A4%E3%81%84%E8%BB%8A&min_score=0.3&group_id=group-a"
+# event: ready
+# data: {"last_window_id": 120}
+#
+# event: hit
+# data: {"window_id": 121, "source_id": 13, "score": 0.42, "abs_time": "2026-01-01T09:00:04", ...}
+
+# (b) 定期的に問い合わせる。前回の応答の last_window_id を after_window_id に渡すと、その後に増えた窓だけを探す
+curl -H 'Content-Type: application/json' -d '{"query": "赤い車", "after_window_id": 120}' http://localhost:8000/api/search/text
+```
+
+- (a) は、接続時にクエリを 1 回だけベクトル化し、以降は新しい窓だけを照合します(0.5 秒ごと)。`duration_sec`(既定 3600)で接続を閉じます。
+  再接続のときは、最後に受け取った `window_id` を `after_window_id` に渡すと、取りこぼしなく続けられます。
+- ブラウザでは `new EventSource("/api/search/live?query=...")` で受け取れます。WebUI では「新しい窓を通知」を「する」にして文章で検索します。
+- `API_TOKEN` を設定している場合、EventSource はヘッダーを付けられないため、WebUI と同じく Cookie(`mediasearch_token`)で認証します。
+- MCP の `search_text` にも `after_window_id` があります。
+
 ## クライアントの自動生成
 
 `docs/openapi.json` から、各言語のクライアントを生成できます。

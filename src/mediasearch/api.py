@@ -7,16 +7,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
 import shutil
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 from . import media
 from .ingest_files import MEDIA_KINDS, is_within, media_kind_of
@@ -125,6 +129,7 @@ def _filters_form(kind_description: str):
         to_ts: str | None = Form(None, description="この日時以前(UNIX 秒か ISO 8601)"),
         kind: SearchKind = Form("auto", description=kind_description),
         merge: str | None = Form(None, description="隣り合う窓を区間にまとめた intervals も返す(既定 true)"),
+        after_window_id: str | None = Form(None, description="この ID より後に追加された窓だけを探す"),
     ) -> dict:
         try:
             score = float(min_score) if min_score else 0.0
@@ -139,6 +144,7 @@ def _filters_form(kind_description: str):
             "to_ts": to_ts,
             "kind": kind,
             "merge": _opt_bool(merge) is not False,
+            "after_window_id": _opt_int(after_window_id, "after_window_id"),
         }
 
     return dependency
@@ -476,6 +482,75 @@ def build_api_router(ctx: Context) -> APIRouter:
         if pcm.size == 0:
             raise HTTPException(400, "音声を読み取れませんでした")
         return svc.search_audio(pcm, **filters)
+
+    @router.get(
+        "/search/live",
+        tags=["検索"],
+        summary="取り込み中の新しい窓から、文章に合うものを通知する(リアルタイム検索・SSE)",
+        response_class=StreamingResponse,
+        responses={
+            200: {
+                "description": (
+                    "Server-Sent Events。`event: ready`(接続時。data は {last_window_id})、"
+                    "`event: hit`(新しく見つかった窓。data は検索結果の 1 件と同じ形)、"
+                    "`event: end`(duration_sec の経過)。"
+                    "15 秒ごとに、接続を保つためのコメント行を送ります"
+                ),
+                "content": {"text/event-stream": {"schema": {"type": "string"}}},
+            },
+            **errors(400, 401, 409, 503),
+        },
+    )
+    async def search_live(
+        request: Request,
+        query: str = Query(..., min_length=1, description="探したい内容を表す文章"),
+        min_score: float = Query(0.3, description="これ以上のスコアの窓だけを通知する"),
+        group_id: str | None = Query(None, description="グループ ID で絞り込む"),
+        location: str | None = Query(None, description="場所で絞り込む"),
+        kind: SearchKind = Query("auto", description="探す窓の種類"),
+        after_window_id: int | None = Query(
+            None, description="この ID より後の窓から通知する(省略時は接続した後に追加された窓だけ。再接続のときに使う)"
+        ),
+        duration_sec: int = Query(3600, ge=1, le=86_400, description="この秒数が経つと接続を閉じる(再接続して続ける)"),
+    ) -> StreamingResponse:
+        """取り込み中(動画・音声・画像・ストリーム)に追加された窓のうち、文章に合うものを、追加されるたびに通知します。
+
+        ブラウザでは `new EventSource("/api/search/live?query=...")` で受け取れます(API_TOKEN を設定している場合は、
+        WebUI と同じく Cookie で認証します)。クエリのベクトル化は接続時の 1 回だけで、以降は新しい窓だけを照合します。
+        """
+        qvec = await run_in_threadpool(svc.text_vector, query)
+        filters = {"min_score": min_score, "group_id": group_id, "location": location, "kind": kind, "merge": False}
+        seen = ctx.store.last_window_id if after_window_id is None else after_window_id
+
+        def event(name: str, data: dict) -> str:
+            return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        async def stream():
+            nonlocal seen
+            yield event("ready", {"last_window_id": seen})
+            started = last_sent = time.monotonic()
+            while time.monotonic() - started < duration_sec:
+                if await request.is_disconnected():
+                    return
+                latest = ctx.store.last_window_id
+                if latest > seen:
+                    res = await run_in_threadpool(
+                        svc.search, qvec, {**filters, "after_window_id": seen, "top_k": 1000}
+                    )
+                    # 検索中に増えた窓は、次の回に通知する(重複して送らない)
+                    hits = sorted((h for h in res["results"] if h["window_id"] <= latest), key=lambda h: h["window_id"])
+                    for h in hits:
+                        yield event("hit", h)
+                        last_sent = time.monotonic()
+                    seen = latest
+                elif time.monotonic() - last_sent > 15:
+                    yield ": keep-alive\n\n"
+                    last_sent = time.monotonic()
+                await asyncio.sleep(0.5)
+            yield event("end", {"last_window_id": seen})
+
+        headers = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}  # 中継のサーバーにためさせない
+        return StreamingResponse(stream(), media_type="text/event-stream", headers=headers)
 
     # ------------------------------------------------------------------ 取り込み元・ジョブ
     @router.get(

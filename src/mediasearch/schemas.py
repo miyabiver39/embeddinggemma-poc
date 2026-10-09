@@ -201,6 +201,11 @@ class SearchResponse(BaseModel):
     took_ms: int = Field(description="DB の検索にかかった時間(ミリ秒)")
     embed_ms: int = Field(description="クエリのベクトル化にかかった時間(ミリ秒)")
     searched_kinds: str = Field(description="指定された kind")
+    last_window_id: int = Field(
+        description=(
+            "検索の時点で最後に追加されていた窓の ID。次の検索の after_window_id に渡すと、その後に増えた窓だけを探せる"
+        )
+    )
 
 
 class TextSearchRequest(BaseModel):
@@ -213,6 +218,13 @@ class TextSearchRequest(BaseModel):
     to_ts: str | None = Field(None, description="この日時以前(UNIX 秒か ISO 8601)")
     kind: SearchKind = Field("auto", description="探す窓の種類")
     merge: bool = Field(True, description="隣り合う窓を区間にまとめた intervals も返す")
+    after_window_id: int | None = Field(
+        None,
+        description=(
+            "この ID より後に追加された窓だけを探す。取り込み中の新しい結果を定期的に問い合わせるときに、"
+            "前回の応答の last_window_id を渡す(通知を受け取る場合は GET /api/search/live)"
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
