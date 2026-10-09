@@ -162,7 +162,8 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 
 - **メタデータ(グループ ID・場所・時刻)はベクトルに埋め込みません。** 別の列に保存し、検索時に絞り込みます(ベクトルに混ぜると検索精度と再現性が落ちるため)。
 - DB には**モデルID・次元・窓の設定**を記録し、**違う設定での追記は 409 で拒否**します(ベクトル空間の混在防止)。`DIMS` を変えたいときは `DATA_DIR` を作り直して再取り込みしてください。
-- 「映像のみ(frames)」「映像+音声(tav)」「音声のみ(audio)」は**別のベクトル空間**として別々に検索します(`kind` で指定。`auto` は `INCLUDE_AUDIO` の設定に合わせて tav か frames を探します。音声で検索したときの `auto` は `audio` を探します)。
+- 「映像のみ(frames)」「映像+音声(tav)」「音声のみ(audio)」「静止画(image)」は種類(`kind`)を分けて保存し、検索時に選びます。`auto` は、文字・画像で検索したときは `INCLUDE_AUDIO` の設定に合わせて tav か frames と、image を探します。音声で検索したときの `auto` は `audio` を探します。
+- **画像だけでも登録できます。** 動画から切り出せない場合や写真だけを扱う場合は、画像 1 枚を 1 件として取り込みます(`/api/ingest/image`、パス指定、フォルダ一括、監視フォルダのいずれも対応)。撮影日時は指定値、ファイル名の日時、EXIF の撮影日時の順に採用します。
 - 検索は SQLite に保存したベクトルを numpy の総当たり(コサイン類似度)で探します。件数が増えると検索時間とメモリが線形に増えます(256次元なら100万窓で約1GB)。目安は百万窓程度まで。それ以上は専用のベクトル DB への差し替えを検討してください(設計書参照)。
 
 ## API の概要
@@ -170,13 +171,13 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | | |
 |---|---|
 | `GET /api/info` | 状態・版・既定値・プリセット・索引の件数・監視フォルダの状態 |
-| `POST /api/ingest/video` / `audio` | ファイルのアップロード取り込み |
+| `POST /api/ingest/video` / `audio` / `image` | ファイルのアップロード取り込み(画像は複数枚をまとめて送れる) |
 | `POST /api/ingest/path` | コンテナ内パスの取り込み |
 | `POST /api/ingest/dir` | コンテナ内フォルダの一括取り込み |
 | `POST /api/watch/scan` | 監視フォルダを今すぐ走査 |
 | `POST /api/ingest/frames` | 加工済みフレーム(+音声)の取り込み |
 | `POST /api/search/text` / `image` / `audio` | 検索(グループ ID・場所・期間・種別・最小スコアで絞り込み) |
-| `GET /api/jobs`, `/api/sources` ほか | ジョブ・ソースの確認、削除、再取り込み |
+| `GET /api/jobs`, `/api/sources`, `/api/sources/{id}` ほか | ジョブ・取り込み元の確認、削除、再取り込み |
 | `GET /api/media/{id}`, `/api/thumb/{id}` | 元動画(Range 対応)とサムネイル |
 | `/compute/*` | ベクトル化 API(ROLE=compute / all) |
 

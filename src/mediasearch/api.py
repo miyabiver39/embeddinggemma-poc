@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from . import __version__, media
 from .config import PRESETS, Settings
 from .embedders import Embedder
-from .ingest_files import FileIntake, is_within
+from .ingest_files import MEDIA_KINDS, FileIntake, is_within, media_kind_of
 from .media import MediaError
 from .pipeline import Ingestor, IngestParams
 from .store import Store
@@ -32,7 +32,7 @@ from .watcher import FolderWatcher
 
 log = logging.getLogger(__name__)
 
-KIND_CHOICES = ("auto", "all", "frames", "tav", "audio")
+KIND_CHOICES = ("auto", "all", "frames", "tav", "audio", "image")
 
 
 @dataclass
@@ -150,14 +150,14 @@ class IngestPathRequest(BaseModel):
     frames_per_window: int | None = None
     overlap_sec: int | None = None
     include_audio: bool | None = None
-    kind: str = "video"  # video / audio
+    kind: str = "auto"  # auto(拡張子で判定) / video / audio / image
     force: bool = False  # 取り込み済みでも、もう一度取り込む
 
 
 class IngestDirRequest(BaseModel):
     dir: str
     recursive: bool = True
-    kind: str = "auto"  # auto(拡張子で判定) / video / audio
+    kind: str = "auto"  # auto(拡張子で判定) / video / audio / image
     group_id: str | None = None
     group_from_dir: bool = False  # ファイルが入っているフォルダ名をグループ ID にする
     location: str | None = None
@@ -235,7 +235,8 @@ def build_api_router(ctx: Context) -> APIRouter:
         if kind == "auto":
             if auto_kinds is not None:
                 return auto_kinds
-            return ["tav"] if s.include_audio else ["frames"]
+            # 静止画(image)は映像のみの窓と同じく画像だけを入力にしたベクトルなので、文字・画像のクエリで一緒に探す
+            return ["tav" if s.include_audio else "frames", "image"]
         return [kind]
 
     def _search(qvec: np.ndarray, f: dict, auto_kinds: list[str] | None = None, embed_ms: int = 0) -> dict:
@@ -348,6 +349,29 @@ def build_api_router(ctx: Context) -> APIRouter:
         params = _params(None, None, None, None, None, _opt_int(chunk_sec, "chunk_sec"))
         return _accept_upload(file, "audio", start_ts, group_id=group_id, location=location, params=params)
 
+    @router.post("/ingest/image")
+    def ingest_image(
+        files: list[UploadFile] = File(..., description="画像ファイル(複数可。JPEG / PNG / WebP / BMP / TIFF)"),
+        group_id: str | None = Form(None),
+        location: str | None = Form(None),
+        start_ts: str | None = Form(None),
+    ) -> dict:
+        """静止画を取り込みます。画像 1 枚が 1 件の取り込み元になります(動画から切り出せない場合など)。
+
+        撮影日時は start_ts、ファイル名の日時、EXIF の撮影日時、受付時刻の順に採用します。
+        1 枚ずつ受け付け、取り込めない画像があっても残りは処理します(結果は items と errors に分けて返します)。
+        """
+        params = _params(None, None, None, None, None)
+        items, errors = [], []
+        for upload in files:
+            try:
+                items.append(
+                    _accept_upload(upload, "image", start_ts, group_id=group_id, location=location, params=params)
+                )
+            except MediaError as exc:
+                errors.append({"name": upload.filename, "error": str(exc)})
+        return {"queued": len(items), "items": items, "errors": errors}
+
     @router.post("/ingest/path")
     def ingest_path(body: IngestPathRequest) -> dict:
         """サーバ(コンテナ)内にあるファイルを取り込みます。録画ディレクトリをマウントして使う想定です。
@@ -360,8 +384,12 @@ def build_api_router(ctx: Context) -> APIRouter:
             raise HTTPException(
                 400, f"ファイルが見つかりません: {body.path}(コンテナ内のパスで指定してください)"
             )
-        if body.kind not in ("video", "audio"):
-            raise HTTPException(400, "kind は video か audio にしてください")
+        if body.kind not in ("auto", *MEDIA_KINDS):
+            raise HTTPException(400, "kind は auto / video / audio / image のいずれかにしてください")
+        ctx.intake.check_allowed(path)  # 許可したフォルダの外なら、拡張子に関係なく 403 にする
+        kind = media_kind_of(path) if body.kind == "auto" else body.kind
+        if kind is None:
+            raise MediaError(f"映像・音声・画像として扱えない拡張子です: {path.name}")
         params = _params(
             body.preset,
             body.window_sec,
@@ -371,7 +399,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         )
         return ctx.intake.accept(
             path,
-            kind=body.kind,
+            kind=kind,
             group_id=body.group_id,
             location=body.location,
             start_ts=parse_opt_ts(body.start_ts),
@@ -386,8 +414,8 @@ def build_api_router(ctx: Context) -> APIRouter:
         録画開始時刻はファイル名の日時から読み取ります(読み取れなければ受付時刻)。
         取り込み済みのファイルは飛ばすので、同じフォルダに何度実行しても重複しません。
         """
-        if body.kind not in ("auto", "video", "audio"):
-            raise HTTPException(400, "kind は auto / video / audio のいずれかにしてください")
+        if body.kind not in ("auto", *MEDIA_KINDS):
+            raise HTTPException(400, "kind は auto / video / audio / image のいずれかにしてください")
         params = _params(
             body.preset,
             body.window_sec,
@@ -545,6 +573,13 @@ def build_api_router(ctx: Context) -> APIRouter:
     def list_sources(limit: int = 200) -> dict:
         return {"sources": ctx.store.list_sources(limit)}
 
+    @router.get("/sources/{source_id}")
+    def get_source(source_id: int) -> dict:
+        src = ctx.store.get_source(source_id)
+        if src is None:
+            raise HTTPException(404, "取り込み元が見つかりません")
+        return src
+
     @router.delete("/sources/{source_id}")
     def delete_source(source_id: int) -> dict:
         src = ctx.store.get_source(source_id)
@@ -559,7 +594,7 @@ def build_api_router(ctx: Context) -> APIRouter:
     @router.post("/sources/{source_id}/reindex")
     def reindex_source(source_id: int) -> dict:
         src = ctx.store.get_source(source_id)
-        if src is None or src["kind"] not in ("video", "audio"):
+        if src is None or src["kind"] not in MEDIA_KINDS:
             raise HTTPException(404, "再取り込みできる取り込み元が見つかりません")
         if not src["path"] or not Path(src["path"]).is_file():
             raise HTTPException(404, f"元のファイルが見つかりません: {src['path']}")
@@ -585,7 +620,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         # 配信するのは、受付時の検証を通った映像・音声だけ(取り込みに失敗したものは返さない)
         if (
             src is None
-            or src["kind"] not in ("video", "audio")
+            or src["kind"] not in MEDIA_KINDS
             or src["status"] == "failed"
             or not src["path"]
             or not is_within(src["path"], s.ingest_roots)  # 以前の版で登録された、許可外のパスも返さない
@@ -601,11 +636,16 @@ def build_api_router(ctx: Context) -> APIRouter:
             return FileResponse(thumb, media_type="image/jpeg")
         window = ctx.store.get_window(window_id)
         src = ctx.store.get_source(window["source_id"]) if window else None
-        if not window or not src or src["kind"] != "video" or not src["path"]:
+        if not window or not src or src["kind"] not in ("video", "image") or not src["path"]:
             raise HTTPException(404, "サムネイルがありません")
         mid = (window["start_ms"] + window["end_ms"]) // 2
         try:
-            media.make_thumbnail(src["path"], mid, thumb)
+            if src["kind"] == "image":
+                from .pipeline import save_thumbnail
+
+                save_thumbnail(media.load_image(src["path"], 320), thumb)
+            else:
+                media.make_thumbnail(src["path"], mid, thumb)
         except MediaError as exc:
             raise HTTPException(404, f"サムネイルを作れません: {exc}") from exc
         return FileResponse(thumb, media_type="image/jpeg")

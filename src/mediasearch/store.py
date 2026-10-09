@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS meta (
 
 CREATE TABLE IF NOT EXISTS sources (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind TEXT NOT NULL,            -- video / audio / frames
+  kind TEXT NOT NULL,            -- video / audio / image / frames
   path TEXT,                     -- 映像・音声ファイルのパス(frames は NULL)
   name TEXT NOT NULL,
   group_id TEXT,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS windows (
   source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
   start_ms INTEGER NOT NULL,
   end_ms INTEGER NOT NULL,
-  kind TEXT NOT NULL,            -- frames(映像のみ) / tav(映像+音声) / audio(音声のみ)
+  kind TEXT NOT NULL,            -- frames(映像のみ) / tav(映像+音声) / audio(音声のみ) / image(静止画 1 枚)
   group_id TEXT,
   abs_ts REAL NOT NULL,          -- 窓の開始時刻(UNIX 秒) = source.start_ts + start_ms / 1000
   vec BLOB NOT NULL
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 """
 
-WINDOW_KINDS = ("frames", "tav", "audio")
+WINDOW_KINDS = ("frames", "tav", "audio", "image")
 
 
 class IndexMismatch(RuntimeError):

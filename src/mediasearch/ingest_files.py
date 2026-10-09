@@ -33,6 +33,8 @@ VIDEO_EXTS = frozenset(
     {".mp4", ".m4v", ".mov", ".mkv", ".avi", ".ts", ".mts", ".m2ts", ".webm", ".flv", ".wmv", ".3gp"}
 )
 AUDIO_EXTS = frozenset({".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".oga", ".opus", ".wma"})
+IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"})
+MEDIA_KINDS = ("video", "audio", "image")
 
 # ファイル名に含まれる日時。例: 20260101_090000 / 2026-01-01T09-00-00 / group-a-20260101-090000.mp4
 _TS_PATTERN = re.compile(
@@ -51,12 +53,14 @@ def is_within(path: str | Path, roots: tuple[Path, ...]) -> bool:
 
 
 def media_kind_of(path: str | Path) -> str | None:
-    """拡張子から、映像(video)か音声(audio)かを判定します。どちらでもなければ None。"""
+    """拡張子から、映像(video)・音声(audio)・画像(image)のどれかを判定します。どれでもなければ None。"""
     ext = Path(path).suffix.lower()
     if ext in VIDEO_EXTS:
         return "video"
     if ext in AUDIO_EXTS:
         return "audio"
+    if ext in IMAGE_EXTS:
+        return "image"
     return None
 
 
@@ -114,15 +118,22 @@ class FileIntake:
                 f"(許可しているフォルダ: {allowed}。環境変数 INGEST_ROOTS で変更できます)"
             )
 
-    def validate(self, path: Path, kind: str) -> media.MediaInfo:
+    def validate(self, path: Path, kind: str) -> None:
         """取り込めるファイルか確かめます。だめなら MediaError(API では 422 か 403)を送出します。"""
         self.check_allowed(path)
         expected = media_kind_of(path)
         if expected is None:
             raise MediaError(
-                f"映像・音声として扱えない拡張子です: {path.name}"
-                f"(対応: {', '.join(sorted(VIDEO_EXTS | AUDIO_EXTS))})"
+                f"映像・音声・画像として扱えない拡張子です: {path.name}"
+                f"(対応: {', '.join(sorted(VIDEO_EXTS | AUDIO_EXTS | IMAGE_EXTS))})"
             )
+        if kind == "image" or expected == "image":
+            if expected != "image" or kind != "image":
+                raise MediaError(f"画像は kind=image、それ以外は video / audio で取り込んでください: {path.name}")
+            width, height = media.check_image(path)
+            if width < 8 or height < 8:  # 1 ピクセルの追跡用画像などは、検索の対象として意味がない
+                raise MediaError(f"画像が小さすぎます({width}x{height}): {path.name}")
+            return
         info = media.probe(path)
         if kind == "video" and not info.has_video:
             raise MediaError(f"映像トラックがありません: {path.name}(音声だけなら kind=audio で取り込んでください)")
@@ -130,7 +141,6 @@ class FileIntake:
             raise MediaError(f"音声トラックがありません: {path.name}")
         if info.duration_ms <= 0:
             raise MediaError(f"長さが 0 です: {path.name}")
-        return info
 
     def accept(
         self,
@@ -157,6 +167,8 @@ class FileIntake:
             ts, ts_from = start_ts, "request"
         elif (guessed := ts_from_filename(name)) is not None:
             ts, ts_from = guessed, "filename"
+        elif kind == "image" and (taken := media.image_taken_at(path)) is not None:
+            ts, ts_from = taken, "exif"
         else:
             ts, ts_from = time.time(), "now"
 

@@ -139,3 +139,56 @@ def format_time(ms: int) -> str:
     hours, rest = divmod(total, 3600)
     minutes, seconds = divmod(rest, 60)
     return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes:02d}:{seconds:02d}"
+
+
+# ---------------------------------------------------------------------- 静止画
+def load_image(path: str | Path, max_side: int = 448) -> np.ndarray:
+    """静止画を RGB 配列で読み込みます。EXIF の向き(スマートフォンの縦撮りなど)を反映し、長辺を max_side に縮小します。
+
+    動画から切り出せない場合でも、画像だけで登録できるようにするための入口です。
+    """
+    from PIL import ImageOps, UnidentifiedImageError
+
+    try:
+        with Image.open(path) as img:
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            if max_side and max(img.size) > max_side:
+                img.thumbnail((max_side, max_side))
+            return np.asarray(img)
+    except (UnidentifiedImageError, OSError) as exc:
+        raise MediaError(f"画像として読めません: {Path(path).name}({exc})") from exc
+
+
+def check_image(path: str | Path) -> tuple[int, int]:
+    """画像として読めるか確かめ、(幅, 高さ) を返します。全体を復号せずに確認するため速く済みます。"""
+    from PIL import UnidentifiedImageError
+
+    try:
+        with Image.open(path) as img:
+            size = img.size  # verify の後は画像を使えないため、先に大きさを取っておく
+            img.verify()  # ファイルの破損を検出する
+            return size
+    except (UnidentifiedImageError, OSError, SyntaxError) as exc:
+        raise MediaError(f"画像として読めません: {Path(path).name}({exc})") from exc
+
+
+def image_taken_at(path: str | Path) -> float | None:
+    """EXIF の撮影日時(DateTimeOriginal、なければ DateTime)を UNIX 秒で返します。無ければ None。
+
+    EXIF の日時にはタイムゾーンが無いため、コンテナの設定(TZ)として解釈します。
+    """
+    from datetime import datetime
+
+    try:
+        with Image.open(path) as img:
+            exif = img.getexif()
+            # 0x8769: 詳細情報(Exif IFD)。DateTimeOriginal(0x9003)はこの中にある。0x0132: DateTime
+            value = exif.get_ifd(0x8769).get(0x9003) or exif.get(0x0132)
+    except Exception:  # EXIF の破損は、撮影日時が無いものとして扱う
+        return None
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value).strip()[:19], "%Y:%m:%d %H:%M:%S").timestamp()
+    except ValueError:
+        return None

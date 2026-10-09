@@ -170,6 +170,16 @@ def build_window_parts(
     return parts
 
 
+def save_thumbnail(image: np.ndarray, dest: Path) -> None:
+    """検索結果に表示するサムネイル(長辺 320px の JPEG)を保存します。"""
+    from PIL import Image
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    thumb = Image.fromarray(image)
+    thumb.thumbnail((320, 320))
+    thumb.save(dest, format="JPEG", quality=80)
+
+
 class Ingestor:
     """取り込みジョブを、バックグラウンドのスレッドで1つずつ処理します。"""
 
@@ -228,6 +238,8 @@ class Ingestor:
                 self._index_video(job_id, source)
             elif source["kind"] == "audio":
                 self._index_audio(job_id, source)
+            elif source["kind"] == "image":
+                self._index_image(job_id, source)
             else:
                 raise ValueError(f"キューで処理できない種類です: {source['kind']}")
         except Exception as exc:
@@ -314,6 +326,29 @@ class Ingestor:
             )
             self._store.update_job(job_id, progress=n)
 
+    def _index_image(self, job_id: int, source: dict) -> None:
+        """静止画 1 枚を 1 ベクトルにします(窓は 1 つ。時刻の幅は 0)。
+
+        動画から切り出せない場合や、写真だけを検索したい場合のための取り込みです。
+        画像単体のベクトルは、映像の窓(frames)と同じく画像だけを入力にしたものなので、文字や画像のクエリで探せます。
+        """
+        image = media.load_image(source["path"], self._settings.image_max_side)
+        self._store.update_source(source["id"], duration_ms=0)
+        self._store.delete_windows(source["id"])
+        self._store.update_job(job_id, total=1, progress=0)
+        vec = self._embedder.embed_images([image], high=False)[0]
+        window_id = self._store.add_window(
+            source_id=source["id"],
+            start_ms=0,
+            end_ms=0,
+            kind="image",
+            group_id=source["group_id"],
+            abs_ts=source["start_ts"],
+            vec=vec,
+        )
+        save_thumbnail(image, self._settings.data_dir / "thumbs" / f"w{window_id}.jpg")
+        self._store.update_job(job_id, progress=1)
+
     # ------------------------------------------------------------------ 加工済みフレームの取り込み
     def index_frames_now(
         self,
@@ -363,10 +398,5 @@ class Ingestor:
             abs_ts=start_ts + min(times_ms) / 1000,
             vec=vec,
         )
-        from PIL import Image
-
-        thumb_dir.mkdir(parents=True, exist_ok=True)
-        thumb = Image.fromarray(frames[0])
-        thumb.thumbnail((320, 320))
-        thumb.save(thumb_dir / f"w{window_id}.jpg", format="JPEG", quality=80)
+        save_thumbnail(frames[0], thumb_dir / f"w{window_id}.jpg")
         return {"source_id": source_id, "window_id": window_id, "kind": kind}

@@ -10,7 +10,8 @@
 
 ## 取り込みのコツ
 
-- 取り込める拡張子: 映像 `.mp4 .m4v .mov .mkv .avi .ts .mts .m2ts .webm .flv .wmv .3gp`、音声 `.wav .mp3 .m4a .aac .flac .ogg .oga .opus .wma`。
+- 取り込める拡張子: 映像 `.mp4 .m4v .mov .mkv .avi .ts .mts .m2ts .webm .flv .wmv .3gp`、音声 `.wav .mp3 .m4a .aac .flac .ogg .oga .opus .wma`、画像 `.jpg .jpeg .png .webp .bmp .tif .tiff`。
+- 画像は 1 枚が 1 件の取り込み元になり、窓の種類は `image` です。8x8 ピクセル未満の画像は受け付けません。EXIF の向きは補正してから取り込みます。
   それ以外の拡張子や、ffprobe で読めないファイルは、受付の時点で 422 になります(ジョブは作られません)。
 - 録画ファイル名に開始日時(`20260101_090000` など)が入っていれば、`start_ts` を省略できます。応答の `start_ts_from` で、何を採用したか(`request` 指定値 / `filename` ファイル名 / `now` 受付時刻)を確認できます。
 - 同じファイルは重複して登録されません。設定を変えて取り込み直す場合は、WebUI の「再取り込み」か、`"force": true` を使います。
