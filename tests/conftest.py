@@ -8,8 +8,8 @@ import subprocess
 import pytest
 from fastapi.testclient import TestClient
 
-from vmsembed.config import Settings
-from vmsembed.main import create_app
+from mediasearch.config import Settings
+from mediasearch.main import create_app
 
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg が必要です")
 

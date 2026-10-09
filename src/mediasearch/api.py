@@ -291,8 +291,8 @@ def build_api_router(ctx: Context) -> APIRouter:
             "version": {
                 "app": __version__,
                 "variant": os.environ.get("VARIANT", "source"),
-                "revision": os.environ.get("VMSEMBED_REVISION", "unknown"),
-                "build_ref": os.environ.get("VMSEMBED_BUILD_REF", "local"),
+                "revision": os.environ.get("MEDIASEARCH_REVISION", "unknown"),
+                "build_ref": os.environ.get("MEDIASEARCH_BUILD_REF", "local"),
             },
             "embedder": embedder,
             "defaults": {
@@ -350,7 +350,7 @@ def build_api_router(ctx: Context) -> APIRouter:
 
     @router.post("/ingest/path")
     def ingest_path(body: IngestPathRequest) -> dict:
-        """サーバ(コンテナ)内にあるファイルを取り込みます。VMS の録画ディレクトリをマウントして使う想定です。
+        """サーバ(コンテナ)内にあるファイルを取り込みます。録画ディレクトリをマウントして使う想定です。
 
         start_ts を省略すると、ファイル名の日時(例: 20260101_090000)を録画開始時刻にします。
         取り込み済みのファイルは重複として既存の取り込み元を返します(force=true で取り込み直し)。

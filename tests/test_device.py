@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from vmsembed.embedders.local import run_probe
+from mediasearch.embedders.local import run_probe
 
 
 def test_probe_returns_last_line():

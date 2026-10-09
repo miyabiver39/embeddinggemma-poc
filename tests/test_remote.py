@@ -9,9 +9,9 @@ import numpy as np
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from vmsembed.embedders.dummy import DummyEmbedder
-from vmsembed.embedders.remote import RemoteEmbedder
-from vmsembed.main import create_app
+from mediasearch.embedders.dummy import DummyEmbedder
+from mediasearch.embedders.remote import RemoteEmbedder
+from mediasearch.main import create_app
 
 
 def test_remote_embedder_matches_local(settings, tmp_path):

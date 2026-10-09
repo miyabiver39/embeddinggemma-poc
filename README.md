@@ -1,7 +1,7 @@
-# vmsembed — EmbeddingGemma 2 で動画・音声・画像・文章を横断検索する(開発用)
+# mediasearch — EmbeddingGemma 2 で動画・音声・画像・文章を横断検索する(開発用)
 
 「赤い車が映っている場面」「サイレンが鳴っている区間」のような**言葉(または画像・音声)**で、録画映像の**該当時刻**を探すための
-バックエンド基盤です。VMS(映像管理システム)への組み込みを想定した開発用で、
+バックエンド基盤です。他のシステムへの組み込みを想定した開発用で、
 Google の [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) を使います。
 
 - 取り込み(ffmpeg で時間窓に分割 → ベクトル化 → SQLite に保存)と検索を **1つのコンテナ**で提供
@@ -19,7 +19,7 @@ Google の [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) �
 ## クイックスタート(まずは CPU)
 
 ```bash
-docker run -d --name vmsembed -p 8000:8000 -v ./data:/data \
+docker run -d --name mediasearch -p 8000:8000 -v ./data:/data \
   ghcr.io/miyabiver39/embeddinggemma-poc:cpu
 ```
 
@@ -31,7 +31,7 @@ docker run -d --name vmsembed -p 8000:8000 -v ./data:/data \
 ### 録画ディレクトリをそのまま取り込む
 
 ```bash
-docker run -d --name vmsembed -p 8000:8000 -v ./data:/data -v /path/to/recordings:/recordings:ro \
+docker run -d --name mediasearch -p 8000:8000 -v ./data:/data -v /path/to/recordings:/recordings:ro \
   ghcr.io/miyabiver39/embeddinggemma-poc:cpu
 
 # 1 ファイルを取り込む(録画開始時刻はファイル名の 20260101_090000 から読み取ります)
@@ -50,7 +50,7 @@ curl -X POST localhost:8000/api/ingest/dir -H 'Content-Type: application/json' \
 ### 録画フォルダを監視して自動で取り込む
 
 ```bash
-docker run -d --name vmsembed -p 8000:8000 -v ./data:/data -v /path/to/recordings:/recordings:ro \
+docker run -d --name mediasearch -p 8000:8000 -v ./data:/data -v /path/to/recordings:/recordings:ro \
   -e WATCH_DIRS=/recordings ghcr.io/miyabiver39/embeddinggemma-poc:cpu
 ```
 
@@ -180,7 +180,7 @@ pip install -e ".[dev]"          # モデル不要のテスト用
 pytest -q                        # ダミー埋め込みでの通しテスト(ffmpeg が必要)
 pip install -e ".[model]"        # 実モデルを使う場合(transformers は AGENTS.md の固定コミットを推奨)
 RUN_MODEL_TESTS=1 pytest -q -m model
-EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory vmsembed.main:create_app --reload
+EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:create_app --reload
 ```
 
 ## リリースと SBOM・脆弱性検査

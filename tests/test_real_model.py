@@ -9,8 +9,8 @@ from conftest import make_video, needs_ffmpeg
 from fastapi.testclient import TestClient
 from test_e2e_dummy import wait_done
 
-from vmsembed.config import Settings
-from vmsembed.main import create_app
+from mediasearch.config import Settings
+from mediasearch.main import create_app
 
 pytestmark = [pytest.mark.model, needs_ffmpeg]
 

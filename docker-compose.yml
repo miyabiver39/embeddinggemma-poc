@@ -10,7 +10,7 @@ x-common: &common
   #   API_TOKEN: "<推測されにくい値>"   # 信頼できるネットワークの外で使う場合は必ず設定(docs/security.md)
   volumes:
     - ./data:/data
-    # - /path/to/recordings:/recordings:ro   # VMS の録画ディレクトリ(/api/ingest/path で指定)
+    # - /path/to/recordings:/recordings:ro   # 録画ディレクトリ(/api/ingest/path で指定)
 
 services:
   cpu:

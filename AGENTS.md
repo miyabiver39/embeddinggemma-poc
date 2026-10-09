@@ -5,7 +5,7 @@
 
 ## 1. プロジェクト概要
 
-Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向けのマルチモーダル検索基盤です。
+Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチモーダル検索基盤です。
 テキスト・画像・動画・音声を同じベクトル空間に変換し、文章や画像で映像の該当場面を探します。
 
 - 用途: **開発中の検証用途**です。運用品質の保証はしません。**自己責任**で利用する前提です。
@@ -87,7 +87,7 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 - [ ] GPU 3 種(cuda / rocm / xpu)の動作、bf16 の NaN の有無、RX 9060 XT が ROCm 7.2 ホイールで動くか
 - [ ] GPU での 1 窓あたりの処理時間
 - [ ] ONNX Runtime / OpenVINO / TensorRT へ変換したときのベクトル一致度と速度(フェーズ 2)
-- [ ] 実際の監視映像での検索精度
+- [ ] 実際の録画映像での検索精度
 - [ ] リリース時の SBOM・脆弱性検査ワークフロー(`security.yml`)のタグ契機での実行とリリースへの添付(手動実行では 5 イメージの SBOM 作成・検査・集計まで成功を確認済み)
 
 ## 7. ディレクトリ構成
@@ -96,7 +96,7 @@ Google の **EmbeddingGemma 2** を使った、VMS(映像管理システム)向�
 .
 ├── AGENTS.md / README.md / LICENSE / docker-compose.yml
 ├── docs/                  design.md(設計書) operations.md(運用) gpu.md(GPU確認手順) security.md(セキュリティ対策) release.md(リリース)
-├── src/vmsembed/
+├── src/mediasearch/
 │   ├── main.py            アプリ生成(ROLE で構成が変わる)
 │   ├── api.py             取り込み・検索・参照 API
 │   ├── compute_api.py     ベクトル化 API(/compute/*)
@@ -134,7 +134,7 @@ pytest -q
 ruff check .
 
 # ローカル起動(モデルを使わない動作確認用)
-EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory vmsembed.main:create_app --reload
+EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:create_app --reload
 ```
 
 イメージのビルドは GitHub Actions で行います。ローカルでビルドする必要はありません。

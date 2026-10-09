@@ -28,7 +28,7 @@ from .store import Store
 
 log = logging.getLogger(__name__)
 
-# 取り込める拡張子。VMS の録画でよく使われる形式を挙げています
+# 取り込める拡張子。録画でよく使われる形式を挙げています
 VIDEO_EXTS = frozenset(
     {".mp4", ".m4v", ".mov", ".mkv", ".avi", ".ts", ".mts", ".m2ts", ".webm", ".flv", ".wmv", ".3gp"}
 )
@@ -63,7 +63,7 @@ def media_kind_of(path: str | Path) -> str | None:
 def ts_from_filename(name: str) -> float | None:
     """ファイル名から録画開始の日時を読み取り、UNIX 秒で返します。読み取れなければ None。
 
-    多くの VMS は録画ファイル名に開始日時を入れるため、start_ts を省略したときの既定に使います。
+    多くの録画システムは録画ファイル名に開始日時を入れるため、start_ts を省略したときの既定に使います。
     タイムゾーンはコンテナの設定(TZ、既定は Asia/Tokyo)として解釈します。
     """
     m = _TS_PATTERN.search(Path(name).name)

@@ -7,26 +7,26 @@
 #   - docker run --user で起動した場合は、その利用者のまま動かします(所有者の調整は行いません)。
 set -e
 
-: "${ROLE:=$(cat /etc/vmsembed_role)}"
+: "${ROLE:=$(cat /etc/mediasearch_role)}"
 export ROLE
 
 # DEVICE の既定は auto。GPU を渡していなければ CPU で動きます
-echo "[vmsembed] VARIANT=${VARIANT:-?} ROLE=${ROLE} DEVICE=${DEVICE:-auto} DATA_DIR=${DATA_DIR}"
+echo "[mediasearch] VARIANT=${VARIANT:-?} ROLE=${ROLE} DEVICE=${DEVICE:-auto} DATA_DIR=${DATA_DIR}"
 
-set -- uvicorn --factory vmsembed.main:create_app \
+set -- uvicorn --factory mediasearch.main:create_app \
   --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --log-level "$(echo "${LOG_LEVEL:-info}" | tr 'A-Z' 'a-z')"
 
 PUID="${PUID:-1000}"
 PGID="${PGID:-$PUID}"
 if [ "$(id -u)" != "0" ] || [ "$PUID" = "0" ]; then
-  [ "$(id -u)" = "0" ] && echo "[vmsembed] PUID=0 のため root のまま動かします"
+  [ "$(id -u)" = "0" ] && echo "[mediasearch] PUID=0 のため root のまま動かします"
   exec "$@"
 fi
 
 # データ置き場: 所有者が違うものだけを変更する(以前の版で root が作ったファイルの引き継ぎ。2 回目以降はほぼ何もしない)
 mkdir -p "$DATA_DIR"
 if ! find "$DATA_DIR" \( ! -user "$PUID" -o ! -group "$PGID" \) -exec chown "$PUID:$PGID" {} + 2>/dev/null; then
-  echo "[vmsembed] 警告: ${DATA_DIR} の所有者を変更できないファイルがあります(読み取り専用のマウントなど)"
+  echo "[mediasearch] 警告: ${DATA_DIR} の所有者を変更できないファイルがあります(読み取り専用のマウントなど)"
 fi
 
 # GPU のデバイスファイル(Intel / AMD の /dev/dri、AMD の /dev/kfd)のグループを引き継ぐ。
@@ -39,10 +39,10 @@ for g in $(id -G) $(stat -c %g /dev/dri/* /dev/kfd 2>/dev/null); do
 done
 
 # PyTorch などが作業用のキャッシュを書き込むホーム
-export HOME=/home/vmsembed
+export HOME=/home/mediasearch
 mkdir -p "$HOME" && chown "$PUID:$PGID" "$HOME"
 
-echo "[vmsembed] 一般ユーザー(uid=${PUID} gid=${PGID}${groups:+ 補助グループ=${groups}})に切り替えて起動します"
+echo "[mediasearch] 一般ユーザー(uid=${PUID} gid=${PGID}${groups:+ 補助グループ=${groups}})に切り替えて起動します"
 # --no-new-privs: 切り替えた後に、setuid のプログラムなどで権限を取り戻せないようにする
 if [ -n "$groups" ]; then
   exec setpriv --reuid="$PUID" --regid="$PGID" --groups="$groups" --no-new-privs -- "$@"

@@ -5,7 +5,7 @@
 
 ## 1. 依頼の要点(利用者の意向)
 
-- EmbeddingGemma 2 を使った VMS 向けマルチモーダル検索基盤を、**公開リポジトリ**で作る。開発中の用途、**自己責任**。
+- EmbeddingGemma 2 を使った録画映像・音声のマルチモーダル検索基盤を、**公開リポジトリ**で作る。開発中の用途、**自己責任**。
 - セキュリティは「**実施できる対策は実施する**。ただし追加の設定なしで起動できることは維持する」(2026-10-08 に方針変更。当初は対策不要だった)。バックエンド専用だが、開発用 WebUI は付ける。
 - ビルドは **GitHub Actions** に任せ、利用者は `docker pull` して**追加の設定なしで起動**できること。
 - ドキュメントとコメントは**日本語**。**Mac は想定しない**(今後も不要)。実装は**全て Python**。
@@ -35,7 +35,7 @@
 
 1. **GPU 3 種**(cuda / rocm / xpu)を**実機の GPU で**動かした結果。bf16 での NaN の有無、CPU 版とのベクトル一致度、RX 9060 XT が ROCm 7.2 ホイールで動くか。手順と結果記入欄は `docs/gpu.md`。
    `:cuda` と `:intel` は「GPU なしで起動して CPU で動く」ところまで確認済み。`:rocm` は展開後の容量が作業環境のディスク枠に入らず未実施。
-2. 窓あたりの処理時間(GPU)、実際の監視映像での検索精度。
+2. 窓あたりの処理時間(GPU)、実際の録画映像での検索精度。
 
 解決済み(2026-10-08): コンテナの起動・取り込み・検索(`:cpu` / 分離構成)、`tav` / `audio` / 画像クエリの実モデル通し、音声のトークン率(実測 25/秒)、CPU での窓あたりの処理時間。
 
@@ -75,7 +75,7 @@
 ## 6. 作業環境メモ
 
 - テスト: `pip install -e ".[dev]" && pytest -q`。実モデル: `pip install -e ".[model]"`(transformers は固定コミット、torchvision 必須)のうえ `RUN_MODEL_TESTS=1 pytest -m model`(CPU で約 90 秒)。
-- 手元起動(モデルなし): `EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory vmsembed.main:create_app --reload`
+- 手元起動(モデルなし): `EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:create_app --reload`
 - ffmpeg / ffprobe が必須(テストの動画は ffmpeg の `lavfi` で合成。実在の映像は使わない)。
 - PyTorch は 2.14.1 / torchvision 0.29.1 に固定。入手元: cpu / cu126 / rocm7.2 / xpu(cp312 ホイールの存在を確認済み)。
 - クラウドの作業環境では Docker デーモンが止まっていることがある。`dockerd &` で起動できた(root)。ディスク枠は約 40GB なので、GPU イメージは 1 つずつ pull して確認後に消す。

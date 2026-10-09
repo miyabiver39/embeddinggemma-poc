@@ -8,9 +8,9 @@ import pytest
 from conftest import make_video, needs_ffmpeg
 from fastapi.testclient import TestClient
 
-from vmsembed.embedders.dummy import DummyEmbedder
-from vmsembed.embedders.remote import RemoteEmbedder
-from vmsembed.main import create_app
+from mediasearch.embedders.dummy import DummyEmbedder
+from mediasearch.embedders.remote import RemoteEmbedder
+from mediasearch.main import create_app
 
 TOKEN = "test-token-0123456789abcdef"
 
@@ -37,7 +37,7 @@ def test_token_required_except_public_paths(secured):
     [
         ({"Authorization": f"Bearer {TOKEN}"}, {}),
         ({"X-API-Key": TOKEN}, {}),
-        ({}, {"vmsembed_token": TOKEN}),
+        ({}, {"mediasearch_token": TOKEN}),
     ],
 )
 def test_token_accepted_in_header_or_cookie(secured, headers, cookies):
@@ -60,15 +60,15 @@ def test_cross_site_requests_are_refused(client):
 
 
 def test_allowed_origins(settings):
-    s = replace(settings, allowed_origins=("http://vms.example",))
+    s = replace(settings, allowed_origins=("http://app.example",))
     with TestClient(create_app(s)) as c:
-        r = c.post("/api/search/text", json={"query": "x"}, headers={"Origin": "http://vms.example"})
+        r = c.post("/api/search/text", json={"query": "x"}, headers={"Origin": "http://app.example"})
         assert r.status_code == 200
 
 
 def test_allowed_hosts(settings):
-    s = replace(settings, allowed_hosts=("vms.local",))
-    with TestClient(create_app(s), base_url="http://vms.local:8000") as c:
+    s = replace(settings, allowed_hosts=("search.local",))
+    with TestClient(create_app(s), base_url="http://search.local:8000") as c:
         assert c.get("/healthz").status_code == 200
     with TestClient(create_app(s), base_url="http://attacker.example") as c:
         assert c.get("/healthz").status_code == 403

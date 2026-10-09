@@ -1,6 +1,6 @@
 # 設計書
 
-対象: vmsembed(EmbeddingGemma 2 による VMS 向けマルチモーダル検索基盤・開発用)
+対象: mediasearch(EmbeddingGemma 2 による録画映像・音声のマルチモーダル検索基盤・開発用)
 
 ## 1. 目的と前提
 
@@ -12,7 +12,7 @@
 
 ```
         ┌───────────── ROLE=all(1コンテナ) ─────────────┐
- VMS ─▶ │ app: 取り込み/検索 API + WebUI + SQLite + ffmpeg │
+ 外部─▶ │ app: 取り込み/検索 API + WebUI + SQLite + ffmpeg │
         │        │ Embedder インターフェース                │
         │        ├─ local : 同一プロセスで推論 ────────────┤
         └────────┼─────────────────────────────────────────┘
@@ -29,7 +29,7 @@
 - app に渡す前に加工済みのデータを入れたい場合は `/api/ingest/frames`(フレーム画像 + 時刻 + 任意の音声)。
 - 取り込みと検索は同じプロセス。推論は `PriorityGate` で**1回ずつ直列化**し、検索(高優先)が取り込み(低優先)を推論の合間に追い越す。
 
-### Embedder インターフェース(`src/vmsembed/embedders/`)
+### Embedder インターフェース(`src/mediasearch/embedders/`)
 
 `embed_texts / embed_images / embed_audio / embed_parts`。実装は `LocalEmbedder`(sentence-transformers)、`RemoteEmbedder`(HTTP)、`DummyEmbedder`(テスト用)。
 `embed_parts` は「ラベル文字・音声・画像」を**順序を保ったまま 1 つのベクトルに**する(動画+音声の窓に使う)。
@@ -122,4 +122,4 @@
 | 動画+音声(tav)・音声のみ・画像クエリの実モデル動作 | モデル単体では確認済み。アプリ経由の実モデル通しは未実施 |
 | GPU 3 種 | **未確認**(作者環境に GPU なし)。手順は docs/gpu.md |
 | Docker ビルド、GitHub Actions、ghcr の公開設定 | **未確認**(最初の CI 実行が最初のビルド) |
-| 実際の監視映像での検索精度 | 未評価 |
+| 実際の録画映像での検索精度 | 未評価 |

@@ -21,7 +21,7 @@ def wait_done(client, job_id: int, timeout: float = 60) -> dict:
 
 def test_healthz_and_index(client):
     assert client.get("/healthz").json()["status"] == "ok"
-    assert "vmsembed" in client.get("/").text
+    assert "mediasearch" in client.get("/").text
     info = client.get("/api/info").json()
     assert info["embedder"]["backend"] == "dummy"
 
@@ -99,7 +99,7 @@ def test_dims_mismatch_refused(settings):
 
     from fastapi.testclient import TestClient
 
-    from vmsembed.main import create_app
+    from mediasearch.main import create_app
 
     with TestClient(create_app(settings)) as c:
         assert c.post("/api/search/text", json={"query": "x"}).status_code == 200

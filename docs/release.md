@@ -12,7 +12,7 @@
 
 ## リリースの作り方
 
-1. `pyproject.toml` の `version` と `src/vmsembed/__init__.py` の `__version__` を新しい版に合わせ、main に取り込みます。
+1. `pyproject.toml` の `version` と `src/mediasearch/__init__.py` の `__version__` を新しい版に合わせ、main に取り込みます。
 2. タグを付けて push します。
 
    ```bash

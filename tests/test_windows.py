@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from vmsembed.config import Settings
-from vmsembed.pipeline import IngestParams, plan_windows
+from mediasearch.config import Settings
+from mediasearch.pipeline import IngestParams, plan_windows
 
 
 def params(**kw) -> IngestParams:

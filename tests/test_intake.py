@@ -9,9 +9,9 @@ from conftest import make_video, needs_ffmpeg
 from fastapi.testclient import TestClient
 from test_e2e_dummy import wait_done
 
-from vmsembed.config import Settings
-from vmsembed.ingest_files import media_kind_of, ts_from_filename
-from vmsembed.main import create_app
+from mediasearch.config import Settings
+from mediasearch.ingest_files import media_kind_of, ts_from_filename
+from mediasearch.main import create_app
 
 
 @pytest.mark.parametrize(
@@ -91,9 +91,9 @@ def test_failed_source_is_not_served(client, tmp_path, settings):
     wait_done(client, r["job_id"])
     assert client.get(f"/api/media/{r['source_id']}").status_code == 200
     # 取り込みに失敗した扱いにすると、配信しない
-    from vmsembed.store import Store
+    from mediasearch.store import Store
 
-    store = Store(settings.data_dir / "vmsembed.db")
+    store = Store(settings.data_dir / "mediasearch.db")
     store.update_source(r["source_id"], status="failed")
     store.close()
     assert client.get(f"/api/media/{r['source_id']}").status_code == 404

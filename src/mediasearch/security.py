@@ -3,7 +3,7 @@
 既定値のままでも起動できること(追加の設定なしで動くこと)を保ちながら、次を行います。
 
   1. トークン認証(API_TOKEN を設定したときだけ)
-       Authorization: Bearer <トークン> / X-API-Key ヘッダー / Cookie(vmsembed_token)のどれかで受け付けます。
+       Authorization: Bearer <トークン> / X-API-Key ヘッダー / Cookie(mediasearch_token)のどれかで受け付けます。
        Cookie は、<img> や <video> のようにヘッダーを付けられない WebUI のリクエストのためです。
   2. CSRF(他サイトのページからの、なりすましリクエスト)の防止
        更新系のメソッド(POST / PUT / PATCH / DELETE)は、ブラウザが付ける Origin / Sec-Fetch-Site を確認し、
@@ -31,7 +31,7 @@ from .config import Settings
 
 log = logging.getLogger(__name__)
 
-TOKEN_COOKIE = "vmsembed_token"
+TOKEN_COOKIE = "mediasearch_token"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # 認証なしで開けるパス。/healthz は Docker の死活監視、/ と /docs は WebUI と API 仕様の画面
 # (画面自体には情報がなく、データの取得には認証が要る)

@@ -1,6 +1,6 @@
 """アプリの入口。
 
-起動:  uvicorn --factory vmsembed.main:create_app --host 0.0.0.0 --port 8000
+起動:  uvicorn --factory mediasearch.main:create_app --host 0.0.0.0 --port 8000
 ROLE 環境変数で、app / compute / all のどれとして動くかが決まります。
 """
 
@@ -26,7 +26,7 @@ from .security import SecurityMiddleware, startup_warnings
 from .store import IndexMismatch, Store
 from .watcher import FolderWatcher
 
-log = logging.getLogger("vmsembed")
+log = logging.getLogger("mediasearch")
 WEB_DIR = Path(__file__).parent / "web"
 
 
@@ -67,7 +67,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     """アプリを作ります。テストでは settings と embedder を差し込めます。"""
     _setup_logging()
     s = settings or Settings.from_env()
-    log.info("vmsembed %s を起動します(ROLE=%s, EMBEDDING_BACKEND=%s)", __version__, s.role, s.embedding_backend)
+    log.info("mediasearch %s を起動します(ROLE=%s, EMBEDDING_BACKEND=%s)", __version__, s.role, s.embedding_backend)
 
     # モデルの読み込みなど重い初期化は、アプリを作るこの時点で1回だけ行う(ルーターもここで登録する)
     s.data_dir.mkdir(parents=True, exist_ok=True)
@@ -77,7 +77,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     intake: FileIntake | None = None
     watcher: FolderWatcher | None = None
     if s.role in ("all", "app"):
-        store = Store(s.data_dir / "vmsembed.db")
+        store = Store(s.data_dir / "mediasearch.db")
         ingestor = Ingestor(s, store, emb)
         intake = FileIntake(store, ingestor, s.ingest_roots)
         watcher = FolderWatcher(s, store, intake)
@@ -102,9 +102,9 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
             emb.close()
 
     app = FastAPI(
-        title="vmsembed",
+        title="mediasearch",
         version=__version__,
-        description="EmbeddingGemma 2 を使った VMS 向けマルチモーダル検索基盤(開発用)",
+        description="EmbeddingGemma 2 を使った録画映像・音声のマルチモーダル検索基盤(開発用)",
         lifespan=lifespan,
     )
 

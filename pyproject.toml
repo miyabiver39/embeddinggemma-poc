@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vmsembed"
+name = "mediasearch"
 version = "0.1.0"
-description = "EmbeddingGemma 2 を使った VMS(映像管理システム)向けマルチモーダル検索基盤(開発用)"
+description = "EmbeddingGemma 2 を使った録画映像・音声のマルチモーダル検索基盤(開発用)"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
@@ -36,7 +36,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-vmsembed = ["web/*"]
+mediasearch = ["web/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

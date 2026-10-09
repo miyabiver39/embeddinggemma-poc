@@ -4,8 +4,8 @@
 
 ## 起動と永続化
 
-- 保存先は `-v ./data:/data` で永続化します。中身: `vmsembed.db`(SQLite)、`thumbs/`、`media/`(アップロードした動画・音声)。
-- バックアップは `data/` を丸ごとコピー(停止中が安全。WAL を使うので稼働中は `vmsembed.db*` の3ファイルをまとめて)。
+- 保存先は `-v ./data:/data` で永続化します。中身: `mediasearch.db`(SQLite)、`thumbs/`、`media/`(アップロードした動画・音声)。
+- バックアップは `data/` を丸ごとコピー(停止中が安全。WAL を使うので稼働中は `mediasearch.db*` の3ファイルをまとめて)。
 - 停止・再起動しても未完了の取り込みジョブは再開されます。
 
 ## 取り込みのコツ
@@ -62,4 +62,4 @@
 
 ## ログ
 
-標準出力に出ます(`docker logs vmsembed`)。`-e LOG_LEVEL=DEBUG` で詳細に。
+標準出力に出ます(`docker logs mediasearch`)。`-e LOG_LEVEL=DEBUG` で詳細に。

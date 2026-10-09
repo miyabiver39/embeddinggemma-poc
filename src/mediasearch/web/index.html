@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>vmsembed 開発用WebUI</title>
+<title>mediasearch 開発用WebUI</title>
 <style>
   :root { --bg:#f6f7f9; --fg:#1d2129; --card:#fff; --line:#d9dde3; --acc:#2563eb; --mute:#6b7280; --ok:#16a34a; --ng:#dc2626; }
   @media (prefers-color-scheme: dark) {
@@ -43,7 +43,7 @@
 </head>
 <body>
 <header>
-  <h1>vmsembed <span class="badge">開発用WebUI(自己責任)</span></h1>
+  <h1>mediasearch <span class="badge">開発用WebUI(自己責任)</span></h1>
   <span class="badge" id="hdr">読み込み中…</span>
 </header>
 <nav id="tabs">
@@ -168,7 +168,7 @@ document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => {
 
 // 認証(API_TOKEN を設定したサーバのみ)。トークンは Cookie に保存し、<img> や <video> の取得にも使う。
 // SameSite=Strict のため、他サイトのページからのリクエストには付かない
-const TOKEN_COOKIE = "vmsembed_token";
+const TOKEN_COOKIE = "mediasearch_token";
 function setToken(token) {
   const secure = location.protocol === "https:" ? "; Secure" : "";
   document.cookie = token

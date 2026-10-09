@@ -15,7 +15,7 @@
 | 取り込めるフォルダの制限 | 有効 | `INGEST_ROOTS` | パス指定・フォルダ一括で取り込めるのは、既定で `/recordings` と `DATA_DIR` の下だけです。監視フォルダ(`WATCH_DIRS`)は自動で許可されます。シンボリックリンクと `..` は解決してから判定します |
 | 取り込むファイルの検証 | 有効 | なし | 拡張子が映像・音声で、ffprobe で読めるものだけを受け付けます。取り込みに失敗したものや、許可したフォルダの外のものは配信しません |
 | CSRF の防止 | 有効 | `ALLOWED_ORIGINS` | 更新系のリクエスト(POST など)は、別のサイトのページから送られたもの(Origin / Sec-Fetch-Site で判定)を 403 で拒否します。curl などブラウザ以外からの利用には影響しません |
-| Host ヘッダーの確認 | 無効 | `ALLOWED_HOSTS` | 受け付けるホスト名を限定し、DNS リバインディングを防ぎます(例: `vms-search.local,192.168.1.20`) |
+| Host ヘッダーの確認 | 無効 | `ALLOWED_HOSTS` | 受け付けるホスト名を限定し、DNS リバインディングを防ぎます(例: `search.local,192.168.1.20`) |
 | リクエストの大きさの上限 | 4096 MB | `MAX_UPLOAD_MB` | これを超えるアップロードは 413 で拒否します(`0` で無制限) |
 | 応答ヘッダー | 有効 | なし | `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、WebUI に CSP |
 | 一般ユーザーでの実行 | 有効 | `PUID` / `PGID` | 起動直後にデータ置き場の所有者を整え、uid / gid 1000 の一般ユーザーに切り替えて動かします。`PUID=0` で root のまま動かせます |

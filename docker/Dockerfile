@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # =============================================================================
-# vmsembed イメージ。1つの Dockerfile から VARIANT で 5 種類を作ります。
+# mediasearch イメージ。1つの Dockerfile から VARIANT で 5 種類を作ります。
 #
 #   VARIANT=slim   モデル無し・軽量。ROLE=app 専用(ベクトル化は外部の compute に任せる)
 #   VARIANT=cpu    CPU 推論。モデル同梱。どこでも動く
@@ -9,7 +9,7 @@
 #   VARIANT=intel  Intel GPU(Arc / Core Ultra の内蔵 GPU など)。モデル同梱
 #
 # ビルドは GitHub Actions が行います(.github/workflows/build.yml)。
-# 手元でビルドする場合の例:  docker build -f docker/Dockerfile --build-arg VARIANT=cpu -t vmsembed:cpu .
+# 手元でビルドする場合の例:  docker build -f docker/Dockerfile --build-arg VARIANT=cpu -t mediasearch:cpu .
 #
 # 注意: GPU 系(cuda / rocm / intel)は、作者の環境(GPU 無し)では動作確認できていません。
 #       実機での確認手順は docs/gpu.md を参照してください。
@@ -83,25 +83,25 @@ ENV HF_HUB_OFFLINE=1 \
     MODEL_REVISION=${MODEL_REVISION}
 
 # ---- 既定の動作: slim は app(外部 compute を使う)、それ以外は all(1コンテナで全部)
-RUN if [ "$VARIANT" = "slim" ]; then echo app > /etc/vmsembed_role; else echo all > /etc/vmsembed_role; fi
+RUN if [ "$VARIANT" = "slim" ]; then echo app > /etc/mediasearch_role; else echo all > /etc/mediasearch_role; fi
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 # ---- 実行用の一般ユーザー(uid / gid 1000)。ベースイメージの ubuntu ユーザー(同じ uid)は使わないので削除する。
 #      起動直後だけ root で /data の所有者などを整え、その後このユーザーに切り替える(entrypoint.sh)
 #      モデルのキャッシュ(HF_HOME)は root の所有のまま読み取り専用で使う(所有者を変えると、その層にモデルが丸ごと複製されるため)
 RUN chmod +x /usr/local/bin/entrypoint.sh \
  && (userdel --remove ubuntu 2>/dev/null || true) \
- && groupadd --gid 1000 vmsembed \
- && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /home/vmsembed --shell /usr/sbin/nologin vmsembed \
- && mkdir -p /data /recordings /home/vmsembed \
- && chown vmsembed:vmsembed /data /home/vmsembed
+ && groupadd --gid 1000 mediasearch \
+ && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /home/mediasearch --shell /usr/sbin/nologin mediasearch \
+ && mkdir -p /data /recordings /home/mediasearch \
+ && chown mediasearch:mediasearch /data /home/mediasearch
 
 ENV VARIANT=${VARIANT}
 # ビルド元のコミットと参照(タグ・ブランチ)。/api/info に表示し、不具合報告で版を特定できるようにする。
 # 毎回値が変わるため、ビルドキャッシュを壊さないよう最後の層で受け取る
-ARG VMSEMBED_REVISION=unknown
-ARG VMSEMBED_BUILD_REF=local
-ENV VMSEMBED_REVISION=${VMSEMBED_REVISION} \
-    VMSEMBED_BUILD_REF=${VMSEMBED_BUILD_REF}
+ARG MEDIASEARCH_REVISION=unknown
+ARG MEDIASEARCH_BUILD_REF=local
+ENV MEDIASEARCH_REVISION=${MEDIASEARCH_REVISION} \
+    MEDIASEARCH_BUILD_REF=${MEDIASEARCH_BUILD_REF}
 VOLUME ["/data"]
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
