@@ -74,3 +74,4 @@ GPU 用のイメージに含まれる NVIDIA と Intel のライブラリは、�
 | CodeQL(GitHub) | ソースコードの静的解析 | GitHub CodeQL Terms and Conditions(公開リポジトリでは無償) |
 | OpenSSF Scorecard | リポジトリの運用の評価 | Apache-2.0 |
 | pytest / pytest-cov / Ruff | テストと静的チェック | MIT |
+| MediaMTX(`bluenviron/mediamtx`) | RTSP の受信の確認用サーバー(`docs/operations.md` の手順のみ) | MIT |

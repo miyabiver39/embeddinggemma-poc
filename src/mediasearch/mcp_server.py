@@ -364,6 +364,18 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         return {"sources": [{k: src.get(k) for k in keys} for src in sources]}
 
     @server.tool(annotations=_READ_ONLY)
+    def list_streams() -> dict[str, Any]:
+        """受信しながら取り込んでいる RTSP のストリームと、その状態(受信中か、作った窓の数、エラー)を返します。
+
+        ストリームの窓は、取り込み元の種類が stream です。
+        search_text の after_window_id を使うと、新しい窓だけを探せます。
+        """
+        if ctx.streams is None:
+            return {"streams": []}
+        keys = ("id", "name", "url", "group_id", "location", "source_id", "enabled", "state")
+        return {"streams": [{k: st.get(k) for k in keys} for st in ctx.streams.list()]}
+
+    @server.tool(annotations=_READ_ONLY)
     def get_status() -> dict[str, Any]:
         """サーバーの状態(推論のデバイス、版、索引の件数、取り込みの待ち件数、監視フォルダ)を返します。"""
         return svc.info()

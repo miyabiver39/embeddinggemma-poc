@@ -20,6 +20,7 @@ from .embedders import Embedder
 from .ingest_files import FileIntake
 from .pipeline import Ingestor
 from .store import Store
+from .streams import StreamManager
 from .watcher import FolderWatcher
 
 KIND_CHOICES = ("auto", "all", "frames", "tav", "audio", "image")
@@ -46,6 +47,7 @@ class Context:
     ingestor: Ingestor
     intake: FileIntake
     watcher: FolderWatcher
+    streams: StreamManager | None = None
 
     @property
     def media_dir(self) -> Path:
@@ -200,6 +202,14 @@ class Service:
         # 音声クエリの auto は、音声のみで取り込んだ窓(audio)を探す
         return self.search(qvec, filters, auto_kinds=["audio"], embed_ms=int((time.time() - t0) * 1000))
 
+    def _stream_summary(self) -> dict:
+        items = self.ctx.streams.list() if self.ctx.streams else []
+        return {
+            "registered": len(items),
+            "running": sum(1 for s in items if s["state"]["status"] == "running"),
+            "max": self.ctx.settings.max_streams,
+        }
+
     def thumbnail(self, window_id: int) -> Path:
         """窓のサムネイル(JPEG)のパス。取り込み時に作っていなければ(以前の版で取り込んだものなど)、ここで作ります。"""
         ctx = self.ctx
@@ -290,4 +300,5 @@ class Service:
                 "queue_size": ctx.ingestor.queue_size,
             },
             "watch": ctx.watcher.status,
+            "streams": self._stream_summary(),
         }

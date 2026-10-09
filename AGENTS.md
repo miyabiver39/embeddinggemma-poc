@@ -111,6 +111,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 │   ├── security.py        認証・CSRF・Host・本文の上限・応答ヘッダー(ASGI ミドルウェア)
 │   ├── store.py           SQLite(設定・取り込み元・窓・ジョブ)と検索
 │   ├── vectors.py         ベクトル DB(USearch。vectors.usearch)
+│   ├── streams.py         RTSP のストリームの受信と取り込み
 │   ├── media.py           ffmpeg / ffprobe
 │   ├── config.py          環境変数とプリセット
 │   ├── embedders/         Embedder インターフェースと local / remote / dummy

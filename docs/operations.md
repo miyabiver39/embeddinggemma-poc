@@ -36,6 +36,22 @@
   app + compute の分離構成(どちらも CPU)でも、1 窓の時間はほぼ同じでした(9 窓で 73 秒)。
 - 窓の設計を変える(`WINDOW_SEC` など)と別のベクトル分布になります。同じ DB に混ぜたくない場合は `DATA_DIR` を分けてください。
 
+## RTSP のストリーム
+
+- 登録は `POST /api/streams`(例は [api.md](api.md))。登録は DB に残り、サーバーの再起動後に受信を再開します。
+- 1 本につき ffmpeg のプロセスを 1 つ使い、接続したまま連続で復号します。GPU の復号(`FFMPEG_HWACCEL`)も使います(失敗したら次の接続から CPU)。
+- 推論が追いつかない場合は窓を捨てます。`GET /api/streams` の `state.dropped_windows` が増え続ける場合は、窓を長くする(`window_sec`)、
+  フレーム数を減らす、本数を減らす、GPU を使う、のいずれかで負荷を下げてください。
+- 接続は TCP(`-rtsp_transport tcp`)で行います。15 秒で接続できない、または 30 秒フレームが届かない場合は、接続し直します。
+
+確認の手順(手元に RTSP のカメラが無い場合。2026-10-09 に、この手順で受信・切断からの再接続・再起動後の再開を確認):
+
+```bash
+docker run -d --rm --name rtsp --network host bluenviron/mediamtx:latest          # RTSP サーバー(MIT)
+ffmpeg -re -stream_loop -1 -i sample.mp4 -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/cam1 &
+curl -H 'Content-Type: application/json' -d '{"url": "rtsp://127.0.0.1:8554/cam1"}' http://localhost:8000/api/streams
+```
+
 ## 処理時間の確認(ベンチマーク)
 
 取り込みのジョブには、処理時間の内訳(`timings`)が記録されます。設定(GPU 復号、復号の省略、窓の長さ、推論のデバイスなど)を変えたときの効果は、次のどれかで確かめられます。

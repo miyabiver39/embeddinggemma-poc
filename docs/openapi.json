@@ -1490,6 +1490,430 @@
         ]
       }
     },
+    "/api/streams": {
+      "get": {
+        "tags": [
+          "ストリーム"
+        ],
+        "summary": "ストリームの一覧と受信の状態",
+        "operationId": "list_streams_api_streams_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      },
+      "post": {
+        "tags": [
+          "ストリーム"
+        ],
+        "summary": "RTSP のストリームを登録し、受信しながら取り込む",
+        "description": "ネットワークカメラなどの RTSP を受信し続け、窓ごとにベクトルにします。窓は作った時点で検索できます。\n\n登録はサーバーを再起動しても残ります。切断されたら自動で接続し直します。推論が追いつかない場合は、\n古い窓を捨てて最新に追いつきます(`state.dropped_windows`)。",
+        "operationId": "create_stream_api_streams_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StreamCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/streams/{stream_id}": {
+      "get": {
+        "tags": [
+          "ストリーム"
+        ],
+        "summary": "ストリームの受信の状態",
+        "operationId": "get_stream_api_streams__stream_id__get",
+        "parameters": [
+          {
+            "name": "stream_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Stream Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      },
+      "delete": {
+        "tags": [
+          "ストリーム"
+        ],
+        "summary": "ストリームの登録を削除する",
+        "operationId": "delete_stream_api_streams__stream_id__delete",
+        "parameters": [
+          {
+            "name": "stream_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Stream Id"
+            }
+          },
+          {
+            "name": "delete_data",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "作った窓(取り込み元)も削除する",
+              "default": false,
+              "title": "Delete Data"
+            },
+            "description": "作った窓(取り込み元)も削除する"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deleted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/streams/{stream_id}/start": {
+      "post": {
+        "tags": [
+          "ストリーム"
+        ],
+        "summary": "受信を再開する",
+        "operationId": "start_stream_api_streams__stream_id__start_post",
+        "parameters": [
+          {
+            "name": "stream_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Stream Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/streams/{stream_id}/stop": {
+      "post": {
+        "tags": [
+          "ストリーム"
+        ],
+        "summary": "受信を止める",
+        "description": "受信を止めます。作った窓は残り、検索できます。",
+        "operationId": "stop_stream_api_streams__stream_id__stop_post",
+        "parameters": [
+          {
+            "name": "stream_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Stream Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Stream"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
     "/api/sources": {
       "get": {
         "tags": [
@@ -3381,6 +3805,19 @@
             "type": "object",
             "title": "Watch",
             "description": "監視フォルダの状態"
+          },
+          "streams": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Streams",
+            "description": "RTSP のストリーム(registered: 登録数、running: 受信中、max: 同時に受信できる数)"
           }
         },
         "additionalProperties": true,
@@ -4247,7 +4684,8 @@
               "video",
               "audio",
               "image",
-              "frames"
+              "frames",
+              "stream"
             ],
             "title": "Kind"
           },
@@ -4401,6 +4839,378 @@
           "by_kind"
         ],
         "title": "StatsResponse"
+      },
+      "Stream": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "ストリームの URL(パスワードは *** に伏せる)"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params",
+            "description": "取り込みの設定(窓の長さなど)"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id",
+            "description": "窓を登録する取り込み元(kind=stream)"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "受信する設定か(サーバーの再起動後も再開する)"
+          },
+          "created_at": {
+            "type": "number",
+            "title": "Created At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StreamState"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "params",
+          "enabled",
+          "created_at",
+          "state"
+        ],
+        "title": "Stream"
+      },
+      "StreamCreateRequest": {
+        "properties": {
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset",
+            "description": "取り込みのプリセット(object / action / speech)"
+          },
+          "window_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Sec",
+            "description": "1 つのベクトルにする時間窓(秒)"
+          },
+          "frames_per_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frames Per Window",
+            "description": "窓あたりのフレーム数"
+          },
+          "overlap_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Sec",
+            "description": "窓の重なり(秒)"
+          },
+          "include_audio": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Audio",
+            "description": "動画の音声も同じベクトルに含める"
+          },
+          "store_media": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Media",
+            "description": "偽にすると、アップロードしたファイルを取り込み後に削除し、サムネイルも作らない。検索結果は時刻などの情報だけになる(省略時はサーバの STORE_MEDIA)"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "rtsp:// か rtsps:// の URL(認証が必要なら rtsp://ユーザー:パスワード@ホスト/パス)"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "表示名(省略時はホスト名とパス)"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "任意のグループ ID(検索の絞り込みに使う)"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "任意の場所の名前"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "登録してすぐに受信を始める",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "StreamCreateRequest",
+        "examples": [
+          {
+            "group_id": "entrance",
+            "url": "rtsp://user:pass@192.168.1.10:554/stream1"
+          }
+        ]
+      },
+      "StreamList": {
+        "properties": {
+          "streams": {
+            "items": {
+              "$ref": "#/components/schemas/Stream"
+            },
+            "type": "array",
+            "title": "Streams"
+          }
+        },
+        "type": "object",
+        "required": [
+          "streams"
+        ],
+        "title": "StreamList"
+      },
+      "StreamState": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "connecting",
+              "running",
+              "retrying",
+              "stopped"
+            ],
+            "title": "Status",
+            "description": "connecting: 接続中 / running: 受信中 / retrying: 切断され、再接続を待っている / stopped: 停止"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "直近の接続・受信のエラー(URL の認証情報は伏せる)"
+          },
+          "connected_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connected At",
+            "description": "受信を始めた時刻(UNIX 秒)"
+          },
+          "last_frame_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Frame At",
+            "description": "最後にフレームを受け取った時刻(UNIX 秒)"
+          },
+          "frames": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frames",
+            "description": "受け取ったフレームの数(復号の間隔ごと)"
+          },
+          "windows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windows",
+            "description": "作った窓の数"
+          },
+          "dropped_windows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropped Windows",
+            "description": "推論が追いつかず、捨てた窓の数"
+          },
+          "reconnects": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconnects",
+            "description": "再接続した回数"
+          },
+          "lag_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag Ms",
+            "description": "受信したフレームに対する、窓の作成の遅れ(ms)"
+          },
+          "decoder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decoder",
+            "description": "復号の方式(cpu / cuda / vaapi / qsv)"
+          },
+          "has_audio": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Audio",
+            "description": "ストリームに音声があるか"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "StreamState"
       },
       "TextSearchRequest": {
         "properties": {
@@ -4698,6 +5508,10 @@
     {
       "name": "検索",
       "description": "文章・画像・音声による検索。グループ ID・場所・期間・種類・最小スコアで絞り込めます"
+    },
+    {
+      "name": "ストリーム",
+      "description": "RTSP のストリームを受信しながら取り込む(登録・状態の確認・停止・再開)"
     },
     {
       "name": "取り込み元・ジョブ",

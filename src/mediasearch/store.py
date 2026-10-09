@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS meta (
 
 CREATE TABLE IF NOT EXISTS sources (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind TEXT NOT NULL,            -- video / audio / image / frames
+  kind TEXT NOT NULL,            -- video / audio / image / frames / stream
   path TEXT,                     -- 映像・音声ファイルのパス(frames は NULL)
   name TEXT NOT NULL,
   group_id TEXT,
@@ -70,6 +70,21 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 """
 
+# RTSP などのストリームの登録(streams.py)。url は認証情報を含むことがあるため、API では伏せて返す
+STREAMS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS streams (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  group_id TEXT,
+  location TEXT,
+  params TEXT NOT NULL,          -- 取り込みの設定(JSON)
+  source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL
+);
+"""
+
 # 索引は、以前の版の DB を移行した後に作る(移行前の列名のままだと作れないため)
 INDEXES = """
 -- 同じファイルの重複取り込みを確認するため(監視フォルダでは定期的に全件を照合する)
@@ -80,7 +95,7 @@ CREATE INDEX IF NOT EXISTS idx_windows_source ON windows(source_id);
 WINDOW_KINDS = ("frames", "tav", "audio", "image")
 
 # DB の形式の版。列の追加・改名をしたら上げ、_migrate() に移行の処理を足す
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 # 旧い版で使っていた列名 → 現在の列名(以前の版の DB をそのまま使い続けられるよう、起動時に改名する)
 _RENAMED_COLUMNS = {
     "sources": {"camera_id": "group_id"},
@@ -110,6 +125,7 @@ class Store:
         self._db.execute("PRAGMA journal_mode=WAL")  # 書き込み中も検索(読み取り)できる
         self._db.execute("PRAGMA foreign_keys=ON")
         self._db.executescript(SCHEMA)
+        self._db.executescript(STREAMS_SCHEMA)
         self._db.commit()
         self._migrate()
         self._db.executescript(INDEXES)
@@ -403,6 +419,48 @@ class Store:
             "windows_by_kind": by_kind,
             "vector_db": vector_db,
         }
+
+    # ------------------------------------------------------------------ ストリーム
+    def add_stream(
+        self,
+        *,
+        name: str,
+        url: str,
+        group_id: str | None,
+        location: str | None,
+        params: dict,
+        source_id: int,
+        enabled: bool = True,
+    ) -> int:
+        with self._lock:
+            cur = self._db.execute(
+                "INSERT INTO streams(name, url, group_id, location, params, source_id, enabled, created_at)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (name, url, group_id, location, json.dumps(params, ensure_ascii=False), source_id, int(enabled),
+                 time.time()),
+            )  # fmt: skip
+            self._db.commit()
+            return int(cur.lastrowid)
+
+    def get_stream(self, stream_id: int) -> dict | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM streams WHERE id=?", (stream_id,)).fetchone()
+        return self._source_dict(row) if row else None
+
+    def list_streams(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM streams ORDER BY id").fetchall()
+        return [self._source_dict(r) for r in rows]
+
+    def update_stream(self, stream_id: int, *, enabled: bool) -> None:
+        with self._lock:
+            self._db.execute("UPDATE streams SET enabled=? WHERE id=?", (int(enabled), stream_id))
+            self._db.commit()
+
+    def delete_stream(self, stream_id: int) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM streams WHERE id=?", (stream_id,))
+            self._db.commit()
 
     # ------------------------------------------------------------------ ジョブ
     def create_job(self, source_id: int) -> int:

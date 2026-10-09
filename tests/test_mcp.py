@@ -53,7 +53,7 @@ def test_tools_are_listed_with_descriptions(mcp):
     tools = {t["name"]: t for t in mcp.rpc("tools/list").json()["result"]["tools"]}
     expected = {
         "search_text", "search_image", "search_audio", "get_thumbnail", "ingest_path", "ingest_dir",
-        "get_job", "list_jobs", "list_sources", "get_status",
+        "get_job", "list_jobs", "list_sources", "get_status", "list_streams",
     }
     assert expected <= set(tools)
     assert tools["search_text"]["annotations"]["readOnlyHint"] is True

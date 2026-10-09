@@ -42,6 +42,8 @@ from .schemas import (
     Source,
     SourceList,
     StatsResponse,
+    Stream,
+    StreamList,
     TextSearchRequest,
     WatchScanResponse,
     errors,
@@ -103,6 +105,18 @@ class IngestPathRequest(_WindowOptions):
     force: bool = Field(False, description="取り込み済みでも、もう一度取り込む")
 
     model_config = ConfigDict(json_schema_extra={"examples": [{"path": "/recordings/group-a/20260101_090000.mp4"}]})
+
+
+class StreamCreateRequest(_WindowOptions):
+    url: str = Field(description="rtsp:// か rtsps:// の URL(認証が必要なら rtsp://ユーザー:パスワード@ホスト/パス)")
+    name: str | None = Field(None, description="表示名(省略時はホスト名とパス)")
+    group_id: str | None = Field(None, description="任意のグループ ID(検索の絞り込みに使う)")
+    location: str | None = Field(None, description="任意の場所の名前")
+    enabled: bool = Field(True, description="登録してすぐに受信を始める")
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"url": "rtsp://user:pass@192.168.1.10:554/stream1", "group_id": "entrance"}]}
+    )
 
 
 class IngestDirRequest(_WindowOptions):
@@ -551,6 +565,83 @@ def build_api_router(ctx: Context) -> APIRouter:
 
         headers = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}  # 中継のサーバーにためさせない
         return StreamingResponse(stream(), media_type="text/event-stream", headers=headers)
+
+    # ------------------------------------------------------------------ ストリーム(RTSP)
+    def _streams():
+        if ctx.streams is None:
+            raise HTTPException(404, "ストリームは使えません")
+        return ctx.streams
+
+    def _stream_call(fn, *args, **kwargs) -> dict:
+        try:
+            return fn(*args, **kwargs)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @router.post(
+        "/streams",
+        tags=["ストリーム"],
+        summary="RTSP のストリームを登録し、受信しながら取り込む",
+        response_model=Stream,
+        responses=errors(400, 401, 409),
+    )
+    def create_stream(body: StreamCreateRequest) -> dict:
+        """ネットワークカメラなどの RTSP を受信し続け、窓ごとにベクトルにします。窓は作った時点で検索できます。
+
+        登録はサーバーを再起動しても残ります。切断されたら自動で接続し直します。推論が追いつかない場合は、
+        古い窓を捨てて最新に追いつきます(`state.dropped_windows`)。
+        """
+        params = _params(
+            body.preset,
+            body.window_sec,
+            body.frames_per_window,
+            body.overlap_sec,
+            body.include_audio,
+            store_media=body.store_media,
+        )
+        return _streams().create(
+            url=body.url,
+            name=body.name,
+            group_id=body.group_id or None,
+            location=body.location or None,
+            params=params,
+            enabled=body.enabled,
+        )
+
+    @router.get("/streams", tags=["ストリーム"], summary="ストリームの一覧と受信の状態", response_model=StreamList,
+                responses=errors(401))  # fmt: skip
+    def list_streams() -> dict:
+        return {"streams": _streams().list()}
+
+    @router.get("/streams/{stream_id}", tags=["ストリーム"], summary="ストリームの受信の状態", response_model=Stream,
+                responses=errors(401, 404))  # fmt: skip
+    def get_stream(stream_id: int) -> dict:
+        return _stream_call(_streams().describe, stream_id)
+
+    @router.post("/streams/{stream_id}/start", tags=["ストリーム"], summary="受信を再開する", response_model=Stream,
+                 responses=errors(400, 401, 404))  # fmt: skip
+    def start_stream(stream_id: int) -> dict:
+        return _stream_call(_streams().set_enabled, stream_id, True)
+
+    @router.post("/streams/{stream_id}/stop", tags=["ストリーム"], summary="受信を止める", response_model=Stream,
+                 responses=errors(401, 404))  # fmt: skip
+    def stop_stream(stream_id: int) -> dict:
+        """受信を止めます。作った窓は残り、検索できます。"""
+        return _stream_call(_streams().set_enabled, stream_id, False)
+
+    @router.delete(
+        "/streams/{stream_id}",
+        tags=["ストリーム"],
+        summary="ストリームの登録を削除する",
+        response_model=Deleted,
+        responses=errors(401, 404),
+    )
+    def delete_stream(
+        stream_id: int,
+        delete_data: bool = Query(False, description="作った窓(取り込み元)も削除する"),
+    ) -> dict:
+        _stream_call(_streams().delete, stream_id, delete_data)
+        return {"deleted": stream_id}
 
     # ------------------------------------------------------------------ 取り込み元・ジョブ
     @router.get(

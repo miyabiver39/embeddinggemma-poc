@@ -23,9 +23,10 @@
 バックエンド基盤です。他のシステムへの組み込みを想定した開発用で、
 Google の [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) を使います。
 
-- 取り込み(ffmpeg で時間窓に分割 → ベクトル化 → SQLite に保存)と検索を **1つのコンテナ**で提供
+- 取り込み(ffmpeg で時間窓に分割 → ベクトル化 → ベクトル DB に保存)と検索を **1つのコンテナ**で提供
 - 動画・音声・画像・テキストを**同じベクトル空間**で検索(テキスト→映像、画像→映像、音声→音声 など)
 - 開発確認用の **WebUI** 付き(`http://localhost:8000/`)。API リファレンスは **`/scalar`**(Scalar。閲覧と試し呼び出し)、`/docs`(Swagger UI)、[docs/openapi.json](docs/openapi.json)
+- **RTSP のストリーム**(ネットワークカメラなど)を受信しながらベクトル化し、**取り込み中の窓もすぐに検索**できます(新しい窓の通知も可)
 - **MCP サーバー**を内蔵(`http://localhost:8000/mcp`)。AI エージェントから検索・取り込みができます([docs/mcp.md](docs/mcp.md))
 - CPU / NVIDIA GPU / AMD GPU / Intel GPU に対応(イメージを選ぶだけ)
 - ビルドは GitHub Actions が行います。利用者は **`docker pull` / `docker run` だけ**です
@@ -66,6 +67,17 @@ curl -X POST localhost:8000/api/ingest/dir -H 'Content-Type: application/json' \
 - `start_ts` を省略すると、ファイル名に含まれる日時(`20260101_090000`、`2026-01-01T09-00-00` など)を録画開始時刻にします。読み取れない場合は受付時刻になります。
 - 同じファイルを再度指定しても重複して登録しません(既存の取り込み元を返します)。取り込み直す場合は `"force": true` を付けます。
 - 受付の時点で ffprobe による検証を行い、映像・音声として扱えないファイルは 422 で拒否します(取り込める拡張子は `docs/operations.md` を参照)。
+
+### RTSP のストリームを受信しながら取り込む
+
+```bash
+curl -H 'Content-Type: application/json' \
+  -d '{"url": "rtsp://user:pass@192.168.1.10:554/stream1", "group_id": "entrance"}' http://localhost:8000/api/streams
+curl http://localhost:8000/api/streams        # 受信の状態(作った窓の数、遅れ、エラー)。パスワードは *** で表示
+```
+
+窓は作った時点で検索できます。新しい窓のうち、文章に合うものを通知させることもできます(`GET /api/search/live`。[docs/api.md](docs/api.md))。
+登録はサーバーを再起動しても残り、切断されたら自動で接続し直します。
 
 ### 録画フォルダを監視して自動で取り込む
 
@@ -158,6 +170,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `ALLOWED_ORIGINS` | (空) | 別のオリジンのページから更新系の API を呼ぶ場合に許可するオリジン(カンマ区切り) |
 | `ALLOWED_HOSTS` | `*` | 受け付ける Host ヘッダー(カンマ区切り)。DNS リバインディング対策 |
 | `PUID` / `PGID` | `1000` | アプリを動かすユーザー / グループの ID。`PUID=0` で root のまま動かす |
+| `MAX_STREAMS` | `8` | 同時に受信できる RTSP のストリームの数 |
 | `TZ` | `Asia/Tokyo` | 時刻(ファイル名の日時、タイムゾーンのない `start_ts`)の解釈 |
 | `LOG_LEVEL` | `INFO` | |
 
@@ -184,6 +197,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `POST /api/ingest/frames` | 加工済みフレーム(+音声)の取り込み |
 | `POST /api/search/text` / `image` / `audio` | 検索(グループ ID・場所・期間・種別・最小スコアで絞り込み) |
 | `GET /api/jobs`, `/api/sources`, `/api/sources/{id}` ほか | ジョブ・取り込み元の確認、削除、再取り込み |
+| `POST /api/streams`、`GET /api/streams` ほか | RTSP のストリームの登録・状態の確認・停止・再開・削除 |
 | `GET /api/search/live` | 取り込み中に追加された窓のうち、文章に合うものを通知する(リアルタイム検索。Server-Sent Events) |
 | `GET /api/stats` | 取り込みの処理時間の集計(ジョブごとの内訳は `GET /api/jobs/{id}` の `timings`。`scripts/benchmark.py` で計測) |
 | `GET /api/media/{id}`, `/api/thumb/{id}` | 元動画(Range 対応)とサムネイル |

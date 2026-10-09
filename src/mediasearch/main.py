@@ -27,6 +27,7 @@ from .schemas import Health
 from .security import SecurityMiddleware, startup_warnings
 from .service import Context, InvalidInput, NotFound
 from .store import IndexMismatch, Store
+from .streams import StreamError, StreamManager
 from .watcher import FolderWatcher
 
 log = logging.getLogger("mediasearch")
@@ -67,6 +68,7 @@ OPENAPI_TAGS = [
         "name": "検索",
         "description": "文章・画像・音声による検索。グループ ID・場所・期間・種類・最小スコアで絞り込めます",
     },
+    {"name": "ストリーム", "description": "RTSP のストリームを受信しながら取り込む(登録・状態の確認・停止・再開)"},
     {"name": "取り込み元・ジョブ", "description": "登録したファイルと取り込みジョブの確認・削除・取り込み直し"},
     {"name": "配信", "description": "元ファイルとサムネイルの取得"},
     {"name": "compute", "description": "ベクトル化だけを行う API(ROLE=compute / all)。app から内部的に使います"},
@@ -198,11 +200,13 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     ingestor: Ingestor | None = None
     intake: FileIntake | None = None
     watcher: FolderWatcher | None = None
+    streams: StreamManager | None = None
     if s.role in ("all", "app"):
         store = Store(s.data_dir / "mediasearch.db")
         ingestor = Ingestor(s, store, emb)
         intake = FileIntake(store, ingestor, s.ingest_roots)
         watcher = FolderWatcher(s, store, intake)
+        streams = StreamManager(s, store, emb)
         _warn_if_incompatible(store, emb)
 
     mcp_run = None  # MCP サーバーの起動・停止(ROLE=all / app のとき、下で設定する)
@@ -216,11 +220,15 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
             ingestor.start()
         if watcher:
             watcher.start()
+        if streams:
+            streams.start()  # 登録済みのストリームの受信を再開する
         log.info("起動が完了しました。 http://localhost:%d/", s.port)
         try:
             yield
         finally:
             await stack.aclose()
+            if streams:
+                streams.stop()
             if watcher:
                 watcher.stop()
             if ingestor:
@@ -246,7 +254,8 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     if s.role in ("all", "compute"):
         app.include_router(build_compute_router(emb))
     if store and ingestor and intake and watcher:
-        ctx = Context(s, store, emb, ingestor, intake, watcher)
+        ctx = Context(s, store, emb, ingestor, intake, watcher, streams)
+        app.state.ctx = ctx  # テストや拡張から、同じ部品を使えるようにする
         app.include_router(build_api_router(ctx))
         # AI エージェント向けの MCP サーバー(/mcp)。REST と同じ処理・同じ認証で動く
         from .mcp_server import build_mcp_server, mount_mcp
@@ -264,6 +273,10 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
 
     @app.exception_handler(InvalidInput)
     async def _invalid_input(_: Request, exc: InvalidInput) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    @app.exception_handler(StreamError)
+    async def _stream_error(_: Request, exc: StreamError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=400)
 
     @app.exception_handler(NotFound)

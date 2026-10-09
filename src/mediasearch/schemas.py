@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 WindowKind = Literal["frames", "tav", "audio", "image"]
 SearchKind = Literal["auto", "all", "frames", "tav", "audio", "image"]
-SourceKind = Literal["video", "audio", "image", "frames"]
+SourceKind = Literal["video", "audio", "image", "frames", "stream"]
 IngestKind = Literal["auto", "video", "audio", "image"]
 Status = Literal["queued", "running", "done", "failed"]
 
@@ -92,6 +92,9 @@ class InfoResponse(_Open):
     presets: dict[str, dict[str, Any]] = Field(description="取り込みのプリセット")
     index: IndexStatus
     watch: dict[str, Any] = Field(description="監視フォルダの状態")
+    streams: dict[str, Any] | None = Field(
+        None, description="RTSP のストリーム(registered: 登録数、running: 受信中、max: 同時に受信できる数)"
+    )
 
 
 # ---------------------------------------------------------------------- 取り込み
@@ -289,6 +292,39 @@ class Job(_Open):
     finished_at: float | None = None
     source_name: str | None = None
     timings: JobTimings | None = Field(None, description="処理時間の内訳(完了したジョブのみ。ベンチマーク用)")
+
+
+class StreamState(_Open):
+    status: Literal["connecting", "running", "retrying", "stopped"] = Field(
+        description="connecting: 接続中 / running: 受信中 / retrying: 切断され、再接続を待っている / stopped: 停止"
+    )
+    error: str | None = Field(None, description="直近の接続・受信のエラー(URL の認証情報は伏せる)")
+    connected_at: float | None = Field(None, description="受信を始めた時刻(UNIX 秒)")
+    last_frame_at: float | None = Field(None, description="最後にフレームを受け取った時刻(UNIX 秒)")
+    frames: int | None = Field(None, description="受け取ったフレームの数(復号の間隔ごと)")
+    windows: int | None = Field(None, description="作った窓の数")
+    dropped_windows: int | None = Field(None, description="推論が追いつかず、捨てた窓の数")
+    reconnects: int | None = Field(None, description="再接続した回数")
+    lag_ms: int | None = Field(None, description="受信したフレームに対する、窓の作成の遅れ(ms)")
+    decoder: str | None = Field(None, description="復号の方式(cpu / cuda / vaapi / qsv)")
+    has_audio: bool | None = Field(None, description="ストリームに音声があるか")
+
+
+class Stream(_Open):
+    id: int
+    name: str
+    url: str = Field(description="ストリームの URL(パスワードは *** に伏せる)")
+    group_id: str | None = None
+    location: str | None = None
+    params: dict[str, Any] = Field(description="取り込みの設定(窓の長さなど)")
+    source_id: int | None = Field(None, description="窓を登録する取り込み元(kind=stream)")
+    enabled: bool = Field(description="受信する設定か(サーバーの再起動後も再開する)")
+    created_at: float
+    state: StreamState
+
+
+class StreamList(BaseModel):
+    streams: list[Stream]
 
 
 class JobList(BaseModel):

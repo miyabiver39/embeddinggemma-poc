@@ -84,6 +84,7 @@ class Settings:
     watch_settle_sec: int  # 最終更新からこの秒数たったファイルだけを取り込む(書き込み中を避ける)
     watch_group_from_dir: bool  # ファイルが入っているフォルダ名をグループ ID にする
     watch_preset: str  # 取り込みのプリセット(空なら WINDOW_SEC などの既定値)
+    max_streams: int  # 同時に受信できる RTSP ストリームの数
 
     # --- サーバ ---
     host: str
@@ -158,6 +159,7 @@ class Settings:
             watch_settle_sec=max(_env_int("WATCH_SETTLE_SEC", 30), 0),
             watch_group_from_dir=_env_bool("WATCH_GROUP_FROM_DIR", True),
             watch_preset=watch_preset,
+            max_streams=_env_int("MAX_STREAMS", 8),
             host=_env("HOST", "0.0.0.0"),
             port=_env_int("PORT", 8000),
             api_token=api_token,

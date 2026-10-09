@@ -177,6 +177,26 @@ curl -H 'Content-Type: application/json' -d '{"query": "赤い車", "after_windo
 - `API_TOKEN` を設定している場合、EventSource はヘッダーを付けられないため、WebUI と同じく Cookie(`mediasearch_token`)で認証します。
 - MCP の `search_text` にも `after_window_id` があります。
 
+### 6. RTSP のストリームを取り込む
+
+```bash
+# 登録(すぐに受信を始める)。窓の設定・音声・保存しないモードは、ファイルの取り込みと同じ項目で指定できる
+curl -H 'Content-Type: application/json' \
+  -d '{"url": "rtsp://user:pass@192.168.1.10:554/stream1", "group_id": "entrance", "preset": "object"}' \
+  http://localhost:8000/api/streams
+# {"id": 1, "url": "rtsp://user:***@192.168.1.10:554/stream1", "source_id": 5, "state": {"status": "connecting", ...}}
+
+curl http://localhost:8000/api/streams/1                # 状態
+curl -X POST http://localhost:8000/api/streams/1/stop   # 停止(作った窓は残る)
+curl -X POST http://localhost:8000/api/streams/1/start  # 再開
+curl -X DELETE "http://localhost:8000/api/streams/1?delete_data=true"  # 登録と、作った窓を削除
+```
+
+- 1 つの登録が 1 つの取り込み元(`kind=stream`)になります。窓の `abs_time` は、受信した時刻(サーバーの時計)です。
+- `state.status`: `connecting`(接続中)/ `running`(受信中)/ `retrying`(切断され、再接続を待っている。間隔は最大 60 秒)/ `stopped`。
+- 推論が追いつかない場合は、古い窓を捨てて最新に追いつきます(`state.dropped_windows`、遅れは `state.lag_ms`)。
+- 元のファイルが無いため、検索結果の `media_url` は `null` です(サムネイルは、`store_media=false` でなければ作ります)。
+
 ## クライアントの自動生成
 
 `docs/openapi.json` から、各言語のクライアントを生成できます。
