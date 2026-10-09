@@ -106,7 +106,7 @@ jobs:
           # syft 独自形式の SBOM は grype の入力用なので、配布物には含めない
           rm out/sbom.syft.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: scan-${{ matrix.variant }}
           path: out/
@@ -120,9 +120,9 @@ jobs:
     permissions:
       contents: write # リリースへの添付に必要
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: scan-*
           path: reports
@@ -143,7 +143,7 @@ jobs:
           python3 scripts/badges.py vulns reports badges/vulnerabilities.json
           python3 scripts/badges.py publish badges --message "脆弱性検査の結果を更新"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: security-report
           path: notes.md
