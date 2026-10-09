@@ -19,7 +19,7 @@ jobs:
       security-events: write # 結果を Code scanning に登録するため
       id-token: write # 結果の公開(publish_results)に必要
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -29,7 +29,7 @@ jobs:
           results_format: sarif
           publish_results: true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: scorecard-results
           path: results.sarif
