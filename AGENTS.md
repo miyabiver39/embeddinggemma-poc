@@ -119,6 +119,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 ├── tests/                 pytest(実モデルのテストは RUN_MODEL_TESTS=1 のときだけ)
 ├── bench/                 ベンチマーク(速度・資源の使用率・ボトルネックの診断。イメージには含めない。bench/README.md)
 ├── scripts/               release_report.py(脆弱性検査の結果をリリースノートにまとめる) badges.py(README のバッジ用データ) export_openapi.py(docs/openapi.json の書き出し)
+├── deploy/                compose.nginx.yml と nginx/(Nginx を前段に置く構成。docs/nginx.md)
 ├── docker/                Dockerfile(VARIANT=slim|cpu|cuda|rocm|intel)と entrypoint
 └── .github/               workflows/build.yml(テスト・ビルド・公開)、security.yml(SBOM・脆弱性検査)、codeql.yml(静的解析)、scorecard.yml(OpenSSF Scorecard)、dependabot.yml
 ```

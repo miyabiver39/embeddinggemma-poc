@@ -132,6 +132,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 ```
 
 `docker compose --profile split up` で同じ構成を試せます([docker-compose.yml](docker-compose.yml))。
+外から使う場合に、Nginx で HTTPS を終端する構成は `docker compose -f deploy/compose.nginx.yml up -d` です([docs/nginx.md](docs/nginx.md))。
 動画の加工(フレーム抽出・音声の16kHz化)は常に app 側で行うため、compute には**画像と PCM 音声だけ**が流れます。
 自前で加工済みのフレームを `/api/ingest/frames` に渡すこともできます。
 
@@ -229,6 +230,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 - [docs/api.md](docs/api.md) — API ガイド(認証、エラー、使い方の例、クライアントの自動生成)
 - [docs/mcp.md](docs/mcp.md) — MCP サーバー(AI エージェントからの利用)
 - [docs/operations.md](docs/operations.md) — 運用メモ(容量見積もり、チューニング、トラブルシュート)
+- [docs/nginx.md](docs/nginx.md) — Nginx を前段に置く構成(HTTPS・送信元ごとの上限・アクセスログ。`deploy/`)
 - [docs/gpu.md](docs/gpu.md) — GPU モード(RTX 3060 / RX 9060 XT / Intel)の確認手順
 - [docs/release.md](docs/release.md) — リリースの手順と、添付する SBOM・脆弱性検査結果
 - [docs/security.md](docs/security.md) — セキュリティ対策と、残っているリスク
