@@ -272,6 +272,10 @@ def prometheus(stats: RequestStats, ctx=None, embedder=None) -> str:
         if ctx.search_limiter is not None:
             w.metric(p + "search_active", "gauge", "処理中の検索の数", ctx.search_limiter.active)
             w.metric(p + "search_rejected_total", "counter", "混雑で断った検索の数", ctx.search_limiter.rejected)
+        last = ctx.backups.last() if ctx.backups is not None else None
+        if last:
+            help_text = "最後にバックアップを作った時刻(UNIX 秒)"
+            w.metric(p + "backup_last_timestamp_seconds", "gauge", help_text, last.get("created_ts"))
         for status, n in ctx.store.alert_counts().items():
             w.metric(p + "alert_events", "gauge", "通知の数(状態ごと。履歴の保存期間内)", n, {"status": status})
     counts, hist = stats.snapshot()

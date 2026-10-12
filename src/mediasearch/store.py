@@ -943,6 +943,26 @@ class Store:
         """ベクトルをすぐにファイルへ書き出します(通常は一定の間隔で自動的に書き出す)。"""
         self.vectors.save()
 
+    # ------------------------------------------------------------------ バックアップ
+    def backup_to(self, dest_dir: Path) -> dict:
+        """DB とベクトルの、互いに整合した複製を dest_dir に作ります(動かしたまま取れる)。
+
+        窓の追加・削除は、この Store の排他(_lock)の中で DB とベクトルの両方を変えるため、排他を持ったまま
+        両方を書き出せば、片方だけに窓がある状態にはならない。その間(数秒程度)は、取り込みの書き込みが待たされる。
+        DB は SQLite のバックアップの機能で写す(WAL の内容も含む。
+        ファイルの単純な複製は、書き込み中だと壊れることがある)。
+        """
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            dst = sqlite3.connect(dest_dir / "mediasearch.db")
+            try:
+                self._db.backup(dst)
+            finally:
+                dst.close()
+            has_vectors = self.vectors.save_copy(dest_dir / "vectors.usearch")
+            windows = int(self._db.execute("SELECT COUNT(*) FROM windows").fetchone()[0])
+        return {"windows": windows, "vectors": has_vectors}
+
     def close(self) -> None:
         self.vectors.close()
         with self._lock:

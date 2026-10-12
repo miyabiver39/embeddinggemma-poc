@@ -39,6 +39,7 @@ ERROR_RESPONSES: dict[int | str, dict] = {
     413: {"model": ErrorResponse, "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)"},
     422: {"model": ErrorResponse, "description": "映像・音声・画像として扱えないファイル、または入力の検証エラー"},
     503: {"model": ErrorResponse, "description": "推論側(compute)に接続できない"},
+    507: {"model": ErrorResponse, "description": "空き容量が足りない(MIN_FREE_DISK_MB)"},
 }
 
 
@@ -393,6 +394,21 @@ class Alert(_Open):
     enabled: bool
     created_at: float
     secret: str | None = Field(None, description="署名の鍵(作成の応答でだけ返す)")
+
+
+class Backup(_Open):
+    name: str
+    path: str = Field(description="バックアップのフォルダ(サーバーから見たパス)")
+    created_at: str
+    windows: int = Field(description="窓の数")
+    bytes: int = Field(description="ファイルの大きさの合計")
+    files: dict[str, Any] = Field(description="ファイルごとの大きさと SHA-256")
+
+
+class BackupList(BaseModel):
+    backups: list[Backup]
+    backup_dir: str
+    status: dict[str, Any] = Field(description="最後に作成したバックアップと、最後のエラー")
 
 
 class AlertList(BaseModel):

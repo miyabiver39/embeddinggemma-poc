@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from . import __version__, disk
 from .alerts import AlertEngine, AlertError
 from .api import build_api_router
+from .backup import BackupManager
 from .compute_api import build_compute_router
 from .config import Settings
 from .embedders import Embedder, build_embedder
@@ -68,6 +69,7 @@ OPENAPI_TAGS = [
     {"name": "ストリーム", "description": "RTSP のストリームを受信しながら取り込む(登録・状態の確認・停止・再開)"},
     {"name": "取り込み元・ジョブ", "description": "登録したファイルと取り込みジョブの確認・削除・取り込み直し"},
     {"name": "配信", "description": "元ファイルとサムネイルの取得"},
+    {"name": "管理", "description": "バックアップの作成と一覧(API_TOKEN が必要)"},
     {"name": "compute", "description": "ベクトル化だけを行う API(ROLE=compute / all)。app から内部的に使います"},
 ]
 
@@ -228,11 +230,15 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
             retention.start()
         if ctx_holder and ctx_holder[0].alerts:
             ctx_holder[0].alerts.start()
+        if ctx_holder and ctx_holder[0].backups:
+            ctx_holder[0].backups.start()
         log.info("起動が完了しました。 http://localhost:%d/", s.port)
         try:
             yield
         finally:
             await stack.aclose()
+            if ctx_holder and ctx_holder[0].backups:
+                ctx_holder[0].backups.stop()
             if ctx_holder and ctx_holder[0].alerts:
                 ctx_holder[0].alerts.stop()
             if retention:
@@ -270,6 +276,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
         limiter = SearchLimiter(s.max_pending_searches)
         ctx = Context(s, store, emb, ingestor, intake, watcher, streams, retention, limiter)
         ctx.alerts = AlertEngine(ctx, Service(ctx))
+        ctx.backups = BackupManager(s, store)
         app.state.ctx = ctx  # テストや拡張から、同じ部品を使えるようにする
         ctx_holder.append(ctx)
         app.include_router(build_api_router(ctx))

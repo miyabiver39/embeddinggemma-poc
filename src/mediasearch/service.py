@@ -89,6 +89,7 @@ class Context:
     retention: RetentionWorker | None = None
     search_limiter: SearchLimiter | None = None
     alerts: Any = None  # AlertEngine(循環の読み込みを避けるため、型は Any)
+    backups: Any = None  # BackupManager
 
     @property
     def media_dir(self) -> Path:
@@ -387,5 +388,6 @@ class Service:
             "watch": ctx.watcher.status,
             "streams": self._stream_summary(),
             "retention": dict(ctx.retention.status) if ctx.retention else None,
+            "backup": dict(ctx.backups.status) if ctx.backups else None,
             "disk": disk.status(s.data_dir, s.min_free_disk_mb),
         }

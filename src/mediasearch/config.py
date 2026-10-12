@@ -115,6 +115,9 @@ class Settings:
     min_free_disk_mb: int  # DATA_DIR の空き容量がこれを下回ったら、新しい取り込みを止める(0 なら確認しない)
     job_retries: int  # 推論側に接続できないなど、一時的な失敗のときに取り込みを再試行する回数
     job_history_days: float  # 終わったジョブの履歴を残す日数(取り込み元ごとの最新のジョブは残す)
+    backup_dir: Path  # バックアップの保存先(既定 DATA_DIR/backups。別のディスクを指定するのが望ましい)
+    backup_interval_hours: float  # この間隔で自動でバックアップを取る(0 なら取らない)
+    backup_keep: int  # 残すバックアップの数(古いものから削除する。0 なら削除しない)
     max_pending_searches: int  # 同時に処理する検索の上限。超えたら 503(0 なら制限しない)
     api_read_token: str  # 検索・参照だけを許可するトークン(取り込み・削除はできない)
     public_url: str  # 外から見たこのサーバーの URL(通知の本文のサムネイル・動画の URL を絶対 URL にする)
@@ -200,6 +203,9 @@ class Settings:
             min_free_disk_mb=max(_env_int("MIN_FREE_DISK_MB", 1024), 0),
             job_retries=max(_env_int("JOB_RETRIES", 3), 0),
             job_history_days=max(_env_float("JOB_HISTORY_DAYS", 30.0), 0.0),
+            backup_dir=Path(_env("BACKUP_DIR", "")) if _env("BACKUP_DIR", "") else data_dir / "backups",
+            backup_interval_hours=max(_env_float("BACKUP_INTERVAL_HOURS", 0.0), 0.0),
+            backup_keep=max(_env_int("BACKUP_KEEP", 7), 0),
             max_pending_searches=max(_env_int("MAX_PENDING_SEARCHES", 32), 0),
             api_read_token=_env("API_READ_TOKEN", ""),
             public_url=_env("PUBLIC_URL", "").rstrip("/"),

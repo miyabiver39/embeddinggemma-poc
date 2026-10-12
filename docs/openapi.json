@@ -3192,6 +3192,118 @@
         ]
       }
     },
+    "/api/admin/backup": {
+      "post": {
+        "tags": [
+          "管理"
+        ],
+        "summary": "バックアップの作成",
+        "description": "動かしたまま、DB とベクトルの整合した複製を `BACKUP_DIR`(既定 `DATA_DIR/backups`)に作ります。\n\n作成中(数秒程度。DB の大きさによる)は、取り込みの書き込みが待たされます。検索は続けられます。\nサムネイル・アップロードした動画は含めません(書いた後に変更しないため、rsync などでそのまま複製できます)。\n戻し方は docs/operations.md を参照してください。`API_TOKEN` が必要です(読み取り専用のトークンでは不可)。",
+        "operationId": "create_backup_api_admin_backup_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Backup"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "許可していないフォルダ・別サイトからのリクエスト・ホスト名",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "空き容量が足りない(MIN_FREE_DISK_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/admin/backups": {
+      "get": {
+        "tags": [
+          "管理"
+        ],
+        "summary": "バックアップの一覧",
+        "description": "作成済みのバックアップ(新しい順)。`BACKUP_KEEP` 個を超えた古いものは、作成のたびに削除します。",
+        "operationId": "list_backups_api_admin_backups_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
     "/api/stats": {
       "get": {
         "tags": [
@@ -4066,6 +4178,78 @@
         },
         "type": "object",
         "title": "AlertPatch"
+      },
+      "Backup": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "バックアップのフォルダ(サーバーから見たパス)"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "windows": {
+            "type": "integer",
+            "title": "Windows",
+            "description": "窓の数"
+          },
+          "bytes": {
+            "type": "integer",
+            "title": "Bytes",
+            "description": "ファイルの大きさの合計"
+          },
+          "files": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Files",
+            "description": "ファイルごとの大きさと SHA-256"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "created_at",
+          "windows",
+          "bytes",
+          "files"
+        ],
+        "title": "Backup"
+      },
+      "BackupList": {
+        "properties": {
+          "backups": {
+            "items": {
+              "$ref": "#/components/schemas/Backup"
+            },
+            "type": "array",
+            "title": "Backups"
+          },
+          "backup_dir": {
+            "type": "string",
+            "title": "Backup Dir"
+          },
+          "status": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Status",
+            "description": "最後に作成したバックアップと、最後のエラー"
+          }
+        },
+        "type": "object",
+        "required": [
+          "backups",
+          "backup_dir",
+          "status"
+        ],
+        "title": "BackupList"
       },
       "Body_ingest_audio_api_ingest_audio_post": {
         "properties": {
@@ -7126,6 +7310,10 @@
     {
       "name": "配信",
       "description": "元ファイルとサムネイルの取得"
+    },
+    {
+      "name": "管理",
+      "description": "バックアップの作成と一覧(API_TOKEN が必要)"
     },
     {
       "name": "compute",

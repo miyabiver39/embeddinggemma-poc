@@ -253,6 +253,18 @@ class VectorIndex:
             self._pending = 0
             self._unsynced = False
 
+    def save_copy(self, dest: Path) -> bool:
+        """今の索引(ジャーナルの分を含む)を dest に書き出します(バックアップ用)。空なら書かずに False。
+
+        元のファイル・ジャーナルには触れないため、スナップショットの周期は変わらない。
+        """
+        with self._lock:
+            if self._index is None or len(self._index) == 0:
+                return False
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            self._index.save(str(dest))
+            return True
+
     def _background(self) -> None:
         while not self._stop.wait(1.0):
             try:

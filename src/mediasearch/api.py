@@ -26,6 +26,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import disk, media
 from .alerts import new_secret, public_alert, validate_webhook
+from .backup import BackupError
 from .ingest_files import MEDIA_KINDS, is_within, media_kind_of
 from .live import LiveHub, Subscriber
 from .media import MediaError
@@ -38,6 +39,8 @@ from .schemas import (
     AlertEventList,
     AlertList,
     AlertPatch,
+    Backup,
+    BackupList,
     Deleted,
     DirIngestResponse,
     FramesResponse,
@@ -894,6 +897,36 @@ def build_api_router(ctx: Context) -> APIRouter:
         (リポジトリの bench/ が 1 秒ごとに読んで集計します)。詳細は bench/README.md を参照してください。
         """
         return app_metrics(ctx)
+
+    @router.post(
+        "/admin/backup",
+        tags=["管理"],
+        summary="バックアップの作成",
+        response_model=Backup,
+        responses=errors(401, 403, 409, 507),
+    )
+    def create_backup() -> dict:
+        """動かしたまま、DB とベクトルの整合した複製を `BACKUP_DIR`(既定 `DATA_DIR/backups`)に作ります。
+
+        作成中(数秒程度。DB の大きさによる)は、取り込みの書き込みが待たされます。検索は続けられます。
+        サムネイル・アップロードした動画は含めません(書いた後に変更しないため、rsync などでそのまま複製できます)。
+        戻し方は docs/operations.md を参照してください。`API_TOKEN` が必要です(読み取り専用のトークンでは不可)。
+        """
+        try:
+            return ctx.backups.create()
+        except BackupError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @router.get(
+        "/admin/backups",
+        tags=["管理"],
+        summary="バックアップの一覧",
+        response_model=BackupList,
+        responses=errors(401),
+    )
+    def list_backups() -> dict:
+        """作成済みのバックアップ(新しい順)。`BACKUP_KEEP` 個を超えた古いものは、作成のたびに削除します。"""
+        return {"backups": ctx.backups.list(), "backup_dir": str(ctx.backups.root), "status": ctx.backups.status}
 
     @router.get(
         "/stats",
