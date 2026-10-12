@@ -73,6 +73,8 @@ def test_allowed_hosts(settings):
         assert c.get("/healthz").status_code == 200
     with TestClient(create_app(s), base_url="http://attacker.example") as c:
         assert c.get("/healthz").status_code == 403
+    with TestClient(create_app(s), base_url="http://localhost:8000") as c:
+        assert c.get("/healthz").status_code == 200  # コンテナの死活監視(localhost)は常に通す
 
 
 def test_body_limit(settings):

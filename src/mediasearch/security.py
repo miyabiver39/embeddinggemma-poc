@@ -41,6 +41,7 @@ READ_ONLY_MESSAGE = "読み取り専用のトークン(API_READ_TOKEN)では、�
 # 認証なしで開けるパス。/healthz は Docker の死活監視、/ と /docs・/redoc・/scalar は WebUI と API 仕様の画面。
 # /openapi.json は仕様書の画面が読み込むため公開する(仕様書にデータは含まれず、リポジトリでも公開している)。
 # データの取得(/api・/compute・/mcp)には認証が要る
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 PUBLIC_PATHS = frozenset(
     {"/", "/healthz", "/readyz", "/docs", "/docs/oauth2-redirect", "/redoc", "/scalar", "/openapi.json"}
 )
@@ -99,7 +100,9 @@ class SecurityMiddleware:
         # 読み取り専用のトークンは、API_TOKEN を設定しているときだけ有効(認証が無効なら区別する意味がない)
         self.read_token = settings.api_read_token if settings.api_token else ""
         self.allowed_origins = {o.lower() for o in settings.allowed_origins}
-        self.allowed_hosts = set(settings.allowed_hosts)
+        # ループバックの名前は常に許可する(コンテナの死活監視が localhost に接続するため)。DNS リバインディングでは、
+        # 攻撃者のドメイン名が Host に入るため、これらを許可しても防げる
+        self.allowed_hosts = set(settings.allowed_hosts) | LOOPBACK_HOSTS
         self.max_body = settings.max_upload_mb * 1024 * 1024
 
     async def __call__(self, scope, receive, send):
