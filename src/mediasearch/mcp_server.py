@@ -31,7 +31,7 @@ from . import __version__, media
 from .ingest_files import MEDIA_KINDS, media_kind_of
 from .media import MediaError
 from .pipeline import IngestParams
-from .service import Context, InvalidInput, NotFound, Service, parse_opt_ts
+from .service import Context, InvalidInput, NotFound, Overloaded, Service, parse_opt_ts
 from .store import IndexMismatch
 
 MCP_PATH = "/mcp"
@@ -86,7 +86,7 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         """アプリの例外を、エージェントが理解できる日本語のエラーにする。"""
         try:
             return fn(*args, **kwargs)
-        except (InvalidInput, NotFound, MediaError, IndexMismatch, ConnectionError, ValueError) as exc:
+        except (InvalidInput, NotFound, Overloaded, MediaError, IndexMismatch, ConnectionError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
 
     def _filters(top_k, min_score, group_id, location, from_time, to_time, kind) -> dict:

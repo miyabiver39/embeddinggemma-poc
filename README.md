@@ -165,6 +165,8 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `WATCH_GROUP_FROM_DIR` | `true` | ファイルが入っているフォルダ名をグループ ID にする |
 | `WATCH_PRESET` | (空) | 監視フォルダの取り込みに使うプリセット(`object` / `action` / `speech`)。空なら上記の窓の既定値 |
 | `API_TOKEN` | (空) | 設定すると `/api` と `/compute` にトークンが必要になる(`docs/security.md`) |
+| `API_READ_TOKEN` | (空) | 検索・参照だけを許可するトークン(取り込み・変更・削除はできない)。`API_TOKEN` を設定したときだけ有効 |
+| `MAX_PENDING_SEARCHES` | `32` | 同時に処理する検索の上限。超えた分は 503(`Retry-After: 5`)で断り、API が応答しなくなるのを防ぐ。`0` で制限しない |
 | `EMBEDDING_TOKEN` | `API_TOKEN` と同じ | remote のとき、compute に送るトークン |
 | `INGEST_ROOTS` | `/recordings` | パス指定・フォルダ一括で取り込めるフォルダ(カンマ区切り)。`DATA_DIR` と監視フォルダは自動で追加 |
 | `MAX_UPLOAD_MB` | `4096` | 1 リクエストの大きさの上限(MB)。`0` で無制限 |
@@ -206,6 +208,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `POST /api/streams`、`GET /api/streams` ほか | RTSP のストリームの登録・状態の確認・停止・再開・削除 |
 | `GET /api/search/live` | 取り込み中に追加された窓のうち、文章に合うものを通知する(リアルタイム検索。Server-Sent Events) |
 | `GET /healthz` / `GET /readyz` | 死活監視(プロセスが動いているか)/ 準備完了の確認(DB・ベクトル DB・推論側・空き容量。処理できなければ 503)。どちらも認証不要 |
+| `PATCH /api/sources/{id}` | 取り込み元の名前・グループ ID・場所を変える(取り込み直しは不要) |
 | `POST /api/jobs/{id}/cancel` | 取り込みのジョブを取り消す(実行中は窓の区切りで止める) |
 | `GET /api/metrics` | 資源の使用状況(CPU・メモリ・ディスク・GPU)と推論の稼働率。ベンチマーク(`bench/`)が読む |
 | `GET /api/stats` | 取り込みの処理時間の集計(ジョブごとの内訳は `GET /api/jobs/{id}` の `timings`。`bench/bench.py` で計測) |

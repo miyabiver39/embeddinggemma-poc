@@ -33,6 +33,11 @@ log = logging.getLogger(__name__)
 
 TOKEN_COOKIE = "mediasearch_token"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# 読み取り専用のトークン(API_READ_TOKEN)でも使える、POST の経路(検索)
+READ_POST_PATHS = frozenset({"/api/search/text", "/api/search/image", "/api/search/audio"})
+# 読み取り専用のトークンでは呼べない MCP のツール(取り込み)
+MCP_WRITE_TOOLS = frozenset({"ingest_path", "ingest_dir"})
+READ_ONLY_MESSAGE = "読み取り専用のトークン(API_READ_TOKEN)では、この操作はできません(API_TOKEN が必要です)"
 # 認証なしで開けるパス。/healthz は Docker の死活監視、/ と /docs・/redoc・/scalar は WebUI と API 仕様の画面。
 # /openapi.json は仕様書の画面が読み込むため公開する(仕様書にデータは含まれず、リポジトリでも公開している)。
 # データの取得(/api・/compute・/mcp)には認証が要る
@@ -91,6 +96,8 @@ class SecurityMiddleware:
     def __init__(self, app, settings: Settings) -> None:
         self.app = app
         self.token = settings.api_token
+        # 読み取り専用のトークンは、API_TOKEN を設定しているときだけ有効(認証が無効なら区別する意味がない)
+        self.read_token = settings.api_read_token if settings.api_token else ""
         self.allowed_origins = {o.lower() for o in settings.allowed_origins}
         self.allowed_hosts = set(settings.allowed_hosts)
         self.max_body = settings.max_upload_mb * 1024 * 1024
@@ -116,6 +123,19 @@ class SecurityMiddleware:
             receive, exceeded = self._limited(receive)
         else:
             exceeded = None
+
+        if self._is_read_only(path, headers):
+            # 本文の上限(上の _limited)を当てた後に読む。読み取り専用のトークンで、大きな本文を送り付けられても止める
+            try:
+                if path == "/mcp" and method == "POST":
+                    receive, refusal = await self._check_mcp_call(receive)
+                elif method not in SAFE_METHODS and path not in READ_POST_PATHS:
+                    refusal = (403, READ_ONLY_MESSAGE, {})
+            except BodyTooLarge:
+                refusal = (413, self._too_large_message(), {})
+            if refusal is not None:
+                await _send_json(send, *refusal)
+                return
 
         started = replaced = False
 
@@ -160,11 +180,58 @@ class SecurityMiddleware:
 
         if self.token and path not in PUBLIC_PATHS:
             given = token_from_request(headers)
-            if given is None or not hmac.compare_digest(given.encode(), self.token.encode()):
+            ok = given is not None and (
+                hmac.compare_digest(given.encode(), self.token.encode())
+                or (bool(self.read_token) and hmac.compare_digest(given.encode(), self.read_token.encode()))
+            )
+            if not ok:
                 return 401, "認証が必要です(API_TOKEN で設定したトークンを指定してください)", {
                     "www-authenticate": "Bearer"
                 }
         return None
+
+    def _is_read_only(self, path: str, headers: dict[str, str]) -> bool:
+        """読み取り専用のトークンで来た要求か(API_TOKEN と同じ値なら、全ての操作を許す)。"""
+        if not self.read_token or path in PUBLIC_PATHS:
+            return False
+        given = token_from_request(headers)
+        if given is None or hmac.compare_digest(given.encode(), self.token.encode()):
+            return False
+        return hmac.compare_digest(given.encode(), self.read_token.encode())
+
+    async def _check_mcp_call(self, receive):
+        """MCP の要求の本文(小さな JSON)を先に読み、取り込みのツールを呼ぶものなら拒否します。
+
+        読んだ本文は、そのままアプリに渡し直します。
+        """
+        chunks, more = [], True
+        while more:
+            message = await receive()
+            if message["type"] != "http.request":
+                break
+            chunks.append(message.get("body", b""))
+            more = message.get("more_body", False)
+        body = b"".join(chunks)
+        try:
+            payload = json.loads(body or b"null")
+        except ValueError:
+            payload = None
+        calls = payload if isinstance(payload, list) else [payload]
+        for call in calls:
+            if isinstance(call, dict) and call.get("method") == "tools/call":
+                name = (call.get("params") or {}).get("name")
+                if name in MCP_WRITE_TOOLS:
+                    return receive, (403, READ_ONLY_MESSAGE, {})
+        sent = False
+
+        async def replay():
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return await receive()
+
+        return replay, None
 
     def _too_large_message(self) -> str:
         return f"リクエストが大きすぎます(上限 {self.max_body // (1024 * 1024)} MB。MAX_UPLOAD_MB で変更できます)"
@@ -205,7 +272,11 @@ def startup_warnings(settings: Settings) -> None:
             "認証が無効です(API_TOKEN が未設定)。同じネットワークの誰でも映像の取得・削除ができます。"
             "信頼できるネットワーク以外で使う場合は API_TOKEN を設定してください(docs/security.md)"
         )
+    elif settings.api_read_token and settings.api_read_token == settings.api_token:
+        log.warning("API_READ_TOKEN が API_TOKEN と同じ値です。読み取り専用にならないため、別の値にしてください")
     elif len(settings.api_token) < 16:
         log.warning("API_TOKEN が短すぎます(16 文字以上を推奨)。推測されにくい値にしてください")
+    if settings.api_read_token and not settings.api_token:
+        log.warning("API_READ_TOKEN は、API_TOKEN を設定したときだけ有効です(今は認証が無効です)")
     if settings.max_upload_mb == 0:
         log.warning("MAX_UPLOAD_MB=0 のため、アップロードの大きさに上限がありません")

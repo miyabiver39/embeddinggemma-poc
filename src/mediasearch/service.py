@@ -7,7 +7,9 @@ HTTP の要求・応答の形に依存しない処理をここにまとめ、api
 from __future__ import annotations
 
 import os
+import threading
 import time
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +37,40 @@ class NotFound(LookupError):
     """対象が見つからない(API では 404)。"""
 
 
+class Overloaded(RuntimeError):
+    """同時に処理している検索が多すぎる(API では 503 と Retry-After)。"""
+
+
+class SearchLimiter:
+    """同時に処理する検索の数を制限します(MAX_PENDING_SEARCHES)。
+
+    推論は 1 件ずつのため、検索が殺到すると推論の順番待ちが際限なく積み上がり、API のスレッドを使い切って
+    他の要求(状態の確認・取り込みの受付)まで応答しなくなります。上限を超えた分は待たせずに 503 で断り、
+    利用側に時間をおいて再送してもらいます。
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.active = 0
+        self.rejected = 0
+        self._lock = threading.Lock()
+
+    @contextmanager
+    def slot(self):
+        with self._lock:
+            if self.limit > 0 and self.active >= self.limit:
+                self.rejected += 1
+                raise Overloaded(
+                    f"検索が混み合っています(同時に {self.limit} 件まで)。少し時間をおいて再送してください"
+                )
+            self.active += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self.active -= 1
+
+
 def media_stored(source: dict) -> bool:
     """元のファイルとサムネイルを保存する取り込み元か(STORE_MEDIA / store_media が偽なら、情報だけを返す)。"""
     return bool((source.get("params") or {}).get("store_media", True))
@@ -50,6 +86,7 @@ class Context:
     watcher: FolderWatcher
     streams: StreamManager | None = None
     retention: RetentionWorker | None = None
+    search_limiter: SearchLimiter | None = None
 
     @property
     def media_dir(self) -> Path:
@@ -192,17 +229,27 @@ class Service:
             raise InvalidInput("query が空です")
         return self.ctx.embedder.embed_texts([query], kind="query")[0]
 
+    def _slot(self):
+        limiter = self.ctx.search_limiter
+        return limiter.slot() if limiter is not None else nullcontext()
+
     def search_text(self, query: str, **filters) -> dict:
-        t0 = time.time()
-        qvec = self.text_vector(query)
-        return self.search(qvec, filters, embed_ms=int((time.time() - t0) * 1000))
+        with self._slot():
+            t0 = time.time()
+            qvec = self.text_vector(query)
+            return self.search(qvec, filters, embed_ms=int((time.time() - t0) * 1000))
 
     def search_image(self, image: np.ndarray, **filters) -> dict:
-        t0 = time.time()
-        qvec = self.ctx.embedder.embed_images([image], high=True)[0]
-        return self.search(qvec, filters, embed_ms=int((time.time() - t0) * 1000))
+        with self._slot():
+            t0 = time.time()
+            qvec = self.ctx.embedder.embed_images([image], high=True)[0]
+            return self.search(qvec, filters, embed_ms=int((time.time() - t0) * 1000))
 
     def search_audio(self, pcm: np.ndarray, **filters) -> dict:
+        with self._slot():
+            return self._search_audio(pcm, **filters)
+
+    def _search_audio(self, pcm: np.ndarray, **filters) -> dict:
         t0 = time.time()
         qvec = self.ctx.embedder.embed_audio(pcm, high=True)
         # 音声だけのベクトルは映像のみ(frames)の窓とはほぼ無関係な順位になる(実測)ため、

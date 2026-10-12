@@ -1978,6 +1978,106 @@
               "title": "Limit"
             },
             "description": "返す件数(新しい順)"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "先頭から飛ばす件数(前の応答の next_offset を渡すと次のページ)",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "先頭から飛ばす件数(前の応答の next_offset を渡すと次のページ)"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "cancelled",
+                    "expired"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "状態で絞り込む",
+              "title": "Status"
+            },
+            "description": "状態で絞り込む"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "video",
+                    "audio",
+                    "image",
+                    "frames",
+                    "stream"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "種類で絞り込む",
+              "title": "Kind"
+            },
+            "description": "種類で絞り込む"
+          },
+          {
+            "name": "group_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "グループ ID で絞り込む",
+              "title": "Group Id"
+            },
+            "description": "グループ ID で絞り込む"
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "名前の一部で絞り込む",
+              "title": "Name"
+            },
+            "description": "名前の一部で絞り込む"
           }
         ],
         "responses": {
@@ -2048,6 +2148,96 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Source"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      },
+      "patch": {
+        "tags": [
+          "取り込み元・ジョブ"
+        ],
+        "summary": "取り込み元の名前・グループ ID・場所を変える",
+        "description": "取り込んだ後に、グループ ID や場所を付け直します(取り込み直しは不要)。グループ ID は窓にも反映します。\n\n空文字(\"\")を指定した項目は、空にします。ストリームの取り込み元は、ストリームの登録とは別に変わります。",
+        "operationId": "patch_source_api_sources__source_id__patch",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourcePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Source"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2267,6 +2457,63 @@
               "title": "Limit"
             },
             "description": "返す件数(新しい順)"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "先頭から飛ばす件数(前の応答の next_offset を渡すと次のページ)",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "先頭から飛ばす件数(前の応答の next_offset を渡すと次のページ)"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "cancelled",
+                    "expired"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "状態で絞り込む",
+              "title": "Status"
+            },
+            "description": "状態で絞り込む"
+          },
+          {
+            "name": "source_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "取り込み元で絞り込む",
+              "title": "Source Id"
+            },
+            "description": "取り込み元で絞り込む"
           }
         ],
         "responses": {
@@ -4468,6 +4715,30 @@
             },
             "type": "array",
             "title": "Jobs"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total",
+            "description": "条件に合うジョブの総数"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset",
+            "description": "次のページの offset(最後のページなら null)"
           }
         },
         "type": "object",
@@ -5045,6 +5316,30 @@
             },
             "type": "array",
             "title": "Sources"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total",
+            "description": "条件に合う取り込み元の総数"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset",
+            "description": "次のページの offset(最後のページなら null)"
           }
         },
         "type": "object",
@@ -5052,6 +5347,53 @@
           "sources"
         ],
         "title": "SourceList"
+      },
+      "SourcePatch": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "表示名"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "グループ ID(窓にも反映し、検索の絞り込みに使う)"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "場所の名前"
+          }
+        },
+        "type": "object",
+        "title": "SourcePatch",
+        "description": "取り込み元の情報の変更。指定した項目だけを変えます。空文字は、その項目を空にします。"
       },
       "StatsResponse": {
         "properties": {

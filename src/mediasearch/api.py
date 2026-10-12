@@ -44,8 +44,11 @@ from .schemas import (
     SearchKind,
     SearchResponse,
     Source,
+    SourceKind,
     SourceList,
+    SourcePatch,
     StatsResponse,
+    Status,
     Stream,
     StreamList,
     TextSearchRequest,
@@ -673,8 +676,19 @@ def build_api_router(ctx: Context) -> APIRouter:
         response_model=SourceList,
         responses=errors(401),
     )
-    def list_sources(limit: int = Query(200, ge=1, le=10_000, description="返す件数(新しい順)")) -> dict:
-        return {"sources": ctx.store.list_sources(limit)}
+    def list_sources(
+        limit: int = Query(200, ge=1, le=10_000, description="返す件数(新しい順)"),
+        offset: int = Query(0, ge=0, description="先頭から飛ばす件数(前の応答の next_offset を渡すと次のページ)"),
+        status: Status | None = Query(None, description="状態で絞り込む"),
+        kind: SourceKind | None = Query(None, description="種類で絞り込む"),
+        group_id: str | None = Query(None, description="グループ ID で絞り込む"),
+        name: str | None = Query(None, description="名前の一部で絞り込む"),
+    ) -> dict:
+        rows, total = ctx.store.query_sources(
+            offset=offset, limit=limit, status=status, kind=kind, group_id=group_id, name=name
+        )
+        nxt = offset + len(rows) if offset + len(rows) < total else None
+        return {"sources": rows, "total": total, "next_offset": nxt}
 
     @router.get(
         "/sources/{source_id}",
@@ -688,6 +702,26 @@ def build_api_router(ctx: Context) -> APIRouter:
         if src is None:
             raise HTTPException(404, "取り込み元が見つかりません")
         return src
+
+    @router.patch(
+        "/sources/{source_id}",
+        tags=["取り込み元・ジョブ"],
+        summary="取り込み元の名前・グループ ID・場所を変える",
+        response_model=Source,
+        responses=errors(400, 401, 404),
+    )
+    def patch_source(source_id: int, body: SourcePatch) -> dict:
+        """取り込んだ後に、グループ ID や場所を付け直します(取り込み直しは不要)。グループ ID は窓にも反映します。
+
+        空文字("")を指定した項目は、空にします。ストリームの取り込み元は、ストリームの登録とは別に変わります。
+        """
+        if ctx.store.get_source(source_id) is None:
+            raise HTTPException(404, "取り込み元が見つかりません")
+        fields = body.model_dump(exclude_unset=True)
+        clear = tuple(k for k, v in fields.items() if v == "" and k in ("group_id", "location"))
+        values = {k: v for k, v in fields.items() if v not in (None, "")}
+        ctx.store.update_source_meta(source_id, **values, clear=clear)
+        return ctx.store.get_source(source_id)
 
     @router.delete(
         "/sources/{source_id}",
@@ -733,8 +767,15 @@ def build_api_router(ctx: Context) -> APIRouter:
         response_model=JobList,
         responses=errors(401),
     )
-    def list_jobs(limit: int = Query(100, ge=1, le=10_000, description="返す件数(新しい順)")) -> dict:
-        return {"jobs": ctx.store.list_jobs(limit)}
+    def list_jobs(
+        limit: int = Query(100, ge=1, le=10_000, description="返す件数(新しい順)"),
+        offset: int = Query(0, ge=0, description="先頭から飛ばす件数(前の応答の next_offset を渡すと次のページ)"),
+        status: Status | None = Query(None, description="状態で絞り込む"),
+        source_id: int | None = Query(None, description="取り込み元で絞り込む"),
+    ) -> dict:
+        rows, total = ctx.store.query_jobs(offset=offset, limit=limit, status=status, source_id=source_id)
+        nxt = offset + len(rows) if offset + len(rows) < total else None
+        return {"jobs": rows, "total": total, "next_offset": nxt}
 
     @router.post(
         "/jobs/{job_id}/cancel",

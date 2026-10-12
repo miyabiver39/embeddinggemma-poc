@@ -29,6 +29,9 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/info
 curl -H "X-API-Key: $TOKEN"            http://localhost:8000/api/info
 ```
 
+`API_READ_TOKEN` を設定している場合、そのトークンでは検索と参照(GET)だけができます(取り込み・変更・削除は 403)。
+検索だけを使う利用側には、こちらを渡してください。
+
 Scalar(`/scalar`)では Authentication 欄、Swagger UI(`/docs`)では右上の Authorize にトークンを入力します。
 `/healthz` は認証なしで呼べます(死活監視用)。仕様書(`/openapi.json`)と、仕様書の画面も認証なしで開けます(データは含みません)。
 
@@ -61,6 +64,7 @@ curl -sL https://cdn.jsdelivr.net/npm/@scalar/api-reference@<版>/dist/browser/s
 | 413 | リクエストが大きすぎる(`MAX_UPLOAD_MB`) | パス指定での取り込みを使う |
 | 422 | 映像・音声・画像として扱えないファイル、または入力の型の誤り | ファイルの形式を確認する |
 | 503 | 推論側(compute)に接続できない | compute の起動とトークンを確認する |
+| 503(`Retry-After` あり) | 検索が混み合っている(`MAX_PENDING_SEARCHES` を超えた) | `Retry-After` の秒数だけ待って再送する |
 | 507 | `DATA_DIR` の空き容量が `MIN_FREE_DISK_MB` を下回っている(新しい取り込みを止めている) | 保存期間(`RETENTION_DAYS`)を設定する、不要な取り込み元を削除する |
 
 ## 用語
@@ -200,6 +204,18 @@ curl -X DELETE "http://localhost:8000/api/streams/1?delete_data=true"  # 登録�
 - `state.status`: `connecting`(接続中)/ `running`(受信中)/ `retrying`(切断され、再接続を待っている。間隔は最大 60 秒)/ `stopped`。
 - 推論が追いつかない場合は、古い窓を捨てて最新に追いつきます(`state.dropped_windows`、遅れは `state.lag_ms`)。
 - 元のファイルが無いため、検索結果の `media_url` は `null` です(サムネイルは、`store_media=false` でなければ作ります)。
+
+### 7. 一覧のページ送りと、取り込み元の変更
+
+```bash
+# 一覧は新しい順。total が総数、next_offset を offset に渡すと次のページ(最後のページなら null)
+curl "http://localhost:8000/api/sources?limit=100&offset=0&status=failed&kind=video&group_id=group-a&name=0901"
+curl "http://localhost:8000/api/jobs?limit=50&status=running"
+
+# 取り込んだ後に、グループ ID・場所・名前を付け直す(グループ ID は窓にも反映され、検索の絞り込みに使える)。"" で空にする
+curl -X PATCH -H 'Content-Type: application/json' -d '{"group_id": "entrance", "location": ""}' \
+  http://localhost:8000/api/sources/12
+```
 
 ## クライアントの自動生成
 

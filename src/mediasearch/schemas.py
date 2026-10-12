@@ -263,6 +263,16 @@ class Source(_Open):
 
 class SourceList(BaseModel):
     sources: list[Source]
+    total: int | None = Field(None, description="条件に合う取り込み元の総数")
+    next_offset: int | None = Field(None, description="次のページの offset(最後のページなら null)")
+
+
+class SourcePatch(BaseModel):
+    """取り込み元の情報の変更。指定した項目だけを変えます。空文字は、その項目を空にします。"""
+
+    name: str | None = Field(None, min_length=1, max_length=500, description="表示名")
+    group_id: str | None = Field(None, max_length=200, description="グループ ID(窓にも反映し、検索の絞り込みに使う)")
+    location: str | None = Field(None, max_length=200, description="場所の名前")
 
 
 class JobTimings(_Open):
@@ -340,6 +350,8 @@ class StreamList(BaseModel):
 
 class JobList(BaseModel):
     jobs: list[Job]
+    total: int | None = Field(None, description="条件に合うジョブの総数")
+    next_offset: int | None = Field(None, description="次のページの offset(最後のページなら null)")
 
 
 class KindStats(BaseModel):

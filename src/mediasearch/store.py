@@ -323,6 +323,57 @@ class Store:
             ).fetchall()
         return [self._source_dict(r) for r in rows]
 
+    def query_sources(
+        self,
+        *,
+        offset: int = 0,
+        limit: int = 100,
+        status: str | None = None,
+        kind: str | None = None,
+        group_id: str | None = None,
+        name: str | None = None,
+    ) -> tuple[list[dict], int]:
+        """絞り込みとページ送りをした取り込み元の一覧(新しい順)と、条件に合う総数。"""
+        where, params = [], []
+        for col, val in (("status", status), ("kind", kind), ("group_id", group_id)):
+            if val:
+                where.append(f"s.{col} = ?")
+                params.append(val)
+        if name:
+            where.append("s.name LIKE ? ESCAPE '\\'")
+            params.append("%" + name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+        cond = (" WHERE " + " AND ".join(where)) if where else ""
+        with self._lock:
+            total = self._db.execute(f"SELECT COUNT(*) AS n FROM sources s{cond}", params).fetchone()["n"]
+            rows = self._db.execute(
+                "SELECT s.*, (SELECT COUNT(*) FROM windows w WHERE w.source_id=s.id) AS window_count"
+                f" FROM sources s{cond} ORDER BY s.id DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+        return [self._source_dict(r) for r in rows], int(total)
+
+    def update_source_meta(
+        self, source_id: int, *, name: str | None = None, group_id: str | None = None, location: str | None = None,
+        clear: tuple[str, ...] = (),
+    ) -> None:
+        """取り込み元の名前・グループ ID・場所を変えます。グループ ID は窓にも写す(検索の絞り込みに使うため)。
+
+        clear に列の名前を入れると、その列を空(NULL)にします。
+        """
+        fields = {k: v for k, v in (("name", name), ("group_id", group_id), ("location", location)) if v is not None}
+        for col in clear:
+            if col in ("group_id", "location"):
+                fields[col] = None
+        if not fields:
+            return
+        with self._lock:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            self._db.execute(f"UPDATE sources SET {sets} WHERE id=?", (*fields.values(), source_id))
+            if "group_id" in fields:
+                self._db.execute("UPDATE windows SET group_id=? WHERE source_id=?", (fields["group_id"], source_id))
+            self._db.commit()
+            self._cache = None  # 絞り込みに使う値が変わるため、次の検索で読み直す
+
     def find_sources_by_path(self, path: str) -> list[dict]:
         with self._lock:
             rows = self._db.execute("SELECT * FROM sources WHERE path=? ORDER BY id", (path,)).fetchall()
@@ -524,6 +575,26 @@ class Store:
         d = dict(row)
         d["timings"] = json.loads(d["timings"]) if d.get("timings") else None
         return d
+
+    def query_jobs(
+        self, *, offset: int = 0, limit: int = 100, status: str | None = None, source_id: int | None = None
+    ) -> tuple[list[dict], int]:
+        where, params = [], []
+        if status:
+            where.append("j.status = ?")
+            params.append(status)
+        if source_id is not None:
+            where.append("j.source_id = ?")
+            params.append(source_id)
+        cond = (" WHERE " + " AND ".join(where)) if where else ""
+        with self._lock:
+            total = self._db.execute(f"SELECT COUNT(*) AS n FROM jobs j{cond}", params).fetchone()["n"]
+            rows = self._db.execute(
+                "SELECT j.*, s.name AS source_name FROM jobs j JOIN sources s ON s.id=j.source_id"
+                f"{cond} ORDER BY j.id DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+        return [self._job_dict(r) for r in rows], int(total)
 
     def prune_jobs(self, before: float) -> int:
         """before より前に終わったジョブの履歴を削除します。取り込み元ごとの最新のジョブ(最後の処理時間)は残します。"""

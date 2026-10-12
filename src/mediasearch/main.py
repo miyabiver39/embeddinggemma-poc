@@ -27,7 +27,7 @@ from .pipeline import Ingestor
 from .retention import RetentionWorker
 from .schemas import Health
 from .security import SecurityMiddleware, startup_warnings
-from .service import Context, InvalidInput, NotFound, Service
+from .service import Context, InvalidInput, NotFound, Overloaded, SearchLimiter, Service
 from .store import IndexMismatch, Store
 from .streams import StreamError, StreamManager
 from .watcher import FolderWatcher
@@ -265,7 +265,8 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     if s.role in ("all", "compute"):
         app.include_router(build_compute_router(emb))
     if store and ingestor and intake and watcher:
-        ctx = Context(s, store, emb, ingestor, intake, watcher, streams, retention)
+        limiter = SearchLimiter(s.max_pending_searches)
+        ctx = Context(s, store, emb, ingestor, intake, watcher, streams, retention, limiter)
         app.state.ctx = ctx  # テストや拡張から、同じ部品を使えるようにする
         ctx_holder.append(ctx)
         app.include_router(build_api_router(ctx))
@@ -310,6 +311,10 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     @app.exception_handler(InvalidInput)
     async def _invalid_input(_: Request, exc: InvalidInput) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    @app.exception_handler(Overloaded)
+    async def _overloaded(_: Request, exc: Overloaded) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=503, headers={"Retry-After": "5"})
 
     @app.exception_handler(disk.InsufficientStorage)
     async def _no_space(_: Request, exc: disk.InsufficientStorage) -> JSONResponse:
