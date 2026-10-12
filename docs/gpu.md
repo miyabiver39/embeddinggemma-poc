@@ -75,6 +75,19 @@ ffmpeg -v error -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -i <動画> -
 ffmpeg -v error -hwaccel cuda -i <動画> -f null -                                       # NVIDIA
 ```
 
+## 推論のまとめ処理(EMBED_BATCH)
+
+GPU では、既定で 4 件までの窓をまとめて推論します(`EMBED_BATCH=auto`)。効果は実機で未計測のため、次の手順で比べてください。
+
+```bash
+# EMBED_BATCH を変えて起動し直し、それぞれで計測する(timings.stages_ms.embed と per_window_ms を比べる)
+docker run ... -e EMBED_BATCH=1 ...   # まとめない
+docker run ... -e EMBED_BATCH=8 ...
+python scripts/benchmark.py --path /recordings/sample.mp4 --repeat 3
+```
+
+メモリが足りない(CUDA out of memory など)場合は、`EMBED_BATCH` を下げてください。
+
 ## 一般ユーザーでの実行と GPU
 
 アプリは起動直後に一般ユーザー(uid 1000)へ切り替えて動きます(`docs/security.md`)。

@@ -52,8 +52,9 @@ def _audio_vec(pcm: np.ndarray) -> np.ndarray:
 
 
 class DummyEmbedder(Embedder):
-    def __init__(self, dims: int = 768) -> None:
+    def __init__(self, dims: int = 768, batch_size: int = 1) -> None:
         self._dims = dims
+        self._batch = batch_size  # テストで、まとめて推論する経路を通すため
 
     def info(self) -> EmbedderInfo:
         return EmbedderInfo(
@@ -64,6 +65,7 @@ class DummyEmbedder(Embedder):
             device="cpu",
             accelerator="dummy",
             modalities=["text", "image", "audio", "video", "message"],
+            batch_size=self._batch,
         )
 
     def embed_texts(self, texts: Sequence[str], kind: str = "query") -> np.ndarray:

@@ -55,7 +55,7 @@
 - 動画の取り込みを ffmpeg の連続復号に変更(`media.VideoFrameReader`)。60 秒・1080p で 11.0 秒 → 2.6 秒(ダミー推論・4 vCPU)。
   復号は推論と並行、音声は 1 回で変換(`media.AudioTrack`)、`FFMPEG_SKIP_FRAMES=noref` で約 25% 短縮。GPU 復号(`FFMPEG_HWACCEL`)は**実機未確認**(CPU へのフォールバックのみ確認)。
 - 処理時間の記録(ジョブの `timings`)、`GET /api/stats`、`scripts/benchmark.py`。実モデルでの計測は未実施(推論が大半を占める見込み)。
-- 画像は続けて登録されたものを最大 16 枚まとめて推論。
+- 画像は続けて登録されたものを最大 16 枚まとめて 1 ジョブで処理(推論を 1 回にまとめるのは `EMBED_BATCH` が 2 以上のとき。下記)。
 - ベクトルを USearch(`vectors.usearch`)へ移行。LanceDB は依存込みで約 350MB のため不採用(`docs/design.md` 第 4 節)。以前の DB は起動時に移行(確認済み)。
 - 保存しないモード(`STORE_MEDIA` / `store_media`)、取り込み中の検索(`after_window_id`、`GET /api/search/live`。WebUI で Chromium 確認済み)。
 - RTSP の取り込み(`streams.py`、`/api/streams`)。MediaMTX を使い、受信・切断からの再接続・サーバー再起動後の再開・音声つき(tav)を確認済み。

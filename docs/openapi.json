@@ -3282,6 +3282,12 @@
           "backend": {
             "type": "string",
             "title": "Backend"
+          },
+          "batch_size": {
+            "type": "integer",
+            "title": "Batch Size",
+            "description": "まとめて推論する最大の件数(EMBED_BATCH)",
+            "default": 1
           }
         },
         "additionalProperties": true,

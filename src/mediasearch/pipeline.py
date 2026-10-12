@@ -470,6 +470,8 @@ class Ingestor:
                 pending = 0  # 次に処理する窓
                 last_index = -1
                 stream = _prefetch(reader)
+                batch = max(self._embedder.info().batch_size, 1)
+                ready: list[dict] = []  # フレームが揃い、推論を待っている窓(batch 件たまったらまとめて推論する)
                 while pending < len(plans):
                     t = time.perf_counter()
                     item = next(stream, None)
@@ -479,12 +481,15 @@ class Ingestor:
                         frames[last_index] = item[1]
                     # 必要なフレームが揃った窓から順に処理する(動画が probe の長さより短い場合は、手元の分で処理)
                     while pending < len(plans) and (item is None or max(need[pending]) <= last_index):
-                        self._embed_window(source, plans[pending], need[pending], frames, audio, timer)
+                        ready.append(self._prepare_window(plans[pending], need[pending], frames, audio, timer))
                         pending += 1
-                        self._store.update_job(job_id, progress=pending)
                         keep = min(need[pending]) if pending < len(plans) else last_index + 1
                         for k in [k for k in frames if k < keep]:
                             del frames[k]
+                        if len(ready) >= batch or pending == len(plans):
+                            self._store_windows(source, ready, timer)
+                            ready = []
+                            self._store.update_job(job_id, progress=pending)
                     if item is None:
                         break
             finally:
@@ -492,19 +497,20 @@ class Ingestor:
                 if audio is not None:
                     audio.close()
         timer.extra.update(
-            decoder=reader.decoder, skip_frames=reader.skip_used, decode_step_ms=step, decoded_frames=reader.frames
-        )
+            decoder=reader.decoder, skip_frames=reader.skip_used, decode_step_ms=step, decoded_frames=reader.frames,
+            embed_batch=max(self._embedder.info().batch_size, 1),
+        )  # fmt: skip
         return timer.result(len(plans), info.duration_ms)
 
-    def _embed_window(
+    def _prepare_window(
         self,
-        source: dict,
         plan: WindowPlan,
         need: list[int],
         frames: dict[int, np.ndarray],
         audio: media.AudioTrack | None,
         timer: StageTimer,
-    ) -> None:
+    ) -> dict:
+        """1 窓ぶんの入力を組み立てます(推論はまだしない。まとめて推論するため)。"""
         picked, times = [], []
         for k, t in zip(need, plan.sample_ms, strict=True):
             if k in frames:
@@ -520,24 +526,31 @@ class Ingestor:
             with timer.stage("audio"):
                 pcm = audio.slice(plan.start_ms, plan.end_ms)
             slices = split_window_pcm(pcm, plan.start_ms, plan.end_ms, len(picked))
-        parts = build_window_parts(picked, times, slices)
+        return {"plan": plan, "parts": build_window_parts(picked, times, slices), "thumb": picked[len(picked) // 2]}
+
+    def _store_windows(self, source: dict, ready: list[dict], timer: StageTimer) -> None:
+        """組み立てた窓をまとめて推論し、保存します(EMBED_BATCH が 1 なら 1 件ずつ推論する)。"""
+        if not ready:
+            return
         with timer.stage("embed"):
-            vec = self._embedder.embed_parts(parts, high=False)
-        kind = "tav" if any(isinstance(p, AudioPart) for p in parts) else "frames"
-        with timer.stage("store"):
-            window_id = self._store.add_window(
-                source_id=source["id"],
-                start_ms=plan.start_ms,
-                end_ms=plan.end_ms,
-                kind=kind,
-                group_id=source["group_id"],
-                abs_ts=source["start_ts"] + plan.start_ms / 1000,
-                vec=vec,
-            )
-        if source["params"].get("store_media", True):
-            with timer.stage("thumb"):
-                # 復号済みのフレームから作る(表示のたびに ffmpeg を起動しなくて済む)
-                save_thumbnail(picked[len(picked) // 2], self._thumb_path(window_id))
+            vecs = self._embedder.embed_parts_many([w["parts"] for w in ready], high=False)
+        for w, vec in zip(ready, vecs, strict=True):
+            plan = w["plan"]
+            kind = "tav" if any(isinstance(p, AudioPart) for p in w["parts"]) else "frames"
+            with timer.stage("store"):
+                window_id = self._store.add_window(
+                    source_id=source["id"],
+                    start_ms=plan.start_ms,
+                    end_ms=plan.end_ms,
+                    kind=kind,
+                    group_id=source["group_id"],
+                    abs_ts=source["start_ts"] + plan.start_ms / 1000,
+                    vec=vec,
+                )
+            if source["params"].get("store_media", True):
+                with timer.stage("thumb"):
+                    # 復号済みのフレームから作る(表示のたびに ffmpeg を起動しなくて済む)
+                    save_thumbnail(w["thumb"], self._thumb_path(window_id))
 
     def _index_audio(self, job_id: int, source: dict) -> dict:
         timer = StageTimer()

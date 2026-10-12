@@ -154,6 +154,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `FFMPEG_HWACCEL` | `auto` | 動画の復号に使う GPU(`auto` / `cuda` / `vaapi` / `qsv` / `none`)。使えない場合は CPU に切り替える(`docs/gpu.md`) |
 | `FFMPEG_HWACCEL_DEVICE` | (空) | GPU 復号のデバイス(例 `/dev/dri/renderD128`)。空なら自動 |
 | `FFMPEG_SKIP_FRAMES` | `noref` | 動画の復号を省く範囲。`noref`(参照されないフレームを省く。時刻のずれは 1〜2 フレーム)/ `none`(全フレーム)/ `keyframes`(キーフレームのみ。数倍速いが、時刻が数秒ずれることがある) |
+| `EMBED_BATCH` | `auto` | まとめて推論する最大の件数。`auto` は CPU で 1(まとめない。CPU では速くならないことを実測)、GPU で 4(効果は未計測) |
 | `IMAGE_MAX_TOKENS` | `0` | 画像1枚あたりのトークン上限(0=モデル既定) |
 | `TOP_K` | `10` | 検索の既定件数 |
 | `DATA_DIR` | `/data` | DB・サムネイル・アップロード動画の保存先 |

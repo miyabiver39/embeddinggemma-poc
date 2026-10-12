@@ -381,3 +381,4 @@ class ComputeInfo(_Open):
     accelerator: str
     modalities: list[str]
     backend: str
+    batch_size: int = Field(1, description="まとめて推論する最大の件数(EMBED_BATCH)")

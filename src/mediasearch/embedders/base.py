@@ -26,6 +26,7 @@ class EmbedderInfo:
     device: str
     accelerator: str  # cpu / nvidia-cuda / amd-rocm / intel-xpu / dummy
     modalities: list[str]
+    batch_size: int = 1  # まとめて推論する最大の件数(EMBED_BATCH。1 ならまとめない)
 
 
 @dataclass
@@ -87,6 +88,21 @@ class Embedder(ABC):
     @abstractmethod
     def embed_parts(self, parts: Sequence[Part], high: bool = False) -> np.ndarray:
         """並べた順序のまま、複数の部品(文字・画像・音声)を1ベクトルにします(戻り値は (dims,))。"""
+
+    def embed_parts_many(self, items: Sequence[Sequence[Part]], high: bool = False) -> list[np.ndarray]:
+        """複数の窓をベクトルにします(窓ごとに 1 ベクトル。順序は items と同じ)。
+
+        既定の実装は、batch_size が 2 以上なら embed_parts を並行して呼びます。
+        分離構成では、compute に同時に届いた要求を
+        compute 側の LocalEmbedder がまとめて推論します。自プロセスで推論する実装は、これを上書きして直接まとめます。
+        """
+        batch = self.info().batch_size
+        if batch <= 1 or len(items) <= 1:
+            return [self.embed_parts(parts, high=high) for parts in items]
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(batch, len(items))) as pool:
+            return list(pool.map(lambda parts: self.embed_parts(parts, high=high), items))
 
     def close(self) -> None:  # noqa: B027 (任意で上書きする)
         """後始末(必要な実装だけ上書きします)。"""

@@ -320,6 +320,8 @@ class StreamWorker:
                     prune()
                 self.state["lag_ms"] = max(0, latest * step - (n * stride + window_ms))
 
+                batch = max(self._embedder.info().batch_size, 1)
+                ready: list[tuple[int, list, list | None]] = []
                 while not self._stop.is_set():
                     start = n * stride
                     need = [(start + off) // step for off in offsets]
@@ -335,12 +337,17 @@ class StreamWorker:
                         pcm = pcm.astype(np.float32) / 32768.0
                         slices = split_window_pcm(pcm, start, start + window_ms, len(picked)) if pcm.size else None
                     if picked:
-                        self._store_window(source, wall0, start, window_ms, picked, slices)
+                        ready.append((start, picked, slices))
                     n += 1
                     prune()
-                    # 推論の間に届いたフレームを取り込み、遅れていれば次のループで古い窓を捨てる
-                    if not frames.empty():
-                        break
+                    # 遅れて複数の窓が揃っている場合は、EMBED_BATCH 件までまとめて推論する
+                    if len(ready) >= batch:
+                        self._store_windows(source, wall0, window_ms, ready)
+                        ready = []
+                        # 推論の間に届いたフレームを取り込み、遅れていれば次のループで古い窓を捨てる
+                        if not frames.empty():
+                            break
+                self._store_windows(source, wall0, window_ms, ready)
                 if ended:
                     err = proc.stderr.read().decode("utf-8", "replace").strip() if proc.stderr else ""
                     raise media.MediaError(" / ".join(err.splitlines()[-2:]) or "ストリームが終了しました")
@@ -350,35 +357,37 @@ class StreamWorker:
             proc.wait()
             self._proc = None
 
-    def _store_window(
+    def _store_windows(
         self,
         source: dict,
         wall0: float,
-        start: int,
         window_ms: int,
-        picked: list[tuple[np.ndarray, int]],
-        slices: list | None,
+        ready: list[tuple[int, list[tuple[np.ndarray, int]], list | None]],
     ) -> None:
-        images = [f for f, _ in picked]
-        times = [t for _, t in picked]
-        parts = build_window_parts(images, times, slices)
-        vec = self._embedder.embed_parts(parts, high=False)
-        kind = "tav" if any(isinstance(p, AudioPart) for p in parts) else "frames"
-        abs_ts = wall0 + start / 1000
-        rel_ms = int(round((abs_ts - source["start_ts"]) * 1000))  # 取り込み元(登録時刻)からの経過
-        window_id = self._store.add_window(
-            source_id=source["id"],
-            start_ms=rel_ms,
-            end_ms=rel_ms + window_ms,
-            kind=kind,
-            group_id=source["group_id"],
-            abs_ts=abs_ts,
-            vec=vec,
-        )
-        if self.params.store_media:
-            save_thumbnail(images[len(images) // 2], self._s.data_dir / "thumbs" / f"w{window_id}.jpg")
-        self.state["windows"] += 1
-        self._store.update_source(source["id"], duration_ms=rel_ms + window_ms)
+        if not ready:
+            return
+        built = []
+        for start, picked, slices in ready:
+            images = [f for f, _ in picked]
+            built.append((start, images, build_window_parts(images, [t for _, t in picked], slices)))
+        vecs = self._embedder.embed_parts_many([parts for _, _, parts in built], high=False)
+        for (start, images, parts), vec in zip(built, vecs, strict=True):
+            kind = "tav" if any(isinstance(p, AudioPart) for p in parts) else "frames"
+            abs_ts = wall0 + start / 1000
+            rel_ms = int(round((abs_ts - source["start_ts"]) * 1000))  # 取り込み元(登録時刻)からの経過
+            window_id = self._store.add_window(
+                source_id=source["id"],
+                start_ms=rel_ms,
+                end_ms=rel_ms + window_ms,
+                kind=kind,
+                group_id=source["group_id"],
+                abs_ts=abs_ts,
+                vec=vec,
+            )
+            if self.params.store_media:
+                save_thumbnail(images[len(images) // 2], self._s.data_dir / "thumbs" / f"w{window_id}.jpg")
+            self.state["windows"] += 1
+            self._store.update_source(source["id"], duration_ms=rel_ms + window_ms)
 
 
 class StreamManager:

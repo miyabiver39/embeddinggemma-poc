@@ -25,6 +25,24 @@ ROLES = ("all", "app", "compute")
 BACKENDS = ("local", "remote", "dummy")
 
 
+def resolve_embed_batch(setting: str, device: str) -> int:
+    """EMBED_BATCH を件数にします。auto は、CPU では 1(まとめない)、GPU では 4。
+
+    CPU では、まとめても速くならず、窓(画像 2 枚)では 1 件ずつより遅かった(4 vCPU で 39.8 秒 → 51.2 秒を実測)。
+    GPU では、まとめて計算したほうが処理量が増えるのが一般的なため 4 にしている(実機では未計測)。
+    """
+    setting = (setting or "auto").strip().lower()
+    if setting == "auto":
+        return 1 if device.startswith("cpu") else 4
+    try:
+        value = int(setting)
+    except ValueError as exc:
+        raise ValueError(f"EMBED_BATCH は auto か 1 以上の整数にしてください: {setting!r}") from exc
+    if not 1 <= value <= 64:
+        raise ValueError("EMBED_BATCH は 1〜64 にしてください")
+    return value
+
+
 def _env(name: str, default: str) -> str:
     value = os.environ.get(name)
     return default if value is None or value.strip() == "" else value.strip()
@@ -60,6 +78,7 @@ class Settings:
     dims: int  # 出力次元(MRL で 768 / 512 / 256 / 128 に切り詰め)
     image_max_tokens: int  # 画像1枚あたりの上限トークン。0 ならモデルの既定
     image_max_side: int  # 推論前に縮小する画像の長辺(px)
+    embed_batch: str  # まとめて推論する最大の件数(auto / 整数)。auto は CPU で 1、GPU で 4
     ffmpeg_hwaccel: str  # 動画の復号に使う GPU(auto / none / cuda / vaapi / qsv)
     ffmpeg_hwaccel_device: str  # GPU 復号のデバイス(vaapi なら /dev/dri/renderD128 など。空なら自動)
     ffmpeg_skip_frames: str  # 復号を省く範囲(none / noref / keyframes。media.DECODE_SKIP)
@@ -144,6 +163,7 @@ class Settings:
             dims=dims,
             image_max_tokens=_env_int("IMAGE_MAX_TOKENS", 0),
             image_max_side=_env_int("IMAGE_MAX_SIDE", 448),
+            embed_batch=_env("EMBED_BATCH", "auto").lower(),
             ffmpeg_hwaccel=_env("FFMPEG_HWACCEL", "auto"),
             ffmpeg_hwaccel_device=_env("FFMPEG_HWACCEL_DEVICE", ""),
             ffmpeg_skip_frames=skip_frames,
