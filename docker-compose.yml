@@ -5,6 +5,8 @@
 # <owner> は実際の GitHub ユーザー名に置き換えてください。
 x-common: &common
   restart: unless-stopped
+  # 停止時に、推論の途中の窓とベクトル DB の書き出しを待つ(既定の 10 秒では、CPU の推論が終わらないことがある)
+  stop_grace_period: 60s
   ports: ["8000:8000"]
   # environment:
   #   API_TOKEN: "<推測されにくい値>"   # 信頼できるネットワークの外で使う場合は必ず設定(docs/security.md)

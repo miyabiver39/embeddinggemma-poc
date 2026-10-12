@@ -282,6 +282,10 @@ def _prefetch(iterable, size: int = 32):
         th.join()
 
 
+class _Interrupted(Exception):
+    """停止の要求で、取り込みを途中で止めた。"""
+
+
 class Ingestor:
     """取り込みジョブを、バックグラウンドのスレッドで1つずつ処理します。"""
 
@@ -291,6 +295,7 @@ class Ingestor:
         self._embedder = embedder
         self._queue: queue.Queue[int | None] = queue.Queue()
         self._thread: threading.Thread | None = None
+        self._stopping = threading.Event()
 
     # ------------------------------------------------------------------ 起動・停止
     def start(self) -> None:
@@ -313,9 +318,18 @@ class Ingestor:
         self._thread.start()
 
     def stop(self) -> None:
+        # 取り込み中のジョブは、窓の区切りで止めて queued に戻す(次の起動で最初からやり直す)。
+        # 推論の途中の窓は、終わるまで待つ(待たずに終了すると、推論中のスレッドが残ったまま Python が終了する)
+        self._stopping.set()
         self._queue.put(None)
         if self._thread:
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=45)
+            if self._thread.is_alive():
+                log.warning("取り込みの推論が 45 秒以内に終わりませんでした")
+
+    def _check_stop(self) -> None:
+        if self._stopping.is_set():
+            raise _Interrupted()
 
     def submit(self, source_id: int) -> int:
         job_id = self._store.create_job(source_id)
@@ -422,6 +436,11 @@ class Ingestor:
                 timings = self._index_images([(job_id, source)])
             else:
                 raise ValueError(f"キューで処理できない種類です: {source['kind']}")
+        except _Interrupted:
+            log.info("停止のため、取り込みを中断しました(次の起動でやり直します): %s", source["name"])
+            self._store.update_job(job_id, status="queued", progress=0)
+            self._store.update_source(source["id"], status="queued")
+            return
         except Exception as exc:
             self._fail(job_id, source, exc)
             return
@@ -473,6 +492,7 @@ class Ingestor:
                 batch = max(self._embedder.info().batch_size, 1)
                 ready: list[dict] = []  # フレームが揃い、推論を待っている窓(batch 件たまったらまとめて推論する)
                 while pending < len(plans):
+                    self._check_stop()
                     t = time.perf_counter()
                     item = next(stream, None)
                     timer.add("decode", time.perf_counter() - t)
@@ -569,6 +589,7 @@ class Ingestor:
             audio = media.AudioTrack(source["path"], tmp)  # 全体を 1 回で変換し、区切りごとに切り出す
             try:
                 for n, start in enumerate(starts, start=1):
+                    self._check_stop()
                     end = min(start + chunk_ms, info.duration_ms)
                     if n > 1 and end - start < 500:
                         self._store.update_job(job_id, progress=n)

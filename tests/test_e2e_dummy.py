@@ -136,3 +136,27 @@ def test_store_media_false_keeps_only_information(client, settings, tmp_path):
     assert wait_done(client, r.json()["job_id"])["status"] == "done"
     assert video.is_file()
     assert client.get(f"/api/media/{r.json()['source_id']}").status_code == 404
+
+
+@needs_ffmpeg
+def test_stopping_during_ingest_requeues_the_job(settings, tmp_path):
+    """取り込みの途中で停止したジョブは queued に戻り、次の起動で最後まで取り込まれる。"""
+    from fastapi.testclient import TestClient
+
+    from mediasearch.embedders.dummy import DummyEmbedder
+    from mediasearch.main import create_app
+
+    class Slow(DummyEmbedder):
+        def embed_parts(self, parts, high=False):
+            time.sleep(0.3)
+            return super().embed_parts(parts, high=high)
+
+    video = tmp_path / "20260101_090000.mp4"
+    make_video(video, "red", seconds=20)
+    with TestClient(create_app(settings, embedder=Slow(768))) as c:
+        job = c.post("/api/ingest/path", json={"path": str(video)}).json()
+        time.sleep(1.0)
+    with TestClient(create_app(settings)) as c:
+        assert c.get(f"/api/jobs/{job['job_id']}").json()["status"] in ("queued", "running", "done")
+        done = wait_done(c, job["job_id"])
+        assert done["status"] == "done" and done["total"] == 10

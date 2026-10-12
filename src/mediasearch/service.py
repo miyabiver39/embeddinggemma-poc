@@ -279,6 +279,7 @@ class Service:
                 "device": e.device,
                 "accelerator": e.accelerator,
                 "modalities": e.modalities,
+                "batch_size": e.batch_size,  # まとめて推論する件数(EMBED_BATCH)
             }
         except ConnectionError as exc:
             embedder = {"error": str(exc)}

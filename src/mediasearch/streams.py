@@ -44,6 +44,7 @@ STALL_SEC = 30  # この秒数フレームが届かなければ、切断とみ�
 LAG_WINDOWS = 3
 MIN_LAG_MS = 10_000
 MAX_BACKOFF_SEC = 60
+SHUTDOWN_WAIT_SEC = 45  # 停止時に、推論の途中の窓を待つ時間(docker-compose.yml の stop_grace_period はこれより長くする)
 
 
 class StreamError(ValueError):
@@ -140,11 +141,15 @@ class StreamWorker:
         self._thread = threading.Thread(target=self._run, name=f"stream-{self.stream['id']}", daemon=True)
         self._thread.start()
 
-    def stop(self, wait: float = 10) -> None:
+    def request_stop(self) -> None:
+        """止めるよう伝えます(待たない)。受信の ffmpeg は止め、推論の途中なら、その窓の推論が終わってから止まる。"""
         self._stop.set()
         proc = self._proc
         if proc and proc.poll() is None:
             proc.kill()
+
+    def stop(self, wait: float = 10) -> None:
+        self.request_stop()
         if self._thread:
             self._thread.join(wait)
         self.state["status"] = "stopped"
@@ -410,8 +415,15 @@ class StreamManager:
         with self._lock:
             workers = list(self._workers.values())
             self._workers.clear()
+        # 先に全部へ止めるよう伝えてから、推論の途中のものを待つ(待たずに終了すると、推論中のスレッドが残ったまま
+        # Python が終了し、PyTorch が異常終了する。CPU では 1 窓の推論に 10 秒以上かかることがある)
         for w in workers:
-            w.stop(wait=5)
+            w.request_stop()
+        deadline = time.monotonic() + SHUTDOWN_WAIT_SEC
+        for w in workers:
+            w.stop(wait=max(deadline - time.monotonic(), 0.1))
+            if w.alive:
+                log.warning("ストリーム %s の推論が %d 秒以内に終わりませんでした", w.stream["name"], SHUTDOWN_WAIT_SEC)
 
     def _start_worker(self, stream: dict) -> None:
         with self._lock:

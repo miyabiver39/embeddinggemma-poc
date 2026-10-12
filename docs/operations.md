@@ -4,6 +4,7 @@
 
 ## 起動と永続化
 
+- 停止には最大で約 1 分かかることがあります(推論の途中の窓とベクトル DB の書き出しを待つため。CPU では 1 窓に 10 秒以上かかる)。`docker run` では `--stop-timeout 60` を付けてください(`docker-compose.yml` は `stop_grace_period: 60s` を設定済み)。途中で止めたファイルの取り込みは、次の起動で最初からやり直します。
 - 保存先は `-v ./data:/data` で永続化します。中身: `mediasearch.db`(SQLite。設定・取り込み元・窓・ジョブ)、`vectors.usearch`(ベクトル DB)、`thumbs/`、`media/`(アップロードした動画・音声)。
 - バックアップは `data/` を丸ごとコピー(停止中が安全。ベクトル DB は停止時に必ず書き出してジャーナルを空にするため、`mediasearch.db*` と `vectors.usearch`(と、あれば `vectors.journal`)は停止してからまとめてコピーしてください)。
 - 停止・再起動しても未完了の取り込みジョブは再開されます。
