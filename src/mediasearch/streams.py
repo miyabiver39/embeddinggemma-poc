@@ -192,11 +192,12 @@ class StreamWorker:
         cmd += [
             "-i", url,
             "-map", "0:v:0", "-an", "-sn", "-dn",
-            "-vf", f"fps=fps={1000.0 / step:.6f}:round=near,scale={width}:{height}:flags=area",
+            "-vf", f"fps=fps={1000.0 / step:.6f}:round=near{media.VIDEO_TIMING},scale={width}:{height}:flags=area",
             "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
         ]  # fmt: skip
         if audio_fd is not None:
-            cmd += ["-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", f"pipe:{audio_fd}"]
+            cmd += ["-map", "0:a:0", "-vn", *media.AUDIO_TIMING, "-ac", "1", "-ar", str(SAMPLE_RATE),
+                    "-f", "s16le", f"pipe:{audio_fd}"]  # fmt: skip
         return cmd
 
     def _session(self) -> None:

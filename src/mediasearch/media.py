@@ -130,6 +130,15 @@ def extract_audio(path: str | Path, start_ms: int, duration_ms: int) -> np.ndarr
 
 
 # ---------------------------------------------------------------------- 連続復号(取り込み用)
+# 映像と音声の時刻を揃える指定。どちらも ffmpeg の時間軸の 0(入力の開始)を起点にする。
+#   映像: fps の start_time=0 で、最初のフレームが 0 より後に始まる場合も、0 から一定間隔で出力する
+#   音声: aresample の first_pts=0 で、音声が 0 より後に始まる場合は先頭を無音で埋め、async=1 で途中の欠け
+#         (ネットワークでの取りこぼしなど)も無音で埋めて、サンプルの位置 = 時刻に保つ
+# 指定しない場合、音声の 1 サンプル目を 0 秒とみなすため、音声の開始が遅い動画では、窓の映像と音声がずれていた
+# (音声を 1 秒遅らせた動画で、ずれを 0.94 秒と実測。指定後は正しい位置になる)
+VIDEO_TIMING = ":start_time=0"
+AUDIO_TIMING = ["-af", "aresample=async=1:first_pts=0"]
+
 def _even(n: float) -> int:
     """yuv 系の形式は幅・高さが偶数でないと変換できないため、偶数に丸める。"""
     return max(2, int(round(n / 2)) * 2)
@@ -258,7 +267,7 @@ class VideoFrameReader:
         cmd += [
             "-i", self.path, "-an", "-sn", "-dn",
             # round=near: 各出力時刻に最も近い元のフレームを使う。area: 縮小のときに画質がよい
-            "-vf", f"fps=fps={fps:.6f}:round=near,scale={self.width}:{self.height}:flags=area",
+            "-vf", f"fps=fps={fps:.6f}:round=near{VIDEO_TIMING},scale={self.width}:{self.height}:flags=area",
             "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
         ]  # fmt: skip
         return cmd
@@ -314,7 +323,7 @@ class AudioTrack:
 
     def __init__(self, path: str | Path, tmp_dir: str | Path) -> None:
         self._file = Path(tmp_dir) / "audio.s16le"
-        cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(path), "-vn", "-ac", "1",
+        cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(path), "-vn", *AUDIO_TIMING, "-ac", "1",
                "-ar", str(SAMPLE_RATE), "-f", "s16le", str(self._file)]  # fmt: skip
         self._proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self._data: np.ndarray | None = None
