@@ -92,7 +92,8 @@ class RequestContextMiddleware:
                 access_log.info(
                     "%s %s %s %.1fms", method, scope.get("path", ""), status, elapsed * 1000,
                     extra={"http": {"method": method, "path": scope.get("path", ""), "route": route,
-                                    "status": status, "duration_ms": round(elapsed * 1000, 1)}},
+                                    "status": status, "duration_ms": round(elapsed * 1000, 1),
+                                    "client": (scope.get("client") or ("", 0))[0]}},
                 )  # fmt: skip
             request_id_var.reset(token)
 
