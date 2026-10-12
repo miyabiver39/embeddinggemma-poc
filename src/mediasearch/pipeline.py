@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import media
+from . import media, thumbs
 from .config import PRESETS, Settings
 from .disk import InsufficientStorage
 from .disk import check as check_disk
@@ -506,7 +506,7 @@ class Ingestor:
         self._finish(job_id, source, timings)
 
     def _thumb_path(self, window_id: int) -> Path:
-        return self._settings.data_dir / "thumbs" / f"w{window_id}.jpg"
+        return thumbs.path_for(self._settings.data_dir / "thumbs", window_id)
 
     def _index_video(self, job_id: int, source: dict) -> dict:
         """動画を窓ごとにベクトルにします。
@@ -792,5 +792,5 @@ class Ingestor:
             vec=vec,
         )
         if params.store_media:
-            save_thumbnail(frames[0], thumb_dir / f"w{window_id}.jpg")
+            save_thumbnail(frames[0], thumbs.path_for(thumb_dir, window_id))
         return {"source_id": source_id, "window_id": window_id, "kind": kind}

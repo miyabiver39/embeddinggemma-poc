@@ -10,6 +10,7 @@ from conftest import make_video, needs_ffmpeg
 from fastapi.testclient import TestClient
 from test_e2e_dummy import wait_done
 
+from mediasearch import thumbs
 from mediasearch.main import create_app
 from mediasearch.pipeline import IngestParams
 
@@ -34,14 +35,14 @@ def test_old_windows_are_deleted_and_file_sources_marked_expired(settings, tmp_p
         b = c.post("/api/ingest/path", json={"path": str(new)}).json()  # 日時が無いので受付時刻(今)
         assert wait_done(c, a["job_id"])["status"] == "done" and wait_done(c, b["job_id"])["status"] == "done"
         old_windows = [h["window_id"] for h in ctx.store.search(_vec(0), top_k=100, source_id=a["source_id"])]
-        assert old_windows and all((s.data_dir / "thumbs" / f"w{w}.jpg").is_file() for w in old_windows)
+        assert old_windows and all(thumbs.path_for(s.data_dir / "thumbs", w).is_file() for w in old_windows)
 
         result = ctx.retention.run_once()
         assert result["deleted_windows"] == len(old_windows) and result["expired_sources"] == [a["source_id"]]
         src = c.get(f"/api/sources/{a['source_id']}").json()
         assert src["status"] == "expired"  # 行は残る(監視フォルダが同じファイルを取り込み直さないように)
         assert old.is_file()  # 利用者のファイルは削除しない
-        assert not any((s.data_dir / "thumbs" / f"w{w}.jpg").exists() for w in old_windows)
+        assert not any(thumbs.path_for(s.data_dir / "thumbs", w).exists() for w in old_windows)
         assert len(ctx.store.vectors) == c.get("/api/info").json()["index"]["windows"]  # ベクトルも削除済み
         hits = c.post("/api/search/text", json={"query": "x", "min_score": -1, "top_k": 100}).json()["results"]
         assert hits and {h["source_id"] for h in hits} == {b["source_id"]}

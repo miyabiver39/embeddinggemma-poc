@@ -20,6 +20,7 @@ from typing import Any
 
 import numpy as np
 
+from . import thumbs
 from .vectors import IndexMismatch, VectorIndex
 
 __all__ = ["IndexMismatch", "SchemaError", "Store", "WINDOW_KINDS", "SCHEMA_VERSION"]
@@ -156,8 +157,16 @@ class SchemaError(RuntimeError):
 
 
 class Store:
-    def __init__(self, path: Path, vector_path: Path | None = None, snapshot_every: int | None = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        vector_path: Path | None = None,
+        snapshot_every: int | None = None,
+        thumbs_dir: Path | None = None,
+    ) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
+        # 窓を削除したときに、そのサムネイルも消す(消さないと、取り込み直し・削除のたびにファイルが残り続ける)
+        self.thumbs_dir = thumbs_dir or path.parent / "thumbs"
         self._lock = threading.RLock()
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
@@ -436,6 +445,7 @@ class Store:
             self._db.commit()
             self.vectors.remove(ids)
             self._drop_from_cache(ids)
+        thumbs.remove(self.thumbs_dir, ids)
 
     @staticmethod
     def _source_dict(row: sqlite3.Row) -> dict:
@@ -482,7 +492,8 @@ class Store:
             self._db.commit()
             self.vectors.remove(ids)
             self._drop_from_cache(ids)
-            return cur.rowcount
+        thumbs.remove(self.thumbs_dir, ids)
+        return cur.rowcount
 
     def get_window(self, window_id: int) -> dict | None:
         with self._lock:
@@ -832,6 +843,7 @@ class Store:
                     self._db.execute("UPDATE sources SET status='expired' WHERE id=?", (sid,))
                     expired.append(src)
             self._db.commit()
+        thumbs.remove(self.thumbs_dir, deleted)
         return {"window_ids": deleted, "expired_sources": expired}
 
     def _meta(self) -> dict[str, np.ndarray]:

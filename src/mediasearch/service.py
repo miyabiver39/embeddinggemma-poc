@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from . import __version__, disk
+from . import __version__, disk, thumbs
 from .config import PRESETS, Settings
 from .embedders import Embedder
 from .ingest_files import FileIntake
@@ -296,15 +296,16 @@ class Service:
     def thumbnail(self, window_id: int) -> Path:
         """窓のサムネイル(JPEG)のパス。取り込み時に作っていなければ(以前の版で取り込んだものなど)、ここで作ります。"""
         ctx = self.ctx
-        thumb = ctx.thumb_dir / f"w{window_id}.jpg"
+        found = thumbs.find(ctx.thumb_dir, window_id)
+        thumb = found or thumbs.path_for(ctx.thumb_dir, window_id)
         window = ctx.store.get_window(window_id)
         src = ctx.store.get_source(window["source_id"]) if window else None
         if not window or not src:
             raise NotFound(f"window_id={window_id} の窓が見つかりません")
         if not media_stored(src):
             raise NotFound("この取り込み元は、画像を保存しない設定(store_media=false)で取り込まれています")
-        if thumb.is_file():
-            return thumb
+        if found:
+            return found
         if src["kind"] not in ("video", "image") or not src["path"]:
             raise NotFound(f"window_id={window_id} のサムネイルがありません(音声、または元のファイルがありません)")
         from . import media

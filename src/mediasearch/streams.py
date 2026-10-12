@@ -27,7 +27,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import numpy as np
 
-from . import disk, media
+from . import disk, media, thumbs
 from .config import Settings
 from .embedders import SAMPLE_RATE, AudioPart, Embedder
 from .pipeline import IngestParams, build_window_parts, plan_windows, save_thumbnail, split_window_pcm
@@ -399,7 +399,7 @@ class StreamWorker:
                 vec=vec,
             )
             if self.params.store_media:
-                save_thumbnail(images[len(images) // 2], self._s.data_dir / "thumbs" / f"w{window_id}.jpg")
+                save_thumbnail(images[len(images) // 2], thumbs.path_for(self._s.data_dir / "thumbs", window_id))
             self.state["windows"] += 1
             self._store.update_source(source["id"], duration_ms=rel_ms + window_ms)
 

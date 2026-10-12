@@ -73,9 +73,6 @@ class RetentionWorker:
                 before = now - self._s.job_history_days * 86400
                 self.status["total_pruned_jobs"] += self._store.prune_jobs(before)
                 self._store.prune_alert_events(before)  # 送り終えた通知の履歴も、同じ期間で削除する
-            thumbs = self._s.data_dir / "thumbs"
-            for wid in result["window_ids"]:
-                (thumbs / f"w{wid}.jpg").unlink(missing_ok=True)
             uploads = (self._s.data_dir / "media").resolve()
             for src in result["expired_sources"]:
                 path = Path(src["path"]) if src.get("path") else None

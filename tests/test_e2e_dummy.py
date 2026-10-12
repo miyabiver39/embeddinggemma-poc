@@ -128,7 +128,7 @@ def test_store_media_false_keeps_only_information(client, settings, tmp_path):
     assert hits[0]["source_name"] == "clip.mp4" and hits[0]["abs_time"]
     assert client.get(f"/api/thumb/{hits[0]['window_id']}").status_code == 404
     assert client.get(f"/api/media/{src['id']}").status_code == 404
-    assert not list((settings.data_dir / "thumbs").glob(f"w{hits[0]['window_id']}.jpg"))
+    assert not list((settings.data_dir / "thumbs").rglob(f"w{hits[0]['window_id']}.jpg"))
     assert client.post(f"/api/sources/{src['id']}/reindex").status_code == 404
 
     # パス指定のファイルは利用者のものなので消さず、配信の対象からだけ外す
