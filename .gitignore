@@ -15,3 +15,6 @@ data/
 *.db-wal
 *.db-shm
 .env
+
+# ベンチマークの結果(bench/results/)
+bench/results/

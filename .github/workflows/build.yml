@@ -26,7 +26,7 @@ jobs:
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pip install -e ".[dev]"
-      - run: ruff check src tests scripts
+      - run: ruff check src tests scripts bench
       - run: pytest -q -m "not model" --cov=mediasearch --cov-report=term --cov-report=json:coverage.json --junitxml=junit.xml
       - name: README のバッジを更新する(main への push のときだけ)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

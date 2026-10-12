@@ -54,7 +54,7 @@
 
 - 動画の取り込みを ffmpeg の連続復号に変更(`media.VideoFrameReader`)。60 秒・1080p で 11.0 秒 → 2.6 秒(ダミー推論・4 vCPU)。
   復号は推論と並行、音声は 1 回で変換(`media.AudioTrack`)、`FFMPEG_SKIP_FRAMES=noref` で約 25% 短縮。GPU 復号(`FFMPEG_HWACCEL`)は**実機未確認**(CPU へのフォールバックのみ確認)。
-- 処理時間の記録(ジョブの `timings`)、`GET /api/stats`、`scripts/benchmark.py`。実モデルでの計測は未実施(推論が大半を占める見込み)。
+- 処理時間の記録(ジョブの `timings`)、`GET /api/stats`、ベンチマーク(`bench/`。速度・資源の使用率・ボトルネックの診断)。実モデルでの計測は未実施(推論が大半を占める見込み)。
 - 画像は続けて登録されたものを最大 16 枚まとめて 1 ジョブで処理(推論を 1 回にまとめるのは `EMBED_BATCH` が 2 以上のとき。下記)。
 - ベクトルを USearch(`vectors.usearch`)へ移行。LanceDB は依存込みで約 350MB のため不採用(`docs/design.md` 第 4 節)。以前の DB は起動時に移行(確認済み)。
 - 保存しないモード(`STORE_MEDIA` / `store_media`)、取り込み中の検索(`after_window_id`、`GET /api/search/live`。WebUI で Chromium 確認済み)。
@@ -90,7 +90,7 @@
 1. **最初のリリース(例 `v0.2.0`)を作成**し、SBOM と脆弱性検査の結果がリリースに添付されることを確認する(タグ契機の実行は未確認。手順は `docs/release.md`)。
 2. **GPU 実機確認**(一般ユーザーでの実行で GPU を掴めるかも含む。だめなら `-e PUID=0` と比べる)(利用者が RTX 3060 / RX 9060 XT を持っている)。`docs/gpu.md` の表を埋め、不具合があれば Dockerfile(ホイールの版、`HSA_OVERRIDE_GFX_VERSION` など)を直す。
 3. GPU での窓あたりの処理時間・取り込み速度。結果を `docs/operations.md` と `AGENTS.md` の「検証状況」に反映。
-4. 速度改善: 推論が 1 件ずつ直列(CPU で約 8.5 秒/窓 = 実時間の約 0.24 倍速)。GPU でのバッチ処理を検討。復号の高速化は済んだので、`scripts/benchmark.py` の `embed` の割合で効果を測る。
+4. 速度改善: 推論が 1 件ずつ直列(CPU で約 8.5 秒/窓 = 実時間の約 0.24 倍速)。GPU でのバッチ処理を検討。復号の高速化は済んだので、`bench/bench.py` の「推論の稼働率」「GPU 使用率」と `timings` の `embed` の割合で効果を測る(`bench/README.md`)。
    RTSP は推論が追いつかないと窓を捨てる(`dropped_windows`)ため、実機 GPU で 1 本あたりの余裕を測る。
 5. フェーズ 2: ネイティブ化(ONNX Runtime → OpenVINO / TensorRT)。受け入れ条件は「PyTorch 版との出力コサイン類似度」と速度。設計は `docs/design.md` の第 7 節。
 6. (任意)1 台のメモリに載らない規模への対策(ベクトルは USearch に移行済み。分散型へ移す場合は `vectors.py` を差し替える)。

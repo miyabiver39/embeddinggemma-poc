@@ -54,3 +54,7 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["B008"]  # FastAPI の File()/Form() は引数の既定値で使う作法
+
+[tool.ruff.lint.per-file-ignores]
+# ベンチマーク(イメージに含めない)は、日本語の診断の文と HTML の雛形が長いため、行の長さだけは見ない
+"bench/*" = ["E501"]

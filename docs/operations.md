@@ -68,11 +68,13 @@ curl -H 'Content-Type: application/json' -d '{"url": "rtsp://127.0.0.1:8554/cam1
 |---|---|
 | `GET /api/jobs/{id}` | 1 件のジョブの `timings`(段階ごとの時間、窓の数、実時間比、復号の方式、推論のデバイス) |
 | `GET /api/stats` | 直近の完了ジョブを、種類(video / audio / image)ごとに合計・平均したもの |
-| `python scripts/benchmark.py` | 同じファイルを指定の回数だけ取り込み直し、中央値と内訳を表示する(標準ライブラリだけで動く) |
+| `GET /api/metrics` | CPU(スレッド・ffmpeg ごと)・メモリ・ディスク・GPU の使用状況と、推論の稼働率・待ち件数(起動からの積算) |
+| `python bench/bench.py` | 負荷をかけながら上の値を 1 秒ごとに記録し、速度・資源の使用率・ボトルネックの診断を `report.html` にまとめる(リポジトリに同梱。イメージには含めない。[bench/README.md](../bench/README.md)) |
 
 ```bash
-python scripts/benchmark.py --path /recordings/sample.mp4 --repeat 3            # サーバ内のファイル
-python scripts/benchmark.py --upload ./sample.mp4 --audio --url http://server:8000  # 手元のファイルを送る
+python bench/bench.py ingest --path /recordings/sample.mp4 --repeat 3                 # 取り込みの速さ
+python bench/bench.py search --concurrency 4 --during-ingest /recordings/sample.mp4  # 取り込み中の検索の速さ
+python bench/compare.py bench/results/<前> bench/results/<後>                         # 設定を変えた前後を比べる
 ```
 
 `timings.stages_ms` の段階: `probe`(ffprobe)/ `decode`(映像の復号の待ち)/ `audio`(音声の変換の待ち)/ `image`(画像の読み込み)/

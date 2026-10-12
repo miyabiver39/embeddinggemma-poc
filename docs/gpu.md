@@ -80,13 +80,16 @@ ffmpeg -v error -hwaccel cuda -i <動画> -f null -                             
 GPU では、既定で 4 件までの窓をまとめて推論します(`EMBED_BATCH=auto`)。効果は実機で未計測のため、次の手順で比べてください。
 
 ```bash
-# EMBED_BATCH を変えて起動し直し、それぞれで計測する(timings.stages_ms.embed と per_window_ms を比べる)
+# EMBED_BATCH を変えて起動し直し、それぞれで計測して比べる(GPU 使用率・推論の稼働率・1 窓あたりの時間)
 docker run ... -e EMBED_BATCH=1 ...   # まとめない
+python bench/bench.py --label batch1 ingest --path /recordings/sample.mp4 --repeat 3
 docker run ... -e EMBED_BATCH=8 ...
-python scripts/benchmark.py --path /recordings/sample.mp4 --repeat 3
+python bench/bench.py --label batch8 ingest --path /recordings/sample.mp4 --repeat 3
+python bench/compare.py bench/results/*-batch1 bench/results/*-batch8
 ```
 
 メモリが足りない(CUDA out of memory など)場合は、`EMBED_BATCH` を下げてください。
+`report.html` の診断に「GPU を使い切れていません」と出る場合は、まとめる件数を増やす余地があります(`bench/README.md`)。
 
 ## 一般ユーザーでの実行と GPU
 
