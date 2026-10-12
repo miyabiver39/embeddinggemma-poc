@@ -33,6 +33,25 @@ curl -s localhost:8000/api/info | python3 -m json.tool | grep -A8 embedder
   動かない場合は `rocm7.2` を別の版に変えて `docker/Dockerfile` を調整、または `HSA_OVERRIDE_GFX_VERSION` の利用を試す。
 - PyTorch 上は `cuda` デバイスとして見える(`accelerator` は `torch.version.hip` で `amd-rocm` と判定)。
 - 確認: コンテナ内で `python -c "import torch;print(torch.cuda.is_available(), torch.version.hip)"`。
+- この修正より前のイメージ(2026-10-13 まで)は、`libatomic1` が入っていないため `import torch` が失敗し、推論を開始できませんでした(修正済み。
+  ビルド時に `import torch` を確認するようにしています)。
+
+### Windows(WSL2 / Docker Desktop)で AMD GPU を使う
+
+WSL2 には `/dev/kfd` が無く、GPU は `/dev/dxg` から見えます。`rocm` イメージには、その橋渡しをする AMD の librocdxg を同梱しています。
+`/dev/dxg` があり `/dev/kfd` が無い場合、起動スクリプトが必要な環境変数(`HSA_ENABLE_DXG_DETECTION=1`、
+`ROCPROFILER_REGISTER_ENABLED=0`)を自動で設定します。Windows 側のドライバの一部(`libdxcore.so`)は同梱できないため、マウントで渡します。
+
+```bash
+docker run -d -p 8000:8000 -v ./data:/data --device=/dev/dxg -v /usr/lib/wsl:/usr/lib/wsl:ro \
+  ghcr.io/miyabiver39/embeddinggemma-poc:rocm
+```
+
+- Windows に、WSL の ROCm に対応した AMD の Adrenalin ドライバが必要です(確認した版は下の記録欄)。
+- `ROCPROFILER_REGISTER_ENABLED=0` が無いと、PyTorch に同梱の rocprofiler-sdk が KFD の情報(`/sys/class/kfd`)を探して
+  `Found 0 rocprofiler agents and 2 HSA agents` で異常終了します。
+- WSL2 では amdgpu の sysfs が無いため、ベンチマークの GPU 使用率は取れません(GPU メモリは PyTorch の使用量のみ)。
+  また `/dev/dri` が無いため、動画の復号は CPU で行います。
 
 ## Intel(内蔵 GPU / Arc)
 
@@ -77,7 +96,10 @@ ffmpeg -v error -hwaccel cuda -i <動画> -f null -                             
 
 ## 推論のまとめ処理(EMBED_BATCH)
 
-GPU では、既定で 4 件までの窓をまとめて推論します(`EMBED_BATCH=auto`)。効果は実機で未計測のため、次の手順で比べてください。
+GPU では、既定で 4 件までの窓をまとめて推論します(`EMBED_BATCH=auto`)。
+RX 9060 XT(WSL2)での実測(1080p・60 秒・2 秒窓、3 回の中央値): まとめる件数 1 で 1 窓 1.05 秒、4 で 1.03 秒、8 で 0.94 秒。
+GPU メモリ(PyTorch の確保量の最大)は 1 で約 3.0GB、8 で約 13.2GB でした。効果は小さく、8 は 16GB の GPU では余裕が少ないため、既定は 4 のままにしています。
+ほかの GPU では、次の手順で比べてください。
 
 ```bash
 # EMBED_BATCH を変えて起動し直し、それぞれで計測して比べる(GPU 使用率・推論の稼働率・1 窓あたりの時間)
@@ -107,7 +129,7 @@ python bench/compare.py bench/results/*-batch1 bench/results/*-batch8
 | GPU | イメージ | 起動 | accelerator | CPUとの類似度 | 取り込み速度 | メモ |
 |---|---|---|---|---|---|---|
 | RTX 3060 12GB | cuda | | | | | |
-| RX 9060 XT 16GB | rocm | | | | | |
+| RX 9060 XT 16GB | rocm(修正後。Windows 11 + Docker Desktop の WSL2、`/dev/dxg`) | 可(約 11 秒) | amd-rocm(bf16) | 0.9999 以上(文章 5 件・画像 3 件。NaN なし) | frames 約 1.0 秒/窓(1080p・2 秒窓・まとめる件数 4)。CPU(Ryzen 7 5700X)の約 7 倍 | ドライバ Adrenalin 26.8.1(32.0.31041.1004)、librocdxg 1.2.2、`torch 2.14.1+rocm7.2`。修正前のイメージは libatomic1 の不足で推論を開始できない |
 | Intel 内蔵 | intel | | | | | |
 | (GPU なし・4 vCPU) | cuda | 可(約 16 秒) | cpu | (未計測。検索スコアは cpu 版と小数 3 桁まで一致) | frames 約 8 秒/窓 | `torch 2.14.1+cu126`。GPU の確認にはならない |
 | (GPU なし・4 vCPU) | intel | 修正後は可(約 15 秒) | cpu | (未計測。検索スコアは cpu 版と小数 3 桁まで一致) | frames 約 8 秒/窓 | 修正前は SIGSEGV で起動不可。GPU の確認にはならない |

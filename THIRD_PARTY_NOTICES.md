@@ -44,6 +44,7 @@
 | `cuda` | Triton | MIT |
 | `rocm` | AMD ROCm のライブラリ(PyTorch の ROCm 版に同梱) | 各ライブラリのライセンス(PyTorch のパッケージ内の記載を参照) |
 | `rocm` | Triton(ROCm 版) | MIT |
+| `rocm` | librocdxg(AMD。WSL2 で `/dev/dxg` から GPU を使うための部品。`/opt/rocm/lib`、版は `docker/Dockerfile` の `ROCDXG_VERSION`) | MIT |
 | `intel` | Intel oneAPI の実行環境(DPC++ / SYCL ランタイム、OpenMP、OpenCL ランタイムなど) | **Intel End User License Agreement for Developer Tools** |
 | `intel` | Intel oneMKL、Intel MPI の実行環境 | **Intel Simplified Software License** |
 | `intel` | Intel GPU ドライバ(Ubuntu の `libze-intel-gpu1`、`intel-opencl-icd`)、Level Zero | MIT / BSD-3-Clause ほか |

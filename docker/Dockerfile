@@ -27,6 +27,10 @@ ARG TRANSFORMERS_SHA256=4c30d29ff39f7398d9b0b4073594d2bcd2fbfe1bc31b12743ab08be3
 ARG MODEL_ID=google/embeddinggemma-2
 # モデルの版(Hugging Face のコミット)を固定する。ビルドのたびに中身が変わることを防ぐ
 ARG MODEL_REVISION=914f7f89142e33e77833254d9c9b90c3cef7303b
+# rocm のみ: Windows の WSL2(Docker Desktop)では /dev/kfd が無く、/dev/dxg 経由で GPU を使う。
+# その橋渡しをする AMD の librocdxg(MIT)。RX 9060 XT で動作を確認した版に固定する(docs/gpu.md)
+ARG ROCDXG_VERSION=1.2.2
+ARG ROCDXG_SHA256=28ded1254811192ebace1f76c0227580184af7b27ab2475fb9728295a702d541
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Tokyo \
@@ -41,6 +45,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # ---- OS パッケージ(ffmpeg は動画・音声の加工に必須)
 #      intel のみ、Intel GPU 用の実行環境(Level Zero / OpenCL ドライバ)も入れる
 #      rocm / intel は、ffmpeg が GPU で動画を復号するための VA-API ドライバも入れる(AMD: mesa、Intel: iHD)。
+#      rocm は、PyTorch の ROCm 版が読み込む libatomic1(無いと import torch が失敗する。実測)と、WSL2 用の librocdxg も入れる。
 #      cuda は、NVIDIA のドライバがコンテナに渡す復号ライブラリ(NVDEC)を使う(NVIDIA_DRIVER_CAPABILITIES の video)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -49,7 +54,13 @@ RUN apt-get update \
       apt-get install -y --no-install-recommends libze1 libze-intel-gpu1 intel-opencl-icd intel-media-va-driver; \
     fi \
  && if [ "$VARIANT" = "rocm" ]; then \
-      apt-get install -y --no-install-recommends mesa-va-drivers; \
+      apt-get install -y --no-install-recommends mesa-va-drivers libatomic1 \
+      && curl -fsSLo /tmp/rocdxg.deb "https://github.com/ROCm/librocdxg/releases/download/v${ROCDXG_VERSION}/rocdxg-roct_${ROCDXG_VERSION}_amd64.deb" \
+      && echo "${ROCDXG_SHA256}  /tmp/rocdxg.deb" | sha256sum -c - \
+      && dpkg-deb -x /tmp/rocdxg.deb / \
+      && rm /tmp/rocdxg.deb \
+      && ln -sf "/opt/rocm/lib/librocdxg.so.${ROCDXG_VERSION}" /usr/lib/librocdxg.so \
+      && mkdir -p /usr/share/rocdxg && cp /opt/rocm/share/rocdxg/dids.conf /usr/share/rocdxg/; \
     fi \
  && rm -rf /var/lib/apt/lists/* \
  && python3 -m venv /opt/venv \
@@ -64,7 +75,9 @@ RUN case "$VARIANT" in \
       rocm)  pip install "torch==${TORCH_VERSION}" "torchvision==${TORCHVISION_VERSION}" --index-url https://download.pytorch.org/whl/rocm7.2 ;; \
       intel) pip install "torch==${TORCH_VERSION}" "torchvision==${TORCHVISION_VERSION}" --index-url https://download.pytorch.org/whl/xpu ;; \
       *) echo "不明な VARIANT: $VARIANT" >&2; exit 1 ;; \
-    esac
+    esac \
+ && if [ "$VARIANT" != "slim" ]; then python -c "import torch; print('torch', torch.__version__)"; fi
+# import の確認: 共有ライブラリの不足(rocm の libatomic1 など)を、公開前のビルドで検出する。GPU が無くても通る
 
 # ---- アプリ本体
 WORKDIR /app

@@ -36,6 +36,16 @@ services:
     devices: ["/dev/kfd", "/dev/dri"]
     group_add: ["video"]
 
+  # AMD を Windows の Docker Desktop(WSL2)で使う場合(docs/gpu.md)
+  rocm-wsl:
+    <<: *common
+    image: ghcr.io/miyabiver39/embeddinggemma-poc:rocm
+    profiles: ["rocm-wsl"]
+    devices: ["/dev/dxg"]
+    volumes:
+      - ./data:/data
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+
   intel:
     <<: *common
     image: ghcr.io/miyabiver39/embeddinggemma-poc:intel

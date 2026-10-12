@@ -259,7 +259,7 @@
 |---|---|---|---|
 | CPU | `cpu` | 2.14.1+cpu | fp32 |
 | NVIDIA (RTX 3060 12GB 等) | `cuda` | 2.14.1+cu126 | bf16。ドライバは Docker の `--gpus all` |
-| AMD (RX 9060 XT 16GB 等) | `rocm` | 2.14.1+rocm7.2 | PyTorch 上は `cuda` として見える。`/dev/kfd` と `/dev/dri` が必要 |
+| AMD (RX 9060 XT 16GB 等) | `rocm` | 2.14.1+rocm7.2 | PyTorch 上は `cuda` として見える。Linux は `/dev/kfd` と `/dev/dri`、Windows(WSL2)は `/dev/dxg` と `/usr/lib/wsl`(同梱の librocdxg が橋渡し) |
 | Intel (Arc / Core Ultra 内蔵) | `intel` | 2.14.1+xpu | `xpu`。古い内蔵 GPU (Iris Xe) は未対応の可能性が高い |
 
 「コンテナ提供時にネイティブに変換」は **フェーズ 2** として設計のみ(未実装):
