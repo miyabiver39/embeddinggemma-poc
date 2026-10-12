@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 
 import numpy as np
 import pytest
@@ -48,6 +49,41 @@ def test_exact_and_filtered_search(tmp_path):
         again.close()
 
 
+def test_journal_restores_changes_after_crash(tmp_path):
+    """スナップショットを書き出す前に異常終了しても、ジャーナルから変更を戻せる。"""
+    rng = np.random.default_rng(2)
+    vecs = _unit(rng, 50)
+    first = VectorIndex(tmp_path / "v.usearch", snapshot_every=1_000_000)
+    first.add(np.arange(1, 41), vecs[:40])
+    first.save()  # 40 件はスナップショットに入る
+    first.add(np.arange(41, 51), vecs[40:])
+    first.remove([1, 2])
+    first._stop.set()  # close() を呼ばずに止める(異常終了の代わり)
+    with open(first.journal_path, "ab") as f:
+        f.write(b"A\x01\x02")  # 書き込みの途中で止まった記録
+    again = VectorIndex(tmp_path / "v.usearch")
+    try:
+        assert len(again) == 48 and 1 not in set(again.keys().tolist())
+        assert again.search(vecs[45], 1)[0][0] == 46
+        assert not again.journal_path.exists()  # 戻した後はスナップショットに書き出し、ジャーナルを空にする
+    finally:
+        again.close()
+
+
+def test_snapshot_is_written_when_journal_grows(tmp_path):
+    rng = np.random.default_rng(3)
+    index = VectorIndex(tmp_path / "v.usearch", snapshot_every=10)
+    try:
+        index.add(np.arange(20), _unit(rng, 20))
+        for _ in range(30):
+            if index.pending == 0:
+                break
+            time.sleep(0.2)
+        assert index.pending == 0 and (tmp_path / "v.usearch").is_file()
+    finally:
+        index.close()
+
+
 def test_approximate_search_with_filter(tmp_path, monkeypatch):
     monkeypatch.setattr(vectors, "EXACT_LIMIT", 10)  # 近似検索の経路を通す
     rng = np.random.default_rng(1)
@@ -91,7 +127,7 @@ def test_new_windows_are_searchable_during_ingest(settings, tmp_path):
     """取り込み中に追加された窓も、すぐに検索の対象になる(ファイルへの書き出しを待たない)。"""
     from mediasearch.store import Store
 
-    store = Store(tmp_path / "db" / "m.db", save_interval_sec=3600)
+    store = Store(tmp_path / "db" / "m.db", snapshot_every=1_000_000)
     try:
         sid = store.add_source(kind="frames", path=None, name="x", group_id="g", location=None, start_ts=0, params={})
         q = np.ones(16, dtype=np.float32) / 4
@@ -100,7 +136,8 @@ def test_new_windows_are_searchable_during_ingest(settings, tmp_path):
         assert [h["window_id"] for h in store.search(q)] == [1]
         w2 = store.add_window(source_id=sid, start_ms=1000, end_ms=2000, kind="frames", group_id="g", abs_ts=1, vec=q)
         assert [h["window_id"] for h in store.search(q, after_id=1)] == [w2]
-        assert not (tmp_path / "db" / "vectors.usearch").exists()  # まだ書き出していない
+        assert not (tmp_path / "db" / "vectors.usearch").exists()  # スナップショットはまだ書き出していない
+        assert (tmp_path / "db" / "vectors.journal").stat().st_size > 0  # 変更はジャーナルに書いてある
     finally:
         store.close()
     db = sqlite3.connect(tmp_path / "db" / "m.db")

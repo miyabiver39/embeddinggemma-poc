@@ -117,7 +117,7 @@ class SchemaError(RuntimeError):
 
 
 class Store:
-    def __init__(self, path: Path, vector_path: Path | None = None, save_interval_sec: float = 10.0) -> None:
+    def __init__(self, path: Path, vector_path: Path | None = None, snapshot_every: int | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._db = sqlite3.connect(path, check_same_thread=False)
@@ -133,7 +133,7 @@ class Store:
         self.path = path
         self._cache: dict[str, Any] | None = None
         self._pending: list[tuple] = []  # 検索用のメタデータに、まだ反映していない追加分
-        self.vectors = VectorIndex(vector_path or path.with_name("vectors.usearch"), save_interval_sec)
+        self.vectors = VectorIndex(vector_path or path.with_name("vectors.usearch"), snapshot_every)
         self._move_legacy_vectors()
         # 異常終了で、ベクトルを書き出す前に止まった取り込み元(Ingestor が起動時に取り込み直す)
         self.lost_sources: list[int] = self._reconcile()
@@ -195,8 +195,9 @@ class Store:
                 keep = [(r["id"], r["vec"]) for r in batch if r["id"] not in existing]
                 if keep:
                     vecs = np.stack([np.frombuffer(v, dtype=np.float32) for _, v in keep])
-                    self.vectors.add([k for k, _ in keep], vecs)
+                    self.vectors.add([k for k, _ in keep], vecs, journal=False)  # 最後にまとめて書き出す
                     moved += len(keep)
+                    log.warning("以前の版の DB からベクトルを移しています: %d 件(1 件あたり約 0.5 ミリ秒)", moved)
             self.vectors.save(force=True)
             self._db.execute("ALTER TABLE windows DROP COLUMN vec")
             self._db.commit()
