@@ -54,6 +54,7 @@
 | `sources` | 取り込み元(動画/音声)。パス、グループ ID、場所、開始絶対時刻、設定、状態。パスに索引(重複確認用) |
 | `windows` | `source_id`, `start_ms`, `end_ms`, `kind`, `group_id`, `abs_ts`(ベクトルはベクトル DB に、窓の ID をキーにして保存) |
 | `jobs` | 取り込みジョブ(進捗・エラー・処理時間の内訳 `timings`)。再起動時に未完了ジョブを再開 |
+| `alerts` / `alert_events` | 通知ルール(クエリ・絞り込み・送り先・鍵)と、作った通知(本文・状態・再送の回数)。`(alert_id, window_id)` は一意 |
 
 ベクトルは SQLite ではなく、組み込み型のベクトル DB の [USearch](https://github.com/unum-cloud/usearch)(Apache-2.0)で
 `DATA_DIR/vectors.usearch` に保存する(`vectors.py`)。SQLite と同じく、サーバーを立てずに 1 ファイルで完結する。
@@ -196,6 +197,22 @@
   (50 接続・2 万窓・新しい窓 20 件で、1 回あたり 29 ms → 8 ms を実測。全件に比例する部分が無くなったため、索引が大きいほど差が開く)。
 - 接続ごとの通知は最大 1000 件までためる。受け取りが遅くあふれた分は捨て、`end` の `dropped` で数を返す。
 - 再接続で `after_window_id` を渡した場合は、取りこぼした分(登録の時点まで)だけを、その接続で検索して先に送る。
+
+### 通知ルール(`alerts.py`)
+
+- リアルタイム検索と同じく、1 つのスレッドが 1 秒ごとに新しい窓を読み、有効な全ルールのクエリとの類似度を 1 回の行列の積で計算する。
+  クエリのベクトルはルールの作成・変更のときに作り直す(照合のたびに推論しない)。照合を終えた窓の ID は `meta` の
+  `alerts_last_window_id` に残し、再起動の後は続きから照合する(初回は、その時点より後の窓だけ)。
+- 抑制は (ルール, 取り込み元) ごとの最後の通知の時刻で判断する(再起動の後は `alert_events` から読み直す)。
+- 通知は先に `alert_events` に `pending` で保存してから、送信のスレッドが送る。失敗したら間隔を空けて再送し、上限を超えたら `failed`。
+  再起動のときは `pending` のものを送り直す。古い通知の履歴は、`JOB_HISTORY_DAYS` を過ぎたら保存期間の処理で削除する。
+
+### 監視(`observability.py`、`GET /metrics`)
+
+- `RequestContextMiddleware` をいちばん外側に置き、全ての要求にリクエスト ID を付け、経路のひな形・メソッド・状態コードごとに
+  数と処理時間(ヒストグラム)を数える。経路が決まらない要求は `/api/*` などにまとめ、値の種類が増え続けないようにする。
+- `GET /metrics` は `metrics.app_metrics` の値と上記の数を、Prometheus のテキスト形式で返す(ROLE=compute では資源と推論の値だけ)。
+- `LOG_FORMAT=json` では、ログを 1 行 1 件の JSON にし、要求の処理中のログには `request_id` を付ける。
 
 ### 保存しないモード(`STORE_MEDIA=false` / `store_media`)
 

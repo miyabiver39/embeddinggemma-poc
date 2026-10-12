@@ -179,7 +179,9 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `JOB_HISTORY_DAYS` | `30` | 終わったジョブの履歴を残す日数(取り込み元ごとの最新のジョブは残す)。`0` で削除しない |
 | `MAX_STREAMS` | `8` | 同時に受信できる RTSP のストリームの数 |
 | `TZ` | `Asia/Tokyo` | 時刻(ファイル名の日時、タイムゾーンのない `start_ts`)の解釈 |
-| `LOG_LEVEL` | `INFO` | |
+| `PUBLIC_URL` | (空) | 外から見たこのサーバーの URL(例 `https://search.example.com`)。通知ルールの Webhook の本文で、サムネイル・動画の URL を絶対 URL にする |
+| `LOG_LEVEL` | `INFO` | ログの出力の下限(`DEBUG` / `INFO` / `WARNING` / `ERROR`) |
+| `LOG_FORMAT` | `text` | `json` にすると、1 行 1 件の JSON で出す(ログの収集基盤向け。リクエスト ID・処理時間を含むアクセスログも出す) |
 
 取り込みのプリセット(`preset`): `object`(2秒窓・2フレーム・音声なし。物体やシーン向け)/ `action`(4秒窓・4フレーム・音声なし。動作向け)/ `speech`(6秒窓・6フレーム・音声あり。会話や音が重要なとき向け)。
 

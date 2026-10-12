@@ -45,6 +45,10 @@
   API は 507 を返し、監視フォルダのファイルは登録しないまま残し、ストリームは受信を続けて窓を保存しません(`state.skipped_low_disk`)。空きが戻ると、自動で再開します。
   検索・削除は続けられます。取り込み中のジョブは、窓をまとめて保存する前に確かめ、足りなければ再試行に回します。
 - 推論側に接続できない・空き容量が足りない場合、取り込みのジョブは 30 秒・60 秒・120 秒……(最大 10 分)の間隔で `JOB_RETRIES` 回まで再試行します。
+- 監視基盤からは `GET /metrics`(Prometheus 形式)を読み取ります(`docs/api.md` の 9.)。例えば次の条件で知らせると、止まる前に気付けます。
+  `mediasearch_disk_ok == 0`(空き容量の不足)、`mediasearch_stream_up == 0`(ストリームの切断)、
+  `rate(mediasearch_stream_dropped_windows_total[10m]) > 0`(推論が追いつかない)、
+  `rate(mediasearch_search_rejected_total[5m]) > 0`(検索が混み合っている)、`mediasearch_alert_events{status="failed"} > 0`(通知が届かない)。
 - ジョブの履歴は `JOB_HISTORY_DAYS`(既定 30 日)を過ぎたものを削除します(取り込み元ごとの最新のジョブは残る)。
 
 ## 保存期間
@@ -125,3 +129,7 @@ python bench/compare.py bench/results/<前> bench/results/<後>                 
 ## ログ
 
 標準出力に出ます(`docker logs mediasearch`)。`-e LOG_LEVEL=DEBUG` で詳細に。
+
+`-e LOG_FORMAT=json` にすると、1 行 1 件の JSON(`time` / `level` / `logger` / `message`、要求の処理中のログには `request_id`)で出します。
+この場合、uvicorn のアクセスログの代わりに、`mediasearch.access` がリクエスト ID・経路・状態コード・処理時間(`http`)を出します
+(`/healthz`・`/readyz`・`/metrics` は除く)。問い合わせを受けたときは、応答の `X-Request-ID` の値でログを探します。

@@ -217,6 +217,67 @@ curl -X PATCH -H 'Content-Type: application/json' -d '{"group_id": "entrance", "
   http://localhost:8000/api/sources/12
 ```
 
+### 8. 通知ルール(Webhook)
+
+条件を保存しておくと、新しく作られた窓が条件に合ったときに、サーバーが Webhook(JSON の POST)で知らせます。
+リアルタイム検索(5.)と違い、利用側が接続していない間も照合します。作成・変更・削除には `API_TOKEN` が必要です
+(読み取り専用のトークンでは、一覧と通知の履歴の参照だけができます)。
+
+```bash
+# 作成。secret(署名の鍵)は作成時の応答にだけ含まれるので、受け取り側に保存しておく
+curl -X POST -H 'Content-Type: application/json' -d '{
+  "name": "入口の人", "query": "入口に人が立っている", "min_score": 0.3,
+  "group_id": "entrance", "cooldown_sec": 300, "webhook_url": "https://hooks.example.com/mediasearch"
+}' http://localhost:8000/api/alerts
+# {"id": 1, ..., "secret": "5f1c..."}
+
+curl -X POST http://localhost:8000/api/alerts/1/test      # 試しの通知を 1 件送る(受け取り側の確認)
+curl "http://localhost:8000/api/alerts/1/events?limit=20" # 通知の履歴(pending / delivered / failed)
+curl -X PATCH -H 'Content-Type: application/json' -d '{"enabled": false}' http://localhost:8000/api/alerts/1
+curl -X DELETE http://localhost:8000/api/alerts/1
+```
+
+- 同じルールで同じ取り込み元からの通知は、`cooldown_sec` の間は送りません(同じ場面が続く間、繰り返し届くのを防ぐ)。
+- 受け取り側が 2xx 以外を返した・接続できなかった場合は、5 秒・30 秒・2 分・10 分・30 分の間隔で再送し、それでも届かなければ `failed` にします。
+  未送信の通知は DB に残るため、再起動の後も送り直します。転送(リダイレクト)には従いません。
+- 本文の `match.thumb_url` / `match.media_url` は、`PUBLIC_URL` を設定すると絶対 URL になります。
+
+本文の例:
+
+```json
+{"event": "alert.match", "event_id": 42, "sent_at": "2026-10-12T09:00:05+09:00",
+ "alert": {"id": 1, "name": "入口の人", "query": "入口に人が立っている"},
+ "match": {"window_id": 1201, "source_id": 5, "source_name": "入口カメラ", "kind": "frames", "group_id": "entrance",
+           "location": null, "start_ms": 4000, "end_ms": 6000, "abs_time": "2026-10-12T09:00:04", "abs_ts": 1791763204.0,
+           "score": 0.41, "thumb_url": "https://search.example.com/api/thumb/1201", "media_url": null}}
+```
+
+署名の確かめ方: ヘッダー `X-Mediasearch-Timestamp`(UNIX 秒)と本文を `.` でつないだものの HMAC-SHA256 が、
+`X-Mediasearch-Signature` の `sha256=` の後の値と一致するかを確かめます。時刻が古いもの(例: 5 分以上前)は、
+使い回し(リプレイ)として捨ててください。`event_id` が同じ通知は、再送で 2 回届くことがあります。
+
+```python
+import hashlib, hmac, time
+
+def verify(secret: str, headers: dict, body: bytes) -> bool:
+    ts = headers["X-Mediasearch-Timestamp"]
+    expected = hmac.new(secret.encode(), ts.encode() + b"." + body, hashlib.sha256).hexdigest()
+    given = headers["X-Mediasearch-Signature"].removeprefix("sha256=")
+    return hmac.compare_digest(expected, given) and abs(time.time() - int(ts)) < 300
+```
+
+### 9. 監視(Prometheus)とリクエスト ID
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/metrics   # Prometheus のテキスト形式
+```
+
+- 値: CPU・メモリ(アプリ本体とコンテナ全体)・GPU・推論の稼働時間と待ち時間・窓とベクトルの数・取り込みの待ち・
+  ストリームの状態(受信中か・捨てた窓・遅れ)・空き容量・検索の混雑・通知の数・HTTP の要求の数と処理時間(経路のひな形ごと)。
+- 認証は `/api` と同じです(`API_READ_TOKEN` でも読めます)。Prometheus では `authorization` の設定でトークンを渡します。
+- 全ての応答に `X-Request-ID` を付けます。要求に `X-Request-ID`(英数字・`-`・`_` の 64 文字まで)を付けるとその値を使うため、
+  利用側のログと、サーバーのログ(`LOG_FORMAT=json` の `request_id`)を突き合わせられます。
+
 ## クライアントの自動生成
 
 `docs/openapi.json` から、各言語のクライアントを生成できます。
