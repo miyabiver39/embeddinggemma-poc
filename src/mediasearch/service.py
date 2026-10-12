@@ -13,6 +13,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -87,6 +88,7 @@ class Context:
     streams: StreamManager | None = None
     retention: RetentionWorker | None = None
     search_limiter: SearchLimiter | None = None
+    alerts: Any = None  # AlertEngine(循環の読み込みを避けるため、型は Any)
 
     @property
     def media_dir(self) -> Path:

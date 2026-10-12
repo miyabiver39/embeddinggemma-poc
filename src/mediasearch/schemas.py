@@ -348,6 +348,76 @@ class StreamList(BaseModel):
     streams: list[Stream]
 
 
+class AlertCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200, description="ルールの名前")
+    query: str = Field(min_length=1, max_length=1000, description="探す内容を表す文章(例「人が倒れている」)")
+    kind: SearchKind = Field("auto", description="探す窓の種類")
+    group_id: str | None = Field(None, description="このグループ ID の窓だけを照合する")
+    location: str | None = Field(None, description="この場所の窓だけを照合する")
+    min_score: float = Field(0.3, description="これ以上のスコアの窓を通知する(実データを見て決める)")
+    webhook_url: str = Field(description="通知を POST する URL(http:// / https://)")
+    secret: str | None = Field(
+        None, min_length=16, description="署名の鍵(省略時は作る。作成の応答でだけ返し、以降は伏せる)"
+    )
+    cooldown_sec: float = Field(60, ge=0, le=86_400, description="同じ取り込み元からの通知を、この秒数は送らない")
+    enabled: bool = True
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"name": "入口の人", "query": "人が歩いている", "group_id": "entrance",
+                                         "min_score": 0.35, "webhook_url": "https://example.com/hook"}]}
+    )  # fmt: skip
+
+
+class AlertPatch(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=200)
+    query: str | None = Field(None, min_length=1, max_length=1000)
+    kind: SearchKind | None = None
+    group_id: str | None = None
+    location: str | None = None
+    min_score: float | None = None
+    webhook_url: str | None = None
+    cooldown_sec: float | None = Field(None, ge=0, le=86_400)
+    enabled: bool | None = None
+
+
+class Alert(_Open):
+    id: int
+    name: str
+    query: str
+    kind: str
+    group_id: str | None = None
+    location: str | None = None
+    min_score: float
+    webhook_url: str
+    cooldown_sec: float
+    enabled: bool
+    created_at: float
+    secret: str | None = Field(None, description="署名の鍵(作成の応答でだけ返す)")
+
+
+class AlertList(BaseModel):
+    alerts: list[Alert]
+    status: dict[str, Any] = Field(description="照合・送信の状態(有効なルールの数、通知した数、送れなかった数)")
+
+
+class AlertEvent(_Open):
+    id: int
+    alert_id: int
+    window_id: int
+    source_id: int
+    score: float
+    payload: dict[str, Any] = Field(description="送った(送る)内容")
+    status: Literal["pending", "delivered", "failed"]
+    attempts: int
+    error: str | None = None
+    created_at: float
+    delivered_at: float | None = None
+
+
+class AlertEventList(BaseModel):
+    events: list[AlertEvent]
+
+
 class JobList(BaseModel):
     jobs: list[Job]
     total: int | None = Field(None, description="条件に合うジョブの総数")

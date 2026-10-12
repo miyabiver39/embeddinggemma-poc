@@ -110,6 +110,7 @@ class Settings:
     job_history_days: float  # 終わったジョブの履歴を残す日数(取り込み元ごとの最新のジョブは残す)
     max_pending_searches: int  # 同時に処理する検索の上限。超えたら 503(0 なら制限しない)
     api_read_token: str  # 検索・参照だけを許可するトークン(取り込み・削除はできない)
+    public_url: str  # 外から見たこのサーバーの URL(通知の本文のサムネイル・動画の URL を絶対 URL にする)
 
     # --- サーバ ---
     host: str
@@ -192,6 +193,7 @@ class Settings:
             job_history_days=max(_env_float("JOB_HISTORY_DAYS", 30.0), 0.0),
             max_pending_searches=max(_env_int("MAX_PENDING_SEARCHES", 32), 0),
             api_read_token=_env("API_READ_TOKEN", ""),
+            public_url=_env("PUBLIC_URL", "").rstrip("/"),
             host=_env("HOST", "0.0.0.0"),
             port=_env_int("PORT", 8000),
             api_token=api_token,

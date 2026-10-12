@@ -87,6 +87,38 @@ CREATE TABLE IF NOT EXISTS streams (
 );
 """
 
+# 通知ルール(alerts.py)。検索の条件と通知先(Webhook)を保存し、新しい窓が条件に合ったら通知する
+ALERTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  query TEXT NOT NULL,           -- 探す内容を表す文章
+  kind TEXT NOT NULL DEFAULT 'auto',
+  group_id TEXT,
+  location TEXT,
+  min_score REAL NOT NULL,
+  webhook_url TEXT NOT NULL,
+  secret TEXT NOT NULL,          -- 通知の署名(HMAC-SHA256)の鍵
+  cooldown_sec REAL NOT NULL DEFAULT 60,  -- 同じ取り込み元からの通知を、この秒数は送らない
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS alert_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  alert_id INTEGER NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+  window_id INTEGER NOT NULL,
+  source_id INTEGER NOT NULL,
+  score REAL NOT NULL,
+  payload TEXT NOT NULL,         -- 送る内容(JSON)
+  status TEXT NOT NULL,          -- pending / delivered / failed
+  attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at REAL NOT NULL,
+  delivered_at REAL,
+  UNIQUE(alert_id, window_id)    -- 同じ窓を二重に通知しない(再起動の前後で照合が重なっても)
+);
+"""
+
 # 索引は、以前の版の DB を移行した後に作る(移行前の列名のままだと作れないため)
 INDEXES = """
 -- 同じファイルの重複取り込みを確認するため(監視フォルダでは定期的に全件を照合する)
@@ -94,12 +126,13 @@ CREATE INDEX IF NOT EXISTS idx_sources_path ON sources(path);
 CREATE INDEX IF NOT EXISTS idx_windows_source ON windows(source_id);
 -- 保存期間(RETENTION_DAYS)を過ぎた窓を探すため
 CREATE INDEX IF NOT EXISTS idx_windows_abs_ts ON windows(abs_ts);
+CREATE INDEX IF NOT EXISTS idx_alert_events_status ON alert_events(status);
 """
 
 WINDOW_KINDS = ("frames", "tav", "audio", "image")
 
 # DB の形式の版。列の追加・改名をしたら上げ、_migrate() に移行の処理を足す
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 # 旧い版で使っていた列名 → 現在の列名(以前の版の DB をそのまま使い続けられるよう、起動時に改名する)
 _RENAMED_COLUMNS = {
     "sources": {"camera_id": "group_id"},
@@ -132,6 +165,7 @@ class Store:
         self._db.execute("PRAGMA foreign_keys=ON")
         self._db.executescript(SCHEMA)
         self._db.executescript(STREAMS_SCHEMA)
+        self._db.executescript(ALERTS_SCHEMA)
         self._db.commit()
         self._migrate()
         self._db.executescript(INDEXES)
@@ -521,6 +555,116 @@ class Store:
         with self._lock:
             self._db.execute("DELETE FROM streams WHERE id=?", (stream_id,))
             self._db.commit()
+
+    # ------------------------------------------------------------------ 通知ルール
+    _ALERT_FIELDS = ("name", "query", "kind", "group_id", "location", "min_score", "webhook_url", "secret",
+                     "cooldown_sec", "enabled")  # fmt: skip
+
+    def add_alert(self, **fields) -> int:
+        cols = [k for k in self._ALERT_FIELDS if k in fields]
+        with self._lock:
+            cur = self._db.execute(
+                f"INSERT INTO alerts({', '.join(cols)}, created_at) VALUES({', '.join('?' * len(cols))}, ?)",
+                (*[fields[k] for k in cols], time.time()),
+            )
+            self._db.commit()
+            return int(cur.lastrowid)
+
+    def get_alert(self, alert_id: int) -> dict | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM alerts WHERE id=?", (alert_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_alerts(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM alerts ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+    def update_alert(self, alert_id: int, **fields) -> None:
+        fields = {k: v for k, v in fields.items() if k in self._ALERT_FIELDS}
+        if not fields:
+            return
+        with self._lock:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            self._db.execute(f"UPDATE alerts SET {sets} WHERE id=?", (*fields.values(), alert_id))
+            self._db.commit()
+
+    def delete_alert(self, alert_id: int) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM alerts WHERE id=?", (alert_id,))
+            self._db.commit()
+
+    def add_alert_event(
+        self, *, alert_id: int, window_id: int, source_id: int, score: float, payload: dict
+    ) -> int | None:
+        """通知を記録します。同じルール・同じ窓が記録済みなら None。"""
+        with self._lock:
+            cur = self._db.execute(
+                "INSERT OR IGNORE INTO alert_events(alert_id, window_id, source_id, score, payload, status, created_at)"
+                " VALUES(?,?,?,?,?, 'pending', ?)",
+                (alert_id, window_id, source_id, score, json.dumps(payload, ensure_ascii=False), time.time()),
+            )
+            self._db.commit()
+            return int(cur.lastrowid) if cur.rowcount else None
+
+    def get_alert_event(self, event_id: int) -> dict | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM alert_events WHERE id=?", (event_id,)).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["payload"] = json.loads(d["payload"])
+        return d
+
+    def last_alert_event(self, alert_id: int, source_id: int) -> float | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT MAX(created_at) AS t FROM alert_events WHERE alert_id=? AND source_id=?", (alert_id, source_id)
+            ).fetchone()
+        return row["t"] if row and row["t"] is not None else None
+
+    def update_alert_event(self, event_id: int, **fields) -> None:
+        allowed = {"status", "attempts", "error", "delivered_at"}
+        fields = {k: v for k, v in fields.items() if k in allowed}
+        with self._lock:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            self._db.execute(f"UPDATE alert_events SET {sets} WHERE id=?", (*fields.values(), event_id))
+            self._db.commit()
+
+    def list_alert_events(
+        self, alert_id: int | None = None, status: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        where, params = [], []
+        if alert_id is not None:
+            where.append("alert_id=?")
+            params.append(alert_id)
+        if status:
+            where.append("status=?")
+            params.append(status)
+        cond = (" WHERE " + " AND ".join(where)) if where else ""
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT * FROM alert_events{cond} ORDER BY id DESC LIMIT ?", (*params, limit)
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["payload"] = json.loads(d["payload"])
+            out.append(d)
+        return out
+
+    def alert_counts(self) -> dict:
+        with self._lock:
+            rows = self._db.execute("SELECT status, COUNT(*) AS n FROM alert_events GROUP BY status").fetchall()
+        return {r["status"]: r["n"] for r in rows}
+
+    def prune_alert_events(self, before: float) -> int:
+        with self._lock:
+            cur = self._db.execute(
+                "DELETE FROM alert_events WHERE status != 'pending' AND created_at < ?", (before,)
+            )
+            self._db.commit()
+            return cur.rowcount
 
     # ------------------------------------------------------------------ ジョブ
     def create_job(self, source_id: int) -> int:

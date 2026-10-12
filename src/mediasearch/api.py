@@ -16,7 +16,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import disk, media
+from .alerts import new_secret, public_alert, validate_webhook
 from .ingest_files import MEDIA_KINDS, is_within, media_kind_of
 from .live import LiveHub, Subscriber
 from .media import MediaError
@@ -32,6 +33,11 @@ from .metrics import app_metrics
 from .pipeline import IngestParams
 from .schemas import (
     Accepted,
+    Alert,
+    AlertCreate,
+    AlertEventList,
+    AlertList,
+    AlertPatch,
     Deleted,
     DirIngestResponse,
     FramesResponse,
@@ -589,6 +595,85 @@ def build_api_router(ctx: Context) -> APIRouter:
 
         headers = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}  # 中継のサーバーにためさせない
         return StreamingResponse(stream(), media_type="text/event-stream", headers=headers)
+
+    # ------------------------------------------------------------------ 通知ルール
+    def _engine():
+        if ctx.alerts is None:
+            raise HTTPException(404, "通知ルールは使えません")
+        return ctx.alerts
+
+    def _alert_or_404(alert_id: int) -> dict:
+        alert = ctx.store.get_alert(alert_id)
+        if alert is None:
+            raise HTTPException(404, "通知ルールが見つかりません")
+        return alert
+
+    @router.post("/alerts", tags=["通知ルール"], summary="通知ルールを作る", response_model=Alert,
+                 responses=errors(400, 401))  # fmt: skip
+    def create_alert(body: AlertCreate) -> dict:
+        """新しく作られた窓(ファイルの取り込み・ストリーム)が条件に合ったら、webhook_url に POST します。
+
+        本文は JSON(`event`・`alert`・`match`・`sent_at`)。ヘッダー `X-Mediasearch-Signature: sha256=<16 進>` は、
+        `HMAC-SHA256(secret, "<X-Mediasearch-Timestamp>.<本文>")` です。受け取り側で検証してください(docs/api.md)。
+        作成より前の窓は照合しません。
+        """
+        validate_webhook(body.webhook_url)
+        secret = body.secret or new_secret()
+        alert_id = ctx.store.add_alert(**{**body.model_dump(), "secret": secret, "enabled": int(body.enabled)})
+        _engine().reload()
+        return {**public_alert(ctx.store.get_alert(alert_id)), "secret": secret}
+
+    @router.get("/alerts", tags=["通知ルール"], summary="通知ルールの一覧", response_model=AlertList,
+                responses=errors(401))  # fmt: skip
+    def list_alerts() -> dict:
+        engine = _engine()
+        status = {**engine.status, "events": ctx.store.alert_counts(), "last_window_id": engine.seen}
+        return {"alerts": [public_alert(a) for a in ctx.store.list_alerts()], "status": status}
+
+    @router.get("/alerts/{alert_id}", tags=["通知ルール"], summary="通知ルール", response_model=Alert,
+                responses=errors(401, 404))  # fmt: skip
+    def get_alert(alert_id: int) -> dict:
+        return public_alert(_alert_or_404(alert_id))
+
+    @router.patch("/alerts/{alert_id}", tags=["通知ルール"], summary="通知ルールを変える", response_model=Alert,
+                  responses=errors(400, 401, 404))  # fmt: skip
+    def patch_alert(alert_id: int, body: AlertPatch) -> dict:
+        _alert_or_404(alert_id)
+        fields = body.model_dump(exclude_unset=True)
+        if fields.get("webhook_url"):
+            validate_webhook(fields["webhook_url"])
+        if "enabled" in fields:
+            fields["enabled"] = int(bool(fields["enabled"]))
+        ctx.store.update_alert(alert_id, **fields)
+        _engine().reload()
+        return public_alert(ctx.store.get_alert(alert_id))
+
+    @router.delete("/alerts/{alert_id}", tags=["通知ルール"], summary="通知ルールを削除する", response_model=Deleted,
+                   responses=errors(401, 404))  # fmt: skip
+    def delete_alert(alert_id: int) -> dict:
+        _alert_or_404(alert_id)
+        ctx.store.delete_alert(alert_id)
+        _engine().reload()
+        return {"deleted": alert_id}
+
+    @router.get("/alerts/{alert_id}/events", tags=["通知ルール"], summary="通知の履歴", response_model=AlertEventList,
+                responses=errors(401, 404))  # fmt: skip
+    def alert_events(
+        alert_id: int,
+        status: Literal["pending", "delivered", "failed"] | None = Query(None, description="状態で絞り込む"),
+        limit: int = Query(100, ge=1, le=1000),
+    ) -> dict:
+        _alert_or_404(alert_id)
+        return {"events": ctx.store.list_alert_events(alert_id, status, limit)}
+
+    @router.post("/alerts/{alert_id}/test", tags=["通知ルール"], summary="試しの通知を送る",
+                 response_model=dict[str, Any], responses=errors(401, 404))  # fmt: skip
+    def test_alert(alert_id: int) -> dict:
+        """`event: alert.test` の通知を 1 件送り、届いたか(2xx が返ったか)を返します。
+
+        受け取り側の設定の確認に使います。
+        """
+        return _engine().test(_alert_or_404(alert_id))
 
     # ------------------------------------------------------------------ ストリーム(RTSP)
     def _streams():

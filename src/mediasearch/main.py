@@ -17,6 +17,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from . import __version__, disk
+from .alerts import AlertEngine, AlertError
 from .api import build_api_router
 from .compute_api import build_compute_router
 from .config import Settings
@@ -66,6 +67,7 @@ OPENAPI_TAGS = [
         "name": "取り込み",
         "description": "映像・音声・画像の登録(アップロード、コンテナ内のパス、フォルダ一括、監視フォルダ)",
     },
+    {"name": "通知ルール", "description": "保存した検索の条件に合う窓が新しく作られたら、Webhook で知らせる"},
     {
         "name": "検索",
         "description": "文章・画像・音声による検索。グループ ID・場所・期間・種類・最小スコアで絞り込めます",
@@ -231,11 +233,15 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
             streams.start()  # 登録済みのストリームの受信を再開する
         if retention:
             retention.start()
+        if ctx_holder and ctx_holder[0].alerts:
+            ctx_holder[0].alerts.start()
         log.info("起動が完了しました。 http://localhost:%d/", s.port)
         try:
             yield
         finally:
             await stack.aclose()
+            if ctx_holder and ctx_holder[0].alerts:
+                ctx_holder[0].alerts.stop()
             if retention:
                 retention.stop()
             if streams:
@@ -267,6 +273,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     if store and ingestor and intake and watcher:
         limiter = SearchLimiter(s.max_pending_searches)
         ctx = Context(s, store, emb, ingestor, intake, watcher, streams, retention, limiter)
+        ctx.alerts = AlertEngine(ctx, Service(ctx))
         app.state.ctx = ctx  # テストや拡張から、同じ部品を使えるようにする
         ctx_holder.append(ctx)
         app.include_router(build_api_router(ctx))
@@ -319,6 +326,10 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     @app.exception_handler(disk.InsufficientStorage)
     async def _no_space(_: Request, exc: disk.InsufficientStorage) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=507)
+
+    @app.exception_handler(AlertError)
+    async def _alert_error(_: Request, exc: AlertError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
 
     @app.exception_handler(StreamError)
     async def _stream_error(_: Request, exc: StreamError) -> JSONResponse:

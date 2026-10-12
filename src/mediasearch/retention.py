@@ -70,8 +70,9 @@ class RetentionWorker:
             cutoff = now - days * 86400 if days and days > 0 else None
             result = self._store.expire_windows(cutoff, now)
             if self._s.job_history_days > 0:  # 保存期間の設定とは別に、ジョブの履歴は既定で 30 日分だけ残す
-                pruned = self._store.prune_jobs(now - self._s.job_history_days * 86400)
-                self.status["total_pruned_jobs"] += pruned
+                before = now - self._s.job_history_days * 86400
+                self.status["total_pruned_jobs"] += self._store.prune_jobs(before)
+                self._store.prune_alert_events(before)  # 送り終えた通知の履歴も、同じ期間で削除する
             thumbs = self._s.data_dir / "thumbs"
             for wid in result["window_ids"]:
                 (thumbs / f"w{wid}.jpg").unlink(missing_ok=True)
