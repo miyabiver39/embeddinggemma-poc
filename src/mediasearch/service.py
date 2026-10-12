@@ -19,6 +19,7 @@ from .config import PRESETS, Settings
 from .embedders import Embedder
 from .ingest_files import FileIntake
 from .pipeline import Ingestor
+from .retention import RetentionWorker
 from .store import Store
 from .streams import StreamManager
 from .watcher import FolderWatcher
@@ -48,6 +49,7 @@ class Context:
     intake: FileIntake
     watcher: FolderWatcher
     streams: StreamManager | None = None
+    retention: RetentionWorker | None = None
 
     @property
     def media_dir(self) -> Path:
@@ -301,4 +303,5 @@ class Service:
             },
             "watch": ctx.watcher.status,
             "streams": self._stream_summary(),
+            "retention": dict(ctx.retention.status) if ctx.retention else None,
         }

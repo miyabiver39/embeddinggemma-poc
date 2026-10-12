@@ -3806,6 +3806,19 @@
             "title": "Watch",
             "description": "監視フォルダの状態"
           },
+          "retention": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention",
+            "description": "保存期間による削除の状態(days: 日数、total_deleted_windows: 削除した窓の数など)"
+          },
           "streams": {
             "anyOf": [
               {
@@ -4140,7 +4153,8 @@
               "queued",
               "running",
               "done",
-              "failed"
+              "failed",
+              "expired"
             ],
             "title": "Status"
           },
@@ -4749,7 +4763,8 @@
               "queued",
               "running",
               "done",
-              "failed"
+              "failed",
+              "expired"
             ],
             "title": "Status"
           },
@@ -4900,6 +4915,18 @@
             "title": "Enabled",
             "description": "受信する設定か(サーバーの再起動後も再開する)"
           },
+          "retention_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Hours",
+            "description": "窓を残す時間(null は RETENTION_DAYS に従う、0 は削除しない)"
+          },
           "created_at": {
             "type": "number",
             "title": "Created At"
@@ -5041,6 +5068,19 @@
             "title": "Enabled",
             "description": "登録してすぐに受信を始める",
             "default": true
+          },
+          "retention_hours": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Hours",
+            "description": "このストリームの窓を残す時間。省略時は RETENTION_DAYS に従い、0 なら削除しない"
           }
         },
         "type": "object",

@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS sources (
   location TEXT,
   start_ts REAL NOT NULL,        -- 録画開始の時刻(UNIX 秒)
   duration_ms INTEGER,
-  status TEXT NOT NULL,          -- queued / running / done / failed
+  status TEXT NOT NULL,          -- queued / running / done / failed / expired(保存期間を過ぎ、窓を削除した)
   params TEXT NOT NULL,          -- 取り込み設定(JSON)
   error TEXT,
   created_at REAL NOT NULL
@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS streams (
   params TEXT NOT NULL,          -- 取り込みの設定(JSON)
   source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
-  created_at REAL NOT NULL
+  created_at REAL NOT NULL,
+  retention_hours REAL           -- 窓を残す時間。NULL なら RETENTION_DAYS に従い、0 なら削除しない
 );
 """
 
@@ -90,12 +91,14 @@ INDEXES = """
 -- 同じファイルの重複取り込みを確認するため(監視フォルダでは定期的に全件を照合する)
 CREATE INDEX IF NOT EXISTS idx_sources_path ON sources(path);
 CREATE INDEX IF NOT EXISTS idx_windows_source ON windows(source_id);
+-- 保存期間(RETENTION_DAYS)を過ぎた窓を探すため
+CREATE INDEX IF NOT EXISTS idx_windows_abs_ts ON windows(abs_ts);
 """
 
 WINDOW_KINDS = ("frames", "tav", "audio", "image")
 
 # DB の形式の版。列の追加・改名をしたら上げ、_migrate() に移行の処理を足す
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 # 旧い版で使っていた列名 → 現在の列名(以前の版の DB をそのまま使い続けられるよう、起動時に改名する)
 _RENAMED_COLUMNS = {
     "sources": {"camera_id": "group_id"},
@@ -103,7 +106,8 @@ _RENAMED_COLUMNS = {
 }
 # 後の版で追加した列(以前の版の DB には、起動時に ALTER TABLE で足す)。版 3: jobs.timings
 _ADDED_COLUMNS = {
-    "jobs": {"timings": "TEXT"},
+    "jobs": {"timings": "TEXT"},  # 版 3
+    "streams": {"retention_hours": "REAL"},  # 版 6
 }
 _REQUIRED_COLUMNS = {
     "sources": {"id", "kind", "path", "name", "group_id", "location", "start_ts", "status", "params"},
@@ -343,7 +347,7 @@ class Store:
             self._db.execute("DELETE FROM sources WHERE id=?", (source_id,))
             self._db.commit()
             self.vectors.remove(ids)
-            self._cache = None
+            self._drop_from_cache(ids)
 
     @staticmethod
     def _source_dict(row: sqlite3.Row) -> dict:
@@ -389,7 +393,7 @@ class Store:
             cur = self._db.execute("DELETE FROM windows WHERE source_id=?", (source_id,))
             self._db.commit()
             self.vectors.remove(ids)
-            self._cache = None
+            self._drop_from_cache(ids)
             return cur.rowcount
 
     def get_window(self, window_id: int) -> dict | None:
@@ -432,13 +436,14 @@ class Store:
         params: dict,
         source_id: int,
         enabled: bool = True,
+        retention_hours: float | None = None,
     ) -> int:
         with self._lock:
             cur = self._db.execute(
-                "INSERT INTO streams(name, url, group_id, location, params, source_id, enabled, created_at)"
-                " VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO streams(name, url, group_id, location, params, source_id, enabled, created_at,"
+                " retention_hours) VALUES(?,?,?,?,?,?,?,?,?)",
                 (name, url, group_id, location, json.dumps(params, ensure_ascii=False), source_id, int(enabled),
-                 time.time()),
+                 time.time(), retention_hours),
             )  # fmt: skip
             self._db.commit()
             return int(cur.lastrowid)
@@ -537,6 +542,68 @@ class Store:
                 values = [v or "" for v in values]
             out[name] = np.array(values, dtype=dtype)
         return out
+
+    def _drop_from_cache(self, ids: list[int]) -> None:
+        """削除した窓を、検索用のメタデータから外します(全件を読み直さない。保存期間の削除は定期的に起きるため)。"""
+        if not ids:
+            return
+        with self._lock:
+            if self._cache is None:
+                return
+            if self._pending:
+                self._meta()  # 未反映の追加分を先に足す
+            keep = ~np.isin(self._cache["ids"], np.asarray(ids, dtype=np.int64))
+            self._cache = {k: v[keep] for k, v in self._cache.items()}
+
+    # ------------------------------------------------------------------ 保存期間
+    def expire_windows(self, cutoff: float | None, now: float, batch: int = 10_000) -> dict:
+        """保存期間を過ぎた窓を削除します。削除した窓の ID と、窓が無くなった取り込み元を返します。
+
+        - cutoff: この時刻(UNIX 秒)より前の窓を削除する(RETENTION_DAYS。None なら全体の設定は無し)。
+        - ストリームに retention_hours があれば、そのストリームはそちらに従う(0 なら削除しない)。
+        - 取り込み中(queued / running)のファイルは対象外にする(途中の窓を消して、取り込みと食い違わないように)。
+        - 窓が無くなったファイルの取り込み元は、行を残して状態を expired にする。行ごと消すと、監視フォルダが
+          同じファイルを新しいファイルとして取り込み直してしまうため。
+        """
+        busy = "SELECT id FROM sources WHERE kind != 'stream' AND status IN ('queued','running')"
+        own = "SELECT source_id FROM streams WHERE retention_hours IS NOT NULL AND source_id IS NOT NULL"
+        conds: list[tuple[str, tuple]] = []
+        if cutoff is not None:
+            conds.append((f"abs_ts < ? AND source_id NOT IN ({own}) AND source_id NOT IN ({busy})", (cutoff,)))
+        with self._lock:
+            for r in self._db.execute(
+                "SELECT source_id, retention_hours FROM streams WHERE retention_hours > 0 AND source_id IS NOT NULL"
+            ).fetchall():
+                conds.append(("source_id = ? AND abs_ts < ?", (r["source_id"], now - r["retention_hours"] * 3600)))
+        deleted: list[int] = []
+        touched: set[int] = set()
+        for where, params in conds:
+            while True:
+                with self._lock:
+                    rows = self._db.execute(
+                        f"SELECT id, source_id FROM windows WHERE {where} LIMIT ?", (*params, batch)
+                    ).fetchall()
+                    if not rows:
+                        break
+                    ids = [r["id"] for r in rows]
+                    self._db.executemany("DELETE FROM windows WHERE id=?", [(i,) for i in ids])
+                    self._db.commit()
+                    self.vectors.remove(ids)
+                    self._drop_from_cache(ids)
+                deleted += ids
+                touched |= {r["source_id"] for r in rows}
+        expired: list[dict] = []
+        with self._lock:
+            for sid in sorted(touched):
+                src = self.get_source(sid)
+                if src is None or src["kind"] == "stream":
+                    continue
+                left = self._db.execute("SELECT COUNT(*) AS n FROM windows WHERE source_id=?", (sid,)).fetchone()["n"]
+                if left == 0:
+                    self._db.execute("UPDATE sources SET status='expired' WHERE id=?", (sid,))
+                    expired.append(src)
+            self._db.commit()
+        return {"window_ids": deleted, "expired_sources": expired}
 
     def _meta(self) -> dict[str, np.ndarray]:
         """絞り込みに使うメタデータ(ベクトルは含まない)。追加分は、次の検索のときにまとめて反映します。"""

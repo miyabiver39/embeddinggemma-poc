@@ -23,6 +23,7 @@ from .embedders import Embedder, build_embedder
 from .ingest_files import FileIntake, PathNotAllowed
 from .media import MediaError
 from .pipeline import Ingestor
+from .retention import RetentionWorker
 from .schemas import Health
 from .security import SecurityMiddleware, startup_warnings
 from .service import Context, InvalidInput, NotFound
@@ -201,12 +202,14 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     intake: FileIntake | None = None
     watcher: FolderWatcher | None = None
     streams: StreamManager | None = None
+    retention: RetentionWorker | None = None
     if s.role in ("all", "app"):
         store = Store(s.data_dir / "mediasearch.db")
         ingestor = Ingestor(s, store, emb)
         intake = FileIntake(store, ingestor, s.ingest_roots)
         watcher = FolderWatcher(s, store, intake)
         streams = StreamManager(s, store, emb)
+        retention = RetentionWorker(s, store)
         _warn_if_incompatible(store, emb)
 
     mcp_run = None  # MCP サーバーの起動・停止(ROLE=all / app のとき、下で設定する)
@@ -222,11 +225,15 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
             watcher.start()
         if streams:
             streams.start()  # 登録済みのストリームの受信を再開する
+        if retention:
+            retention.start()
         log.info("起動が完了しました。 http://localhost:%d/", s.port)
         try:
             yield
         finally:
             await stack.aclose()
+            if retention:
+                retention.stop()
             if streams:
                 streams.stop()
             if watcher:
@@ -254,7 +261,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     if s.role in ("all", "compute"):
         app.include_router(build_compute_router(emb))
     if store and ingestor and intake and watcher:
-        ctx = Context(s, store, emb, ingestor, intake, watcher, streams)
+        ctx = Context(s, store, emb, ingestor, intake, watcher, streams, retention)
         app.state.ctx = ctx  # テストや拡張から、同じ部品を使えるようにする
         app.include_router(build_api_router(ctx))
         # AI エージェント向けの MCP サーバー(/mcp)。REST と同じ処理・同じ認証で動く

@@ -14,7 +14,7 @@ WindowKind = Literal["frames", "tav", "audio", "image"]
 SearchKind = Literal["auto", "all", "frames", "tav", "audio", "image"]
 SourceKind = Literal["video", "audio", "image", "frames", "stream"]
 IngestKind = Literal["auto", "video", "audio", "image"]
-Status = Literal["queued", "running", "done", "failed"]
+Status = Literal["queued", "running", "done", "failed", "expired"]
 
 
 class _Open(BaseModel):
@@ -92,6 +92,9 @@ class InfoResponse(_Open):
     presets: dict[str, dict[str, Any]] = Field(description="取り込みのプリセット")
     index: IndexStatus
     watch: dict[str, Any] = Field(description="監視フォルダの状態")
+    retention: dict[str, Any] | None = Field(
+        None, description="保存期間による削除の状態(days: 日数、total_deleted_windows: 削除した窓の数など)"
+    )
     streams: dict[str, Any] | None = Field(
         None, description="RTSP のストリーム(registered: 登録数、running: 受信中、max: 同時に受信できる数)"
     )
@@ -319,6 +322,9 @@ class Stream(_Open):
     params: dict[str, Any] = Field(description="取り込みの設定(窓の長さなど)")
     source_id: int | None = Field(None, description="窓を登録する取り込み元(kind=stream)")
     enabled: bool = Field(description="受信する設定か(サーバーの再起動後も再開する)")
+    retention_hours: float | None = Field(
+        None, description="窓を残す時間(null は RETENTION_DAYS に従う、0 は削除しない)"
+    )
     created_at: float
     state: StreamState
 

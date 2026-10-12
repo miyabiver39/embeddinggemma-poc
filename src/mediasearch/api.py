@@ -113,6 +113,9 @@ class StreamCreateRequest(_WindowOptions):
     group_id: str | None = Field(None, description="任意のグループ ID(検索の絞り込みに使う)")
     location: str | None = Field(None, description="任意の場所の名前")
     enabled: bool = Field(True, description="登録してすぐに受信を始める")
+    retention_hours: float | None = Field(
+        None, ge=0, description="このストリームの窓を残す時間。省略時は RETENTION_DAYS に従い、0 なら削除しない"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={"examples": [{"url": "rtsp://user:pass@192.168.1.10:554/stream1", "group_id": "entrance"}]}
@@ -606,6 +609,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             location=body.location or None,
             params=params,
             enabled=body.enabled,
+            retention_hours=body.retention_hours,
         )
 
     @router.get("/streams", tags=["ストリーム"], summary="ストリームの一覧と受信の状態", response_model=StreamList,
@@ -760,7 +764,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         if (
             src is None
             or src["kind"] not in MEDIA_KINDS
-            or src["status"] == "failed"
+            or src["status"] in ("failed", "expired")
             or not media_stored(src)  # 保存しない設定で取り込んだものは返さない(情報だけを返す)
             or not src["path"]
             or not is_within(src["path"], s.ingest_roots)  # 以前の版で登録された、許可外のパスも返さない

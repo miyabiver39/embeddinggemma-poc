@@ -85,6 +85,7 @@ class Settings:
     watch_group_from_dir: bool  # ファイルが入っているフォルダ名をグループ ID にする
     watch_preset: str  # 取り込みのプリセット(空なら WINDOW_SEC などの既定値)
     max_streams: int  # 同時に受信できる RTSP ストリームの数
+    retention_days: float  # この日数より古い窓を削除する(録画の時刻が基準。0 なら削除しない)
 
     # --- サーバ ---
     host: str
@@ -160,6 +161,7 @@ class Settings:
             watch_group_from_dir=_env_bool("WATCH_GROUP_FROM_DIR", True),
             watch_preset=watch_preset,
             max_streams=_env_int("MAX_STREAMS", 8),
+            retention_days=max(_env_float("RETENTION_DAYS", 0.0), 0.0),
             host=_env("HOST", "0.0.0.0"),
             port=_env_int("PORT", 8000),
             api_token=api_token,

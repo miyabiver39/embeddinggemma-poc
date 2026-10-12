@@ -422,6 +422,7 @@ class StreamManager:
         location: str | None,
         params: IngestParams,
         enabled: bool = True,
+        retention_hours: float | None = None,
     ) -> dict:
         url = validate_url(url)
         active = sum(1 for s in self._store.list_streams() if s["enabled"])
@@ -441,7 +442,7 @@ class StreamManager:
         )
         stream_id = self._store.add_stream(
             name=name, url=url, group_id=group_id, location=location, params=params.to_dict(), source_id=source_id,
-            enabled=enabled,
+            enabled=enabled, retention_hours=retention_hours,
         )  # fmt: skip
         stream = self._store.get_stream(stream_id)
         if enabled:
