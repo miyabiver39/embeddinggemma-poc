@@ -84,3 +84,43 @@ def test_after_window_id_returns_only_new_windows(client, tmp_path):
     assert len(res["results"]) == 2 and res["last_window_id"] == max(h["window_id"] for h in res["results"])
     again = client.post("/api/search/text", json={**body, "after_window_id": res["last_window_id"]}).json()
     assert again["results"] == []
+
+
+@needs_ffmpeg
+def test_many_connections_share_matching_and_keep_their_filters(live_server, tmp_path):
+    client = live_server
+    va, vb = tmp_path / "20260101_090000.mp4", tmp_path / "20260101_100000.mp4"
+    make_video(va, "red", seconds=4)
+    make_video(vb, "blue", seconds=4)
+    urls = {
+        "all": "/api/search/live?query=x&min_score=-1&duration_sec=6",
+        "group_a": "/api/search/live?query=x&min_score=-1&group_id=a&duration_sec=6",
+        "none": "/api/search/live?query=x&min_score=1.5&duration_sec=6",  # スコアが届かない
+    }
+    events = {k: [] for k in urls}
+    readies = {k: threading.Event() for k in urls}
+    threads = [
+        threading.Thread(target=_read_events, args=(client, url, readies[k], events[k]), daemon=True)
+        for k, url in urls.items()
+    ]
+    for th in threads:
+        th.start()
+    assert all(r.wait(10) for r in readies.values())
+    ja = client.post("/api/ingest/path", json={"path": str(va), "group_id": "a"}).json()
+    jb = client.post("/api/ingest/path", json={"path": str(vb), "group_id": "b"}).json()
+    assert wait_done(client, ja["job_id"])["status"] == "done" and wait_done(client, jb["job_id"])["status"] == "done"
+    for th in threads:
+        th.join(15)
+    hits = {k: [d for n, d in ev if n == "hit"] for k, ev in events.items()}
+    assert len(hits["all"]) == 4 and {h["group_id"] for h in hits["all"]} == {"a", "b"}
+    assert len(hits["group_a"]) == 2 and {h["group_id"] for h in hits["group_a"]} == {"a"}
+    assert hits["none"] == []
+    assert hits["all"][0]["source_name"] and hits["all"][0]["thumb_url"]  # 表示に必要な情報も付いている
+
+    # 再接続: 最後に受け取った ID を after_window_id に渡すと、取りこぼした窓から通知される
+    first_id = hits["all"][0]["window_id"]
+    again: list = []
+    _read_events(client, f"/api/search/live?query=x&min_score=-1&after_window_id={first_id}&duration_sec=1",
+                 threading.Event(), again)  # fmt: skip
+    caught = [d["window_id"] for n, d in again if n == "hit"]
+    assert caught == sorted(h["window_id"] for h in hits["all"] if h["window_id"] > first_id)

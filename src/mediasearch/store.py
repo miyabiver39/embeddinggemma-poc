@@ -687,6 +687,17 @@ class Store:
             )
         return results
 
+    def windows_between(self, after_id: int, upto_id: int, limit: int = 10_000) -> list[dict]:
+        """ID が after_id より大きく upto_id 以下の窓(リアルタイム検索で、新しく増えた窓を照合するため)。"""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT w.id AS window_id, w.source_id, w.start_ms, w.end_ms, w.kind, w.group_id, w.abs_ts, s.location"
+                " FROM windows w JOIN sources s ON s.id = w.source_id"
+                " WHERE w.id > ? AND w.id <= ? ORDER BY w.id LIMIT ?",
+                (after_id, upto_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def flush(self) -> None:
         """ベクトルをすぐにファイルへ書き出します(通常は一定の間隔で自動的に書き出す)。"""
         self.vectors.save()

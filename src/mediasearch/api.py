@@ -17,6 +17,7 @@ import time
 import uuid
 from pathlib import Path
 
+import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +25,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import media
 from .ingest_files import MEDIA_KINDS, is_within, media_kind_of
+from .live import LiveHub, Subscriber
 from .media import MediaError
 from .pipeline import IngestParams
 from .schemas import (
@@ -176,6 +178,7 @@ def build_api_router(ctx: Context) -> APIRouter:
     router = APIRouter(prefix="/api")
     s = ctx.settings
     svc = Service(ctx)
+    hub = LiveHub(svc)  # リアルタイム検索の照合を、接続をまたいでまとめる
 
     # ------------------------------------------------------------------ 共通処理
     def _params(
@@ -536,35 +539,47 @@ def build_api_router(ctx: Context) -> APIRouter:
         WebUI と同じく Cookie で認証します)。クエリのベクトル化は接続時の 1 回だけで、以降は新しい窓だけを照合します。
         """
         qvec = await run_in_threadpool(svc.text_vector, query)
-        filters = {"min_score": min_score, "group_id": group_id, "location": location, "kind": kind, "merge": False}
-        seen = ctx.store.last_window_id if after_window_id is None else after_window_id
+        sub = Subscriber(
+            qvec=np.asarray(qvec, dtype=np.float32),
+            kinds=svc.resolve_kinds(kind),
+            group_id=group_id or None,
+            location=location or None,
+            min_score=min_score,
+        )
+        # 照合は全接続でまとめて行う(LiveHub)。登録した時点までに照合済みの窓より後を、ここに配ってもらう
+        seen = hub.subscribe(sub)
+        backlog: list[dict] = []
+        if after_window_id is not None and after_window_id < seen:
+            # 再接続のときは、取りこぼした分(after_window_id より後で、登録の時点まで)を、この接続だけで探す
+            filters = {"min_score": min_score, "group_id": group_id, "location": location, "kind": kind,
+                       "merge": False, "after_window_id": after_window_id, "top_k": 1000}  # fmt: skip
+            res = await run_in_threadpool(svc.search, qvec, filters)
+            backlog = sorted((h for h in res["results"] if h["window_id"] <= seen), key=lambda h: h["window_id"])
 
         def event(name: str, data: dict) -> str:
             return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
         async def stream():
-            nonlocal seen
-            yield event("ready", {"last_window_id": seen})
-            started = last_sent = time.monotonic()
-            while time.monotonic() - started < duration_sec:
-                if await request.is_disconnected():
-                    return
-                latest = ctx.store.last_window_id
-                if latest > seen:
-                    res = await run_in_threadpool(
-                        svc.search, qvec, {**filters, "after_window_id": seen, "top_k": 1000}
-                    )
-                    # 検索中に増えた窓は、次の回に通知する(重複して送らない)
-                    hits = sorted((h for h in res["results"] if h["window_id"] <= latest), key=lambda h: h["window_id"])
-                    for h in hits:
-                        yield event("hit", h)
-                        last_sent = time.monotonic()
-                    seen = latest
-                elif time.monotonic() - last_sent > 15:
-                    yield ": keep-alive\n\n"
-                    last_sent = time.monotonic()
-                await asyncio.sleep(0.5)
-            yield event("end", {"last_window_id": seen})
+            last = seen if after_window_id is None else after_window_id
+            try:
+                yield event("ready", {"last_window_id": last})
+                for h in backlog:
+                    yield event("hit", h)
+                    last = h["window_id"]
+                deadline = time.monotonic() + duration_sec
+                while time.monotonic() < deadline:
+                    if await request.is_disconnected():
+                        return
+                    try:
+                        h = await asyncio.wait_for(sub.queue.get(), timeout=min(15.0, deadline - time.monotonic()))
+                    except TimeoutError:
+                        yield ": keep-alive\n\n"  # 接続を保つためのコメント行
+                        continue
+                    yield event("hit", h)
+                    last = h["window_id"]
+                yield event("end", {"last_window_id": max(last, hub.seen), "dropped": sub.dropped})
+            finally:
+                hub.unsubscribe(sub)
 
         headers = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}  # 中継のサーバーにためさせない
         return StreamingResponse(stream(), media_type="text/event-stream", headers=headers)

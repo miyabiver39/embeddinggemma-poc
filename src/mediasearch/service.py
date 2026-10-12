@@ -161,15 +161,7 @@ class Service:
             min_score=f.get("min_score") or 0.0,
             after_id=f.get("after_window_id"),
         )
-        sources: dict[int, dict] = {}
-        for h in hits:
-            src = sources.get(h["source_id"]) or ctx.store.get_source(h["source_id"]) or {}
-            sources[h["source_id"]] = src
-            h["source_name"] = src.get("name")
-            h["abs_time"] = fmt_ts(h["abs_ts"])
-            stored = media_stored(src)
-            h["media_url"] = f"/api/media/{h['source_id']}" if stored and src.get("path") else None
-            h["thumb_url"] = f"/api/thumb/{h['window_id']}" if stored and src.get("kind") != "audio" else None
+        self.decorate_hits(hits)
         out = {
             "results": hits,
             "took_ms": int((time.time() - started) * 1000),  # DB の検索だけにかかった時間
@@ -181,6 +173,19 @@ class Service:
         if f.get("merge", True):
             out["intervals"] = merge_intervals(hits)
         return out
+
+    def decorate_hits(self, hits: list[dict]) -> list[dict]:
+        """検索結果に、表示や再生に必要な情報(取り込み元の名前・日時・URL)を付けます。"""
+        sources: dict[int, dict] = {}
+        for h in hits:
+            src = sources.get(h["source_id"]) or self.ctx.store.get_source(h["source_id"]) or {}
+            sources[h["source_id"]] = src
+            h["source_name"] = src.get("name")
+            h["abs_time"] = fmt_ts(h["abs_ts"])
+            stored = media_stored(src)
+            h["media_url"] = f"/api/media/{h['source_id']}" if stored and src.get("path") else None
+            h["thumb_url"] = f"/api/thumb/{h['window_id']}" if stored and src.get("kind") != "audio" else None
+        return hits
 
     def text_vector(self, query: str) -> np.ndarray:
         if not query.strip():
