@@ -106,13 +106,16 @@ docker run -d -p 8000:8000 -v ./data:/data --gpus all ghcr.io/miyabiver39/embedd
 # AMD
 docker run -d -p 8000:8000 -v ./data:/data --device=/dev/kfd --device=/dev/dri --group-add video \
   ghcr.io/miyabiver39/embeddinggemma-poc:rocm
+# AMD(Windows の Docker Desktop / WSL2。/dev/kfd の代わりに /dev/dxg を使う)
+docker run -d -p 8000:8000 -v ./data:/data --device=/dev/dxg -v /usr/lib/wsl:/usr/lib/wsl:ro \
+  ghcr.io/miyabiver39/embeddinggemma-poc:rocm
 # Intel
 docker run -d -p 8000:8000 -v ./data:/data --device=/dev/dri ghcr.io/miyabiver39/embeddinggemma-poc:intel
 ```
 
 GPU が使われているかは WebUI の「状態」タブ、または `curl localhost:8000/api/info` の `embedder.accelerator` で確認できます
 (`nvidia-cuda` / `amd-rocm` / `intel-xpu` / `cpu`)。
-**GPU 版は作者の環境(GPU なし)で動作確認できていません。** 実機での確認手順と既知の注意点は [docs/gpu.md](docs/gpu.md) を見てください。
+**GPU 版のうち実機で確認したのは、AMD の RX 9060 XT(Windows の WSL2)だけです**(NVIDIA / Intel は未確認)。実機での確認手順・結果と既知の注意点は [docs/gpu.md](docs/gpu.md) を見てください。
 Intel の古い内蔵 GPU(Iris Xe など)は PyTorch の XPU 対応外の可能性が高く、その場合は CPU で動きます。
 
 ## 3つの動かし方(ROLE)

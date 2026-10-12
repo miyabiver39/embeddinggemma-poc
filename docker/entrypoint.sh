@@ -13,6 +13,22 @@ export ROLE
 # DEVICE の既定は auto。GPU を渡していなければ CPU で動きます
 echo "[mediasearch] VARIANT=${VARIANT:-?} ROLE=${ROLE} DEVICE=${DEVICE:-auto} DATA_DIR=${DATA_DIR}"
 
+# AMD の GPU を Windows の WSL2(Docker Desktop)から使う場合: /dev/kfd が無く、/dev/dxg 経由になる(docs/gpu.md)。
+#   - HSA_ENABLE_DXG_DETECTION=1: ROCm 7.2 の実行環境に、librocdxg(イメージに同梱)で GPU を探させる
+#   - ROCPROFILER_REGISTER_ENABLED=0: PyTorch に同梱の rocprofiler-sdk が、WSL2 に無い KFD の情報(/sys/class/kfd)を読もうとして
+#     プロセスごと異常終了するのを防ぐ(実測)。プロファイラを使わないため、推論には影響しない
+#   - libdxcore.so は Windows 側のドライバの一部のため同梱できない。-v /usr/lib/wsl:/usr/lib/wsl:ro で渡してもらう
+if [ "${VARIANT:-}" = "rocm" ] && [ -e /dev/dxg ] && [ ! -e /dev/kfd ]; then
+  export HSA_ENABLE_DXG_DETECTION="${HSA_ENABLE_DXG_DETECTION:-1}"
+  export ROCPROFILER_REGISTER_ENABLED="${ROCPROFILER_REGISTER_ENABLED:-0}"
+  export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  if [ -e /usr/lib/wsl/lib/libdxcore.so ]; then
+    echo "[mediasearch] WSL2 の GPU(/dev/dxg)を使います"
+  else
+    echo "[mediasearch] 警告: /dev/dxg はありますが /usr/lib/wsl/lib/libdxcore.so がありません。-v /usr/lib/wsl:/usr/lib/wsl:ro を付けて起動してください(docs/gpu.md)"
+  fi
+fi
+
 set -- uvicorn --factory mediasearch.main:create_app \
   --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --log-level "$(echo "${LOG_LEVEL:-info}" | tr 'A-Z' 'a-z')"
 
