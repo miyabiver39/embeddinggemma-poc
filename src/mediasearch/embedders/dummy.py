@@ -16,6 +16,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from .base import AudioPart, Embedder, EmbedderInfo, ImagePart, Part, TextPart, finalize
+from .gate import PriorityGate
 
 _FULL_DIMS = 768
 _COLORS = {
@@ -55,6 +56,7 @@ class DummyEmbedder(Embedder):
     def __init__(self, dims: int = 768, batch_size: int = 1) -> None:
         self._dims = dims
         self._batch = batch_size  # テストで、まとめて推論する経路を通すため
+        self._gate = PriorityGate()  # 本物と同じく推論を 1 件ずつにし、使用率(GET /api/metrics)も数える
 
     def info(self) -> EmbedderInfo:
         return EmbedderInfo(
@@ -72,12 +74,17 @@ class DummyEmbedder(Embedder):
         return finalize(np.stack([_text_vec(t) for t in texts]), self._dims)
 
     def embed_images(self, images: Sequence[np.ndarray], high: bool = False) -> np.ndarray:
-        return finalize(np.stack([_image_vec(i) for i in images]), self._dims)
+        with self._gate.acquire(high=high):
+            return finalize(np.stack([_image_vec(i) for i in images]), self._dims)
 
     def embed_audio(self, pcm: np.ndarray, high: bool = False) -> np.ndarray:
         return finalize(_audio_vec(pcm), self._dims)
 
     def embed_parts(self, parts: Sequence[Part], high: bool = False) -> np.ndarray:
+        with self._gate.acquire(high=high):
+            return self._parts(parts)
+
+    def _parts(self, parts: Sequence[Part]) -> np.ndarray:
         total = np.zeros(_FULL_DIMS, dtype=np.float32)
         for part in parts:
             if isinstance(part, ImagePart):

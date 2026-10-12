@@ -16,6 +16,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -27,6 +28,7 @@ from . import media
 from .ingest_files import MEDIA_KINDS, is_within, media_kind_of
 from .live import LiveHub, Subscriber
 from .media import MediaError
+from .metrics import app_metrics
 from .pipeline import IngestParams
 from .schemas import (
     Accepted,
@@ -732,6 +734,21 @@ def build_api_router(ctx: Context) -> APIRouter:
     )
     def list_jobs(limit: int = Query(100, ge=1, le=10_000, description="返す件数(新しい順)")) -> dict:
         return {"jobs": ctx.store.list_jobs(limit)}
+
+    @router.get(
+        "/metrics",
+        tags=["状態"],
+        summary="資源の使用状況と処理の状態(ベンチマーク用)",
+        response_model=dict[str, Any],
+        responses=errors(401),
+    )
+    def metrics() -> dict:
+        """CPU(スレッド・子プロセスごと)・メモリ・ディスク・GPU の使用状況と、推論の使用率・待ち件数などを返します。
+
+        CPU 時間・推論の時間は起動からの積算です。2 回読んだ差を経過時間で割ると、その間の使用率になります
+        (リポジトリの bench/ が 1 秒ごとに読んで集計します)。詳細は bench/README.md を参照してください。
+        """
+        return app_metrics(ctx)
 
     @router.get(
         "/stats",

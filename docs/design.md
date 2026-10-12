@@ -140,6 +140,16 @@
 - URL は `rtsp` / `rtsps` のみ。ffmpeg と ffprobe には `-protocol_whitelist` を付け、ローカルのファイルなどを読ませない。
   URL のパスワードは、API の応答・エラー・ログで伏せる(DB には、再接続のため平文で保存する)。
 
+### 資源の使用状況(`metrics.py`、`GET /api/metrics`)
+
+- ベンチマーク(`bench/`。イメージには含めない)が 1 秒ごとに読み、ボトルネックを判断するための値。追加の依存を使わず、
+  `/proc` と cgroup(v2 と v1)、`nvidia-smi`・amdgpu の sysfs から読む。値は起動からの積算(CPU 時間・推論の時間)と現在の値で、
+  使用率は利用側が差を取って計算する(API 自身は重い計算をしない)。
+- 推論の稼働率は `PriorityGate` が積算する(推論が動いていた時間、検索・取り込みが順番を待った時間と回数)。
+  推論は 1 件ずつなので、稼働率が 100% に近ければ推論が律速と判断できる。
+- スレッドごとの CPU 時間は、Python のスレッド名(`ingestor`・`decode`・`stream-N`・`embed-batch` など)で
+  `/proc/self/task` の値をまとめる。名前の無いスレッド(PyTorch の演算)は `native`。子プロセス(ffmpeg)は別に数える。
+
 ### 推論のまとめ処理(`embedders/batch.py`、`EMBED_BATCH`)
 
 - 推論は全体で 1 件ずつ(`PriorityGate`)。GPU で処理量を上げるため、複数の窓を 1 回のモデル呼び出しにまとめる。

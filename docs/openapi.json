@@ -11,6 +11,49 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/compute/metrics": {
+      "get": {
+        "tags": [
+          "compute"
+        ],
+        "summary": "推論側の資源の使用状況(ベンチマーク用)",
+        "description": "分離構成で、compute 側の CPU・メモリ・GPU と推論の使用率を返します(GET /api/metrics と同じ形式)。",
+        "operationId": "metrics_compute_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Metrics Compute Metrics Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
     "/compute/info": {
       "get": {
         "tags": [
@@ -2253,6 +2296,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/metrics": {
+      "get": {
+        "tags": [
+          "状態"
+        ],
+        "summary": "資源の使用状況と処理の状態(ベンチマーク用)",
+        "description": "CPU(スレッド・子プロセスごと)・メモリ・ディスク・GPU の使用状況と、推論の使用率・待ち件数などを返します。\n\nCPU 時間・推論の時間は起動からの積算です。2 回読んだ差を経過時間で割ると、その間の使用率になります\n(リポジトリの bench/ が 1 秒ごとに読んで集計します)。詳細は bench/README.md を参照してください。",
+        "operationId": "metrics_api_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Metrics Api Metrics Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

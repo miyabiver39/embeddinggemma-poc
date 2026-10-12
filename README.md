@@ -202,7 +202,8 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `GET /api/jobs`, `/api/sources`, `/api/sources/{id}` ほか | ジョブ・取り込み元の確認、削除、再取り込み |
 | `POST /api/streams`、`GET /api/streams` ほか | RTSP のストリームの登録・状態の確認・停止・再開・削除 |
 | `GET /api/search/live` | 取り込み中に追加された窓のうち、文章に合うものを通知する(リアルタイム検索。Server-Sent Events) |
-| `GET /api/stats` | 取り込みの処理時間の集計(ジョブごとの内訳は `GET /api/jobs/{id}` の `timings`。`scripts/benchmark.py` で計測) |
+| `GET /api/metrics` | 資源の使用状況(CPU・メモリ・ディスク・GPU)と推論の稼働率。ベンチマーク(`bench/`)が読む |
+| `GET /api/stats` | 取り込みの処理時間の集計(ジョブごとの内訳は `GET /api/jobs/{id}` の `timings`。`bench/bench.py` で計測) |
 | `GET /api/media/{id}`, `/api/thumb/{id}` | 元動画(Range 対応)とサムネイル |
 | `/compute/*` | ベクトル化 API(ROLE=compute / all) |
 | `/mcp` | MCP サーバー(AI エージェント向け。ROLE=all / app) |

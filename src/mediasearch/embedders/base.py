@@ -104,5 +104,16 @@ class Embedder(ABC):
         with ThreadPoolExecutor(max_workers=min(batch, len(items))) as pool:
             return list(pool.map(lambda parts: self.embed_parts(parts, high=high), items))
 
+    def metrics(self) -> dict:
+        """推論の使用状況(GET /api/metrics の inference)。順番待ちの制御を持つ実装は、その積算値を返します。"""
+        gate = getattr(self, "_gate", None)
+        out: dict = {"backend": self.info().backend, "batch_size": self.info().batch_size}
+        if gate is not None:
+            out["gate"] = gate.snapshot()
+        batcher = getattr(self, "_parts_batcher", None)
+        if batcher is not None:
+            out["batches"] = {"calls": batcher.batches, "items": batcher.items}  # items ÷ calls = 平均のまとめた件数
+        return out
+
     def close(self) -> None:  # noqa: B027 (任意で上書きする)
         """後始末(必要な実装だけ上書きします)。"""

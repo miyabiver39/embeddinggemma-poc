@@ -9,6 +9,7 @@ ROLE=compute のコンテナの本体です。ROLE=all のコンテナにも同�
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request
@@ -48,6 +49,14 @@ def build_compute_router(embedder: Embedder) -> APIRouter:
     def _vectors(array: np.ndarray, dims: int) -> dict:
         array = np.atleast_2d(array)
         return {"vectors": finalize(array, dims).tolist()}
+
+    @router.get("/metrics", summary="推論側の資源の使用状況(ベンチマーク用)", response_model=dict[str, Any],
+                responses=errors(401))  # fmt: skip
+    def metrics() -> dict:
+        """分離構成で、compute 側の CPU・メモリ・GPU と推論の使用率を返します(GET /api/metrics と同じ形式)。"""
+        from .metrics import process_metrics
+
+        return {**process_metrics(), "inference": embedder.metrics()}
 
     @router.get("/info", summary="推論側の情報", response_model=ComputeInfo, responses=errors(401))
     def info() -> dict:
