@@ -72,6 +72,20 @@
 - 推論中の停止で PyTorch が異常終了 → 推論の途中の窓を待って停止。`stop_grace_period: 60s`。
 - 残り: GPU での速度(`EMBED_BATCH` の効果を含む)、実際のネットワークカメラ、カメラ側の時計(RTCP)を使った窓の時刻は未対応・未確認。
 
+## 3.4 2026-10-12 に追加した本番運用向けの機能
+
+| 区分 | 内容 | 主なファイル |
+|---|---|---|
+| 信頼性 | 空き容量の下限(`MIN_FREE_DISK_MB`、507)、`/readyz`、一時的な失敗の再試行(`JOB_RETRIES`)、ジョブの取り消し、ジョブ履歴の削除 | `disk.py`、`pipeline.py`、`retention.py` |
+| API | 一覧のページ送りと絞り込み、`PATCH /api/sources/{id}`、検索の同時実行の上限(`MAX_PENDING_SEARCHES`、503)、読み取り専用のトークン(`API_READ_TOKEN`) | `api.py`、`service.py`、`security.py` |
+| 連携 | 通知ルール(Webhook。HMAC 署名・抑制・再送・再起動後の送り直し)。DB の形式は版 8 | `alerts.py`、`store.py` |
+| 監視 | `GET /metrics`(Prometheus 形式)、`X-Request-ID`、`LOG_FORMAT=json` | `observability.py` |
+| データ | 動作中のバックアップ(`POST /api/admin/backup`、`BACKUP_INTERVAL_HOURS`)と復元の CLI、サムネイルの分割配置と削除漏れの修正 | `backup.py`、`thumbs.py` |
+
+- 全てダミーの推論でテスト済み(`pytest -q` で 118 passed / 1 skipped)。実モデル・実カメラ・実際の Webhook の受け取り側・Prometheus 本体での読み込みは未確認。
+- 残り(未対応): 複数台での冗長化(SQLite と USearch は 1 台が前提)、利用者ごとの権限(トークンは全体で 2 種類だけ)、監査ログ、
+  通知の送り先を社内のアドレスに限定する仕組み(作成できるのは `API_TOKEN` を持つ管理者だけ、としている)。
+
 ## 4. 既知の課題・注意点(コードを読んで気づいたもの)
 
 - (対処済み)音声クエリ(`/api/search/audio`)の `kind=auto` は `audio` の窓を探すように変更した。以前は `frames` を探し、無関係な映像が並んでいた(実測)。文字・画像クエリの `auto` は従来どおり `INCLUDE_AUDIO` で `tav` か `frames`。
@@ -82,7 +96,7 @@
 - `transformers` は PyPI 版に `embedding_gemma2` が無く、Dockerfile でコミット `cb33194ad6152bd9fad6305378d92db385dd7b32` のアーカイブを入れている。PyPI に入ったら通常版へ戻せる(`docker/Dockerfile` の `TRANSFORMERS_COMMIT`)。
 - 全バリアント Ubuntu 24.04 ベース(Intel の `libze-intel-gpu1` / `intel-opencl-icd` が Debian trixie に無かったため)。
 - イメージの容量(圧縮/展開): slim 0.27/1.1GB、cpu 1.46/5.1GB、cuda 4.94/14.4GB、intel 3.82/14.1GB、rocm 7.89GB/未計測。
-- 推論は `PriorityGate` で 1 件ずつ直列。GPU のバッチ処理は未実装(速度改善の余地)。
+- 推論は `PriorityGate` で 1 件ずつ直列。まとめ処理は `EMBED_BATCH`(GPU で既定 4。GPU 実機での効果は未計測)。
 - `pyproject.toml` の pytest marker 説明文は「RUN_MODEL_TESTS=1 のときだけ実行」。`tests/conftest.py` がそれを実装している。
 
 ## 5. 次にやること(優先順)
