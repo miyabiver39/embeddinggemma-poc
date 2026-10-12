@@ -86,3 +86,24 @@ def test_unknown_database_is_refused_with_clear_message(tmp_path):
     db.close()
     with pytest.raises(SchemaError, match="必要な列"):
         Store(path)
+
+
+def test_streams_table_from_version_5_gets_retention_column(tmp_path):
+    path = tmp_path / "v5.db"
+    db = sqlite3.connect(path)
+    db.executescript(
+        OLD_SCHEMA
+        + """
+        CREATE TABLE streams (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, url TEXT NOT NULL,
+          group_id TEXT, location TEXT, params TEXT NOT NULL, source_id INTEGER, enabled INTEGER NOT NULL DEFAULT 1,
+          created_at REAL NOT NULL);
+        INSERT INTO streams(name, url, params, created_at) VALUES('cam', 'rtsp://cam.invalid/x', '{}', 0);
+        """
+    )
+    db.close()
+    s = Store(path)
+    try:
+        stream = s.list_streams()[0]
+        assert stream["name"] == "cam" and stream["retention_hours"] is None
+    finally:
+        s.close()
