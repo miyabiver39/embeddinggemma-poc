@@ -278,6 +278,17 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/metrics   # Prometh
 - 全ての応答に `X-Request-ID` を付けます。要求に `X-Request-ID`(英数字・`-`・`_` の 64 文字まで)を付けるとその値を使うため、
   利用側のログと、サーバーのログ(`LOG_FORMAT=json` の `request_id`)を突き合わせられます。
 
+### 10. バックアップ
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/backup
+# {"name": "20261012-030000", "path": "/data/backups/20261012-030000", "windows": 120345, "bytes": 412000000, ...}
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/backups
+```
+
+動作中のまま、DB とベクトルの整合した複製を作ります。作成中(数秒程度)は取り込みの書き込みが待たされます。
+作成中にもう 1 つ要求すると 409、保存先の空き容量が足りなければ 507 です。復元の手順は `docs/operations.md` を参照してください。
+
 ## クライアントの自動生成
 
 `docs/openapi.json` から、各言語のクライアントを生成できます。

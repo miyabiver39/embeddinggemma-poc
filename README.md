@@ -177,6 +177,9 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `MIN_FREE_DISK_MB` | `1024` | `DATA_DIR` の空き容量がこれを下回ったら、新しい取り込みを止める(507。検索と削除は続けられる)。`0` で確認しない |
 | `JOB_RETRIES` | `3` | 推論側に接続できない・空き容量の不足など、一時的な失敗のときに取り込みを再試行する回数(30 秒から間隔を倍に) |
 | `JOB_HISTORY_DAYS` | `30` | 終わったジョブの履歴を残す日数(取り込み元ごとの最新のジョブは残す)。`0` で削除しない |
+| `BACKUP_DIR` | `DATA_DIR/backups` | バックアップの保存先。ディスクの故障に備え、別のディスク・NAS をマウントして指定するのが望ましい(`docs/operations.md`) |
+| `BACKUP_INTERVAL_HOURS` | `0` | この間隔で、動作中のまま自動でバックアップを取る(例 `24`)。`0` なら自動では取らない(`POST /api/admin/backup` で取れる) |
+| `BACKUP_KEEP` | `7` | 残すバックアップの数(古いものから削除)。`0` で削除しない |
 | `MAX_STREAMS` | `8` | 同時に受信できる RTSP のストリームの数 |
 | `TZ` | `Asia/Tokyo` | 時刻(ファイル名の日時、タイムゾーンのない `start_ts`)の解釈 |
 | `PUBLIC_URL` | (空) | 外から見たこのサーバーの URL(例 `https://search.example.com`)。通知ルールの Webhook の本文で、サムネイル・動画の URL を絶対 URL にする |

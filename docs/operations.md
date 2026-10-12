@@ -6,7 +6,7 @@
 
 - 停止には最大で約 1 分かかることがあります(推論の途中の窓とベクトル DB の書き出しを待つため。CPU では 1 窓に 10 秒以上かかる)。`docker run` では `--stop-timeout 60` を付けてください(`docker-compose.yml` は `stop_grace_period: 60s` を設定済み)。途中で止めたファイルの取り込みは、次の起動で最初からやり直します。
 - 保存先は `-v ./data:/data` で永続化します。中身: `mediasearch.db`(SQLite。設定・取り込み元・窓・ジョブ)、`vectors.usearch`(ベクトル DB)、`thumbs/`、`media/`(アップロードした動画・音声)。
-- バックアップは `data/` を丸ごとコピー(停止中が安全。ベクトル DB は停止時に必ず書き出してジャーナルを空にするため、`mediasearch.db*` と `vectors.usearch`(と、あれば `vectors.journal`)は停止してからまとめてコピーしてください)。
+- バックアップは、動かしたまま取れます(下の「バックアップと復元」)。`data/` を丸ごとコピーする場合は、停止してから行ってください。
 - 停止・再起動しても未完了の取り込みジョブは再開されます。
 
 ## 取り込みのコツ
@@ -50,6 +50,42 @@
   `rate(mediasearch_stream_dropped_windows_total[10m]) > 0`(推論が追いつかない)、
   `rate(mediasearch_search_rejected_total[5m]) > 0`(検索が混み合っている)、`mediasearch_alert_events{status="failed"} > 0`(通知が届かない)。
 - ジョブの履歴は `JOB_HISTORY_DAYS`(既定 30 日)を過ぎたものを削除します(取り込み元ごとの最新のジョブは残る)。
+
+## バックアップと復元
+
+動作中に `mediasearch.db` と `vectors.usearch` をそのままコピーすると、書き込みの途中を写して壊れる・窓とベクトルが食い違う
+ことがあります。次の方法で取ってください(取り込みの書き込みを数秒止め、DB とベクトルがそろった時点の複製を作ります)。
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/backup   # 今すぐ取る
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/backups          # 一覧
+```
+
+- `BACKUP_INTERVAL_HOURS=24` で、24 時間ごとに自動で取ります(再起動しても、最後に取った時刻から数える)。`BACKUP_KEEP`(既定 7)個を超えた古いものは削除します。
+- 保存先は `BACKUP_DIR`(既定 `DATA_DIR/backups`)の `<日時>/` です。同じディスクではディスクの故障に備えられないため、
+  別のディスク・NAS をマウントして指定するか、このフォルダを定期的に別の場所へ複製してください。
+  中身は `mediasearch.db`・`vectors.usearch`・`manifest.json`(作成時刻・窓の数・ファイルの SHA-256)です。
+- サムネイル(`thumbs/`)とアップロードした動画(`media/`)は含めません。書いた後に変更しないファイルなので、動作中のまま
+  `rsync -a data/thumbs data/media <複製先>` などで複製できます(サムネイルは、元の動画が残っていれば作り直せます)。
+- 監視: `GET /metrics` の `mediasearch_backup_last_timestamp_seconds`(最後に取った時刻)が古くなっていないかを確かめます。
+  失敗の内容は `GET /api/info` の `backup.last_error` に出ます。保存先の空き容量が `MIN_FREE_DISK_MB` を下回る場合は 507 で取りません。
+
+復元(サーバーを止めてから行います):
+
+```bash
+docker stop mediasearch
+IMAGE=ghcr.io/miyabiver39/embeddinggemma-poc:cpu   # 動かしているイメージ
+# バックアップが壊れていないかを確かめる(SHA-256 の照合)
+docker run --rm -v ./data:/data --entrypoint python $IMAGE -m mediasearch.backup verify /data/backups/20261012-030000
+# DATA_DIR に戻す。今のファイルは /data/backups/pre-restore-<日時>/ に移す
+docker run --rm -v ./data:/data --entrypoint python $IMAGE -m mediasearch.backup restore /data/backups/20261012-030000
+docker start mediasearch   # 起動時に、ファイルの所有者を一般ユーザーに整える
+```
+
+- 戻すと、バックアップの後に作った窓・取り込み元・通知ルールは無くなります。その間に作ったサムネイルは削除します
+  (窓の ID はバックアップの時点の続きから振り直すため、残すと別の場面のサムネイルが表示される)。
+  監視フォルダのファイルは、次の走査で取り込み直されます。ストリームは、戻した時点の登録で受信を再開します。
+- 起動時に DB とベクトルを突き合わせるため、`vectors.usearch` が無いバックアップ(窓が 0 件のとき)でも起動できます。
 
 ## 保存期間
 

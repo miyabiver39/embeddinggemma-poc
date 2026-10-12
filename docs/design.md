@@ -207,6 +207,19 @@
 - 通知は先に `alert_events` に `pending` で保存してから、送信のスレッドが送る。失敗したら間隔を空けて再送し、上限を超えたら `failed`。
   再起動のときは `pending` のものを送り直す。古い通知の履歴は、`JOB_HISTORY_DAYS` を過ぎたら保存期間の処理で削除する。
 
+### バックアップ(`backup.py`、`Store.backup_to`)
+
+- 窓の追加・削除は `Store` の排他の中で SQLite とベクトル DB の両方を変えるため、排他を持ったまま SQLite のバックアップの機能
+  (WAL の内容も含めて写す)とベクトルの書き出し(`VectorIndex.save_copy`。元のファイルとジャーナルには触れない)を行えば、
+  互いに整合した複製になる。作りかけは `.<名前>.partial` に書き、完成してから名前を変える(途中で止まっても完成品と見分けられる)。
+- 復元は停止中に CLI(`python -m mediasearch.backup restore`)で行う。今のファイル(WAL・ジャーナルを含む)は退避し、
+  バックアップの後に作られた窓(ID が `sqlite_sequence` より大きい)のサムネイルを消す(ID を振り直すため)。
+
+### サムネイルの置き場所(`thumbs.py`)
+
+- `thumbs/<窓の ID ÷ 10000>/w<ID>.jpg`。以前の版の `thumbs/w<ID>.jpg` も読む・消す。窓を削除する `Store` のメソッドが、
+  同時にサムネイルも消す(取り込み直し・削除・保存期間のどれでも残らない)。
+
 ### 監視(`observability.py`、`GET /metrics`)
 
 - `RequestContextMiddleware` をいちばん外側に置き、全ての要求にリクエスト ID を付け、経路のひな形・メソッド・状態コードごとに
