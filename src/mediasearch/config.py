@@ -60,6 +60,13 @@ def _env_bool(name: str, default: bool) -> bool:
     return _env(name, "1" if default else "0").lower() in ("1", "true", "yes", "on")
 
 
+def _log_format(value: str) -> str:
+    value = value.lower()
+    if value not in ("text", "json"):
+        raise ValueError(f"LOG_FORMAT は text か json を指定してください(指定: {value})")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     """アプリ全体の設定。"""
@@ -115,6 +122,8 @@ class Settings:
     # --- サーバ ---
     host: str
     port: int
+    log_level: str  # ログの出力の下限(DEBUG / INFO / WARNING / ERROR)
+    log_format: str  # text(1 行の文字列)か json(1 行 1 件の JSON。ログの収集基盤向け)
 
     # --- セキュリティ(docs/security.md) ---
     api_token: str  # 空なら認証なし。設定すると /api と /compute にトークンが必要
@@ -196,6 +205,8 @@ class Settings:
             public_url=_env("PUBLIC_URL", "").rstrip("/"),
             host=_env("HOST", "0.0.0.0"),
             port=_env_int("PORT", 8000),
+            log_level=_env("LOG_LEVEL", "INFO").upper(),
+            log_format=_log_format(_env("LOG_FORMAT", "text")),
             api_token=api_token,
             embedding_token=_env("EMBEDDING_TOKEN", api_token),
             ingest_roots=ingest_roots,

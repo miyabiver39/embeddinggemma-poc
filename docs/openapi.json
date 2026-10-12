@@ -3533,6 +3533,37 @@
           {}
         ]
       }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "状態"
+        ],
+        "summary": "監視の値(Prometheus 形式)",
+        "description": "Prometheus などの監視基盤から読み取る値です(CPU・メモリ・GPU・推論の稼働・窓の数・ストリームの状態・\n空き容量・検索の混雑・通知・HTTP の要求の数と処理時間)。\n\n認証は `/api` と同じです(`API_TOKEN` を設定していればトークンが必要。`API_READ_TOKEN` でも読めます)。\nROLE=compute では、資源と推論の値だけを返します。",
+        "operationId": "prometheus_metrics_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Prometheus のテキスト形式",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
     }
   },
   "components": {
@@ -7077,12 +7108,12 @@
       "description": "映像・音声・画像の登録(アップロード、コンテナ内のパス、フォルダ一括、監視フォルダ)"
     },
     {
-      "name": "通知ルール",
-      "description": "保存した検索の条件に合う窓が新しく作られたら、Webhook で知らせる"
-    },
-    {
       "name": "検索",
       "description": "文章・画像・音声による検索。グループ ID・場所・期間・種類・最小スコアで絞り込めます"
+    },
+    {
+      "name": "通知ルール",
+      "description": "保存した検索の条件に合う窓が新しく作られたら、Webhook で知らせる"
     },
     {
       "name": "ストリーム",

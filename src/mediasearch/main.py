@@ -7,14 +7,13 @@ ROLE 環境変数で、app / compute / all のどれとして動くかが決ま�
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
 from . import __version__, disk
 from .alerts import AlertEngine, AlertError
@@ -24,6 +23,7 @@ from .config import Settings
 from .embedders import Embedder, build_embedder
 from .ingest_files import FileIntake, PathNotAllowed
 from .media import MediaError
+from .observability import RequestContextMiddleware, RequestStats, prometheus, setup_logging
 from .pipeline import Ingestor
 from .retention import RetentionWorker
 from .schemas import Health
@@ -35,13 +35,6 @@ from .watcher import FolderWatcher
 
 log = logging.getLogger("mediasearch")
 WEB_DIR = Path(__file__).parent / "web"
-
-
-def _setup_logging() -> None:
-    logging.basicConfig(
-        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
 
 
 API_DESCRIPTION = """
@@ -67,11 +60,11 @@ OPENAPI_TAGS = [
         "name": "取り込み",
         "description": "映像・音声・画像の登録(アップロード、コンテナ内のパス、フォルダ一括、監視フォルダ)",
     },
-    {"name": "通知ルール", "description": "保存した検索の条件に合う窓が新しく作られたら、Webhook で知らせる"},
     {
         "name": "検索",
         "description": "文章・画像・音声による検索。グループ ID・場所・期間・種類・最小スコアで絞り込めます",
     },
+    {"name": "通知ルール", "description": "保存した検索の条件に合う窓が新しく作られたら、Webhook で知らせる"},
     {"name": "ストリーム", "description": "RTSP のストリームを受信しながら取り込む(登録・状態の確認・停止・再開)"},
     {"name": "取り込み元・ジョブ", "description": "登録したファイルと取り込みジョブの確認・削除・取り込み直し"},
     {"name": "配信", "description": "元ファイルとサムネイルの取得"},
@@ -193,8 +186,8 @@ def _warn_if_incompatible(store: Store, emb: Embedder) -> None:
 
 def create_app(settings: Settings | None = None, embedder: Embedder | None = None) -> FastAPI:
     """アプリを作ります。テストでは settings と embedder を差し込めます。"""
-    _setup_logging()
     s = settings or Settings.from_env()
+    setup_logging(s.log_level, s.log_format)
     log.info("mediasearch %s を起動します(ROLE=%s, EMBEDDING_BACKEND=%s)", __version__, s.role, s.embedding_backend)
 
     # モデルの読み込みなど重い初期化は、アプリを作るこの時点で1回だけ行う(ルーターもここで登録する)
@@ -267,6 +260,9 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
 
     app.state.embedder = emb
     app.add_middleware(SecurityMiddleware, settings=s)
+    # いちばん外側(後から追加したものが外側になる): 認証で断った要求にも ID を付け、数に入れる
+    request_stats = RequestStats()
+    app.add_middleware(RequestContextMiddleware, stats=request_stats, log_access=s.log_format == "json")
     startup_warnings(s)
     if s.role in ("all", "compute"):
         app.include_router(build_compute_router(emb))
@@ -314,6 +310,23 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
             ok = check["ok"]
             body = {"status": "ready" if ok else "not_ready", "checks": {"embedder": check}}
         return JSONResponse(body, status_code=200 if ok else 503)
+
+    @app.get(
+        "/metrics",
+        tags=["状態"],
+        summary="監視の値(Prometheus 形式)",
+        response_class=PlainTextResponse,
+        responses={200: {"content": {"text/plain": {}}, "description": "Prometheus のテキスト形式"}},
+    )
+    def prometheus_metrics() -> PlainTextResponse:
+        """Prometheus などの監視基盤から読み取る値です(CPU・メモリ・GPU・推論の稼働・窓の数・ストリームの状態・
+        空き容量・検索の混雑・通知・HTTP の要求の数と処理時間)。
+
+        認証は `/api` と同じです(`API_TOKEN` を設定していればトークンが必要。`API_READ_TOKEN` でも読めます)。
+        ROLE=compute では、資源と推論の値だけを返します。
+        """
+        body = prometheus(request_stats, ctx_holder[0] if ctx_holder else None, emb)
+        return PlainTextResponse(body, media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @app.exception_handler(InvalidInput)
     async def _invalid_input(_: Request, exc: InvalidInput) -> JSONResponse:
