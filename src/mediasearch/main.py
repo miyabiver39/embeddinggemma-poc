@@ -11,11 +11,12 @@ import os
 import sqlite3
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from . import __version__
+from . import __version__, disk
 from .api import build_api_router
 from .compute_api import build_compute_router
 from .config import Settings
@@ -26,7 +27,7 @@ from .pipeline import Ingestor
 from .retention import RetentionWorker
 from .schemas import Health
 from .security import SecurityMiddleware, startup_warnings
-from .service import Context, InvalidInput, NotFound
+from .service import Context, InvalidInput, NotFound, Service
 from .store import IndexMismatch, Store
 from .streams import StreamError, StreamManager
 from .watcher import FolderWatcher
@@ -206,12 +207,15 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     if s.role in ("all", "app"):
         store = Store(s.data_dir / "mediasearch.db")
         ingestor = Ingestor(s, store, emb)
-        intake = FileIntake(store, ingestor, s.ingest_roots)
+        intake = FileIntake(
+            store, ingestor, s.ingest_roots, disk_check=lambda: disk.check(s.data_dir, s.min_free_disk_mb)
+        )
         watcher = FolderWatcher(s, store, intake)
         streams = StreamManager(s, store, emb)
         retention = RetentionWorker(s, store)
         _warn_if_incompatible(store, emb)
 
+    ctx_holder: list[Context] = []  # ROLE=all / app のときだけ入る(/readyz で使う)
     mcp_run = None  # MCP サーバーの起動・停止(ROLE=all / app のとき、下で設定する)
 
     @asynccontextmanager
@@ -263,6 +267,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     if store and ingestor and intake and watcher:
         ctx = Context(s, store, emb, ingestor, intake, watcher, streams, retention)
         app.state.ctx = ctx  # テストや拡張から、同じ部品を使えるようにする
+        ctx_holder.append(ctx)
         app.include_router(build_api_router(ctx))
         # AI エージェント向けの MCP サーバー(/mcp)。REST と同じ処理・同じ認証で動く
         from .mcp_server import build_mcp_server, mount_mcp
@@ -278,9 +283,37 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     def healthz() -> dict:
         return {"status": "ok", "role": s.role, "version": __version__}
 
+    @app.get(
+        "/readyz",
+        tags=["状態"],
+        summary="準備完了の確認(認証不要)",
+        response_model=dict[str, Any],
+        responses={503: {"description": "処理できない状態(checks の ok が偽の項目が原因)"}},
+    )
+    def readyz() -> JSONResponse:
+        """DB・ベクトル DB・推論側・空き容量を確かめ、要求を処理できるなら 200、できなければ 503 を返します。
+
+        `/healthz` はプロセスが動いているか(再起動の判断)、`/readyz` は要求を振り分けてよいか(ロードバランサー・
+        コンテナの準備確認)に使います。推論側(compute)が落ちている、ディスクが満杯、などの間は 503 になります。
+        """
+        if ctx_holder:
+            ok, body = Service(ctx_holder[0]).readiness()
+        else:  # ROLE=compute: 推論ができるかだけを確かめる
+            try:
+                check = {"ok": True, "accelerator": emb.info().accelerator}
+            except Exception as exc:
+                check = {"ok": False, "error": str(exc)}
+            ok = check["ok"]
+            body = {"status": "ready" if ok else "not_ready", "checks": {"embedder": check}}
+        return JSONResponse(body, status_code=200 if ok else 503)
+
     @app.exception_handler(InvalidInput)
     async def _invalid_input(_: Request, exc: InvalidInput) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    @app.exception_handler(disk.InsufficientStorage)
+    async def _no_space(_: Request, exc: disk.InsufficientStorage) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=507)
 
     @app.exception_handler(StreamError)
     async def _stream_error(_: Request, exc: StreamError) -> JSONResponse:

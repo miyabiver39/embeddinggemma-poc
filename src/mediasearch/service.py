@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import __version__
+from . import __version__, disk
 from .config import PRESETS, Settings
 from .embedders import Embedder
 from .ingest_files import FileIntake
@@ -217,6 +217,33 @@ class Service:
             "max": self.ctx.settings.max_streams,
         }
 
+    def readiness(self) -> tuple[bool, dict]:
+        """要求を処理できる状態か(GET /readyz)。DB・ベクトル DB・推論側・空き容量を確かめます。
+
+        /healthz(プロセスが動いているか)と分けるのは、推論側(compute)が落ちている・ディスクが満杯などで
+        処理できない間は、ロードバランサーなどが要求を振り分けないようにするためです。
+        """
+        ctx, s = self.ctx, self.ctx.settings
+        checks: dict[str, dict] = {}
+        try:
+            ctx.store.get_meta("schema_version")
+            checks["database"] = {"ok": True}
+        except Exception as exc:
+            checks["database"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        try:
+            checks["vectors"] = {"ok": True, "count": len(ctx.store.vectors)}
+        except Exception as exc:
+            checks["vectors"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        try:
+            info = ctx.embedder.info()
+            checks["embedder"] = {"ok": True, "backend": info.backend, "accelerator": info.accelerator}
+        except Exception as exc:  # 分離構成で compute に接続できない場合など
+            checks["embedder"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        d = disk.status(s.data_dir, s.min_free_disk_mb)
+        checks["disk"] = {"ok": d["ok"], **{k: v for k, v in d.items() if k != "ok"}}
+        ok = all(c["ok"] for c in checks.values())
+        return ok, {"status": "ready" if ok else "not_ready", "checks": checks}
+
     def thumbnail(self, window_id: int) -> Path:
         """窓のサムネイル(JPEG)のパス。取り込み時に作っていなければ(以前の版で取り込んだものなど)、ここで作ります。"""
         ctx = self.ctx
@@ -310,4 +337,5 @@ class Service:
             "watch": ctx.watcher.status,
             "streams": self._stream_summary(),
             "retention": dict(ctx.retention.status) if ctx.retention else None,
+            "disk": disk.status(s.data_dir, s.min_free_disk_mb),
         }

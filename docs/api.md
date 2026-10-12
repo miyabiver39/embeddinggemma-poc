@@ -61,6 +61,7 @@ curl -sL https://cdn.jsdelivr.net/npm/@scalar/api-reference@<版>/dist/browser/s
 | 413 | リクエストが大きすぎる(`MAX_UPLOAD_MB`) | パス指定での取り込みを使う |
 | 422 | 映像・音声・画像として扱えないファイル、または入力の型の誤り | ファイルの形式を確認する |
 | 503 | 推論側(compute)に接続できない | compute の起動とトークンを確認する |
+| 507 | `DATA_DIR` の空き容量が `MIN_FREE_DISK_MB` を下回っている(新しい取り込みを止めている) | 保存期間(`RETENTION_DAYS`)を設定する、不要な取り込み元を削除する |
 
 ## 用語
 
@@ -109,6 +110,9 @@ curl http://localhost:8000/api/jobs/34
 ```
 
 `status` が `done` になれば完了、`failed` なら `error` に理由があります。
+
+- 推論側(compute)に接続できない・空き容量が足りない、などの一時的な失敗は、`queued` に戻して自動で再試行します(`attempts` が回数、`error` に次の再試行までの時間)。`JOB_RETRIES` 回を超えたら `failed` になります。
+- 取り消すには `POST /api/jobs/{id}/cancel` を使います。待っているジョブはすぐに、実行中のジョブは次の窓の区切りで `cancelled` になります(それまでに作った窓は残ります)。
 
 ### 3. 探す
 

@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import media
+from . import disk, media
 from .ingest_files import MEDIA_KINDS, is_within, media_kind_of
 from .live import LiveHub, Subscriber
 from .media import MediaError
@@ -219,6 +219,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         return result.to_dict()
 
     def _save_upload(upload: UploadFile) -> Path:
+        disk.check(s.data_dir, s.min_free_disk_mb)  # 満杯のディスクに書き始めない
         ctx.media_dir.mkdir(parents=True, exist_ok=True)
         dest = ctx.media_dir / f"{uuid.uuid4().hex[:8]}_{_safe_name(upload.filename or 'upload')}"
         with dest.open("wb") as out:
@@ -734,6 +735,24 @@ def build_api_router(ctx: Context) -> APIRouter:
     )
     def list_jobs(limit: int = Query(100, ge=1, le=10_000, description="返す件数(新しい順)")) -> dict:
         return {"jobs": ctx.store.list_jobs(limit)}
+
+    @router.post(
+        "/jobs/{job_id}/cancel",
+        tags=["取り込み元・ジョブ"],
+        summary="ジョブを取り消す",
+        response_model=Job,
+        responses=errors(401, 404),
+    )
+    def cancel_job(job_id: int) -> dict:
+        """待っているジョブはすぐに取り消します。実行中のジョブは、次の窓の区切りで止めます(状態は cancelled)。
+
+        実行中に取り消した場合、それまでに作った窓は残ります。最初から取り込み直すには、取り込み元の再取り込みを使います。
+        終わったジョブ(done / failed / cancelled)は、そのまま返します。
+        """
+        job = ctx.ingestor.cancel(job_id)
+        if job is None:
+            raise HTTPException(404, "ジョブが見つかりません")
+        return job
 
     @router.get(
         "/metrics",

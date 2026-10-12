@@ -105,6 +105,9 @@ class Settings:
     watch_preset: str  # 取り込みのプリセット(空なら WINDOW_SEC などの既定値)
     max_streams: int  # 同時に受信できる RTSP ストリームの数
     retention_days: float  # この日数より古い窓を削除する(録画の時刻が基準。0 なら削除しない)
+    min_free_disk_mb: int  # DATA_DIR の空き容量がこれを下回ったら、新しい取り込みを止める(0 なら確認しない)
+    job_retries: int  # 推論側に接続できないなど、一時的な失敗のときに取り込みを再試行する回数
+    job_history_days: float  # 終わったジョブの履歴を残す日数(取り込み元ごとの最新のジョブは残す)
 
     # --- サーバ ---
     host: str
@@ -182,6 +185,9 @@ class Settings:
             watch_preset=watch_preset,
             max_streams=_env_int("MAX_STREAMS", 8),
             retention_days=max(_env_float("RETENTION_DAYS", 0.0), 0.0),
+            min_free_disk_mb=max(_env_int("MIN_FREE_DISK_MB", 1024), 0),
+            job_retries=max(_env_int("JOB_RETRIES", 3), 0),
+            job_history_days=max(_env_float("JOB_HISTORY_DAYS", 30.0), 0.0),
             host=_env("HOST", "0.0.0.0"),
             port=_env_int("PORT", 8000),
             api_token=api_token,

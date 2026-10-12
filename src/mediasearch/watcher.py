@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from .config import Settings
+from .disk import InsufficientStorage
 from .ingest_files import FileIntake
 from .pipeline import IngestParams
 from .store import Store
@@ -95,14 +96,19 @@ class FolderWatcher:
             if not Path(d).is_dir():
                 errors.append({"path": str(d), "error": "フォルダが見つかりません"})
                 continue
-            result = self._intake.accept_dir(
-                Path(d),
-                params=params,
-                group_from_dir=self._s.watch_group_from_dir,
-                retry_failed=False,
-                settle_sec=self._s.watch_settle_sec,
-                skip_paths=known,
-            )
+            try:
+                result = self._intake.accept_dir(
+                    Path(d),
+                    params=params,
+                    group_from_dir=self._s.watch_group_from_dir,
+                    retry_failed=False,
+                    settle_sec=self._s.watch_settle_sec,
+                    skip_paths=known,
+                )
+            except InsufficientStorage as exc:
+                # 登録しないので、空き容量が戻った後の走査で、同じファイルを取り込む
+                errors.append({"path": str(d), "error": str(exc)})
+                break
             queued += result["queued"]
             pending += result["pending"]
             errors += result["errors"]

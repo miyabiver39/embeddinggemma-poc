@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS sources (
   location TEXT,
   start_ts REAL NOT NULL,        -- 録画開始の時刻(UNIX 秒)
   duration_ms INTEGER,
-  status TEXT NOT NULL,          -- queued / running / done / failed / expired(保存期間を過ぎ、窓を削除した)
+  status TEXT NOT NULL,          -- queued / running / done / failed / cancelled / expired(保存期間を過ぎ、窓を削除した)
   params TEXT NOT NULL,          -- 取り込み設定(JSON)
   error TEXT,
   created_at REAL NOT NULL
@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at REAL NOT NULL,
   started_at REAL,
   finished_at REAL,
-  timings TEXT                   -- 処理時間の内訳(JSON。ベンチマーク用)
+  timings TEXT,                  -- 処理時間の内訳(JSON。ベンチマーク用)
+  attempts INTEGER NOT NULL DEFAULT 0  -- 一時的な失敗で再試行した回数
 );
 """
 
@@ -98,7 +99,7 @@ CREATE INDEX IF NOT EXISTS idx_windows_abs_ts ON windows(abs_ts);
 WINDOW_KINDS = ("frames", "tav", "audio", "image")
 
 # DB の形式の版。列の追加・改名をしたら上げ、_migrate() に移行の処理を足す
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 # 旧い版で使っていた列名 → 現在の列名(以前の版の DB をそのまま使い続けられるよう、起動時に改名する)
 _RENAMED_COLUMNS = {
     "sources": {"camera_id": "group_id"},
@@ -108,6 +109,7 @@ _RENAMED_COLUMNS = {
 _ADDED_COLUMNS = {
     "jobs": {"timings": "TEXT"},  # 版 3
     "streams": {"retention_hours": "REAL"},  # 版 6
+    "jobs#2": {"attempts": "INTEGER NOT NULL DEFAULT 0"},  # 版 7(同じ表への追加は「表名#番号」で書き分ける)
 }
 _REQUIRED_COLUMNS = {
     "sources": {"id", "kind", "path", "name", "group_id", "location", "start_ts", "status", "params"},
@@ -163,7 +165,8 @@ class Store:
                     if old in cols and new not in cols:
                         self._db.execute(f"ALTER TABLE {table} RENAME COLUMN {old} TO {new}")
                         renamed.append(f"{table}.{old} → {new}")
-            for table, added in _ADDED_COLUMNS.items():
+            for key, added in _ADDED_COLUMNS.items():
+                table = key.split("#", 1)[0]
                 cols = self._columns(table)
                 for name, decl in added.items():
                     if cols and name not in cols:
@@ -479,7 +482,7 @@ class Store:
             return int(cur.lastrowid)
 
     def update_job(self, job_id: int, **fields: Any) -> None:
-        allowed = {"status", "progress", "total", "error", "started_at", "finished_at", "timings"}
+        allowed = {"status", "progress", "total", "error", "started_at", "finished_at", "timings", "attempts"}
         assert set(fields) <= allowed, f"更新できない列です: {set(fields) - allowed}"
         if isinstance(fields.get("timings"), dict):
             fields["timings"] = json.dumps(fields["timings"], ensure_ascii=False)
@@ -521,6 +524,17 @@ class Store:
         d = dict(row)
         d["timings"] = json.loads(d["timings"]) if d.get("timings") else None
         return d
+
+    def prune_jobs(self, before: float) -> int:
+        """before より前に終わったジョブの履歴を削除します。取り込み元ごとの最新のジョブ(最後の処理時間)は残します。"""
+        with self._lock:
+            cur = self._db.execute(
+                "DELETE FROM jobs WHERE status IN ('done','failed','cancelled') AND finished_at < ?"
+                " AND id NOT IN (SELECT MAX(id) FROM jobs GROUP BY source_id)",
+                (before,),
+            )
+            self._db.commit()
+            return cur.rowcount
 
     def unfinished_jobs(self) -> list[dict]:
         """起動時に、途中で止まった(queued / running)ジョブを取り出します。"""

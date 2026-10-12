@@ -163,6 +163,17 @@
   揃っているときにまとめる。分離構成(remote)の `embed_parts_many` は、compute の `batch_size` の数だけ同時に送り、compute 側でまとめる。
 - 画像は `embed_images` で `EMBED_BATCH` 枚ずつ 1 回の推論にする。
 
+### 運用のための保護(`disk.py`、`Service.readiness`、`Ingestor`)
+
+- 空き容量: 受け付け(`FileIntake`)・アップロードの保存の前・動画の窓を保存する前・ストリームの窓を保存する前に、
+  `DATA_DIR` の空き容量が `MIN_FREE_DISK_MB` 以上かを確かめる。満杯のまま書き始めると、SQLite・ジャーナル・サムネイルの
+  書き込みが途中で失敗し、中途半端な状態が残るため。
+- 再試行: `ConnectionError`(推論側に接続できない)と `InsufficientStorage` は時間をおけば成功し得るため、ジョブを `queued` に戻し、
+  間隔を倍にしながら `JOB_RETRIES` 回まで再試行する(`jobs.attempts`。DB の形式の版 7)。それ以外(壊れたファイルなど)はすぐに `failed`。
+- 取り消し: 待っているジョブは状態を `cancelled` にし、キューから取り出したときに飛ばす。実行中のジョブは、窓の区切り
+  (`_check_stop`)で止める。推論の途中では止めない(推論は中断できないため)。
+- 準備完了の確認(`/readyz`): DB の読み取り、ベクトル DB、推論側の `info()`、空き容量。
+
 ### 保存期間(`retention.py`)
 
 - `RETENTION_DAYS` を過ぎた窓を 10 分ごとに削除する(既定は 0 = 削除しない)。基準は録画の時刻(`windows.abs_ts`。索引あり)。

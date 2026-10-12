@@ -172,6 +172,9 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `ALLOWED_HOSTS` | `*` | 受け付ける Host ヘッダー(カンマ区切り)。DNS リバインディング対策 |
 | `PUID` / `PGID` | `1000` | アプリを動かすユーザー / グループの ID。`PUID=0` で root のまま動かす |
 | `RETENTION_DAYS` | `0` | この日数より古い窓(録画の時刻が基準)を、ベクトル・サムネイルとともに削除する。`0` なら削除しない。ストリームごとに `retention_hours` でも指定できる |
+| `MIN_FREE_DISK_MB` | `1024` | `DATA_DIR` の空き容量がこれを下回ったら、新しい取り込みを止める(507。検索と削除は続けられる)。`0` で確認しない |
+| `JOB_RETRIES` | `3` | 推論側に接続できない・空き容量の不足など、一時的な失敗のときに取り込みを再試行する回数(30 秒から間隔を倍に) |
+| `JOB_HISTORY_DAYS` | `30` | 終わったジョブの履歴を残す日数(取り込み元ごとの最新のジョブは残す)。`0` で削除しない |
 | `MAX_STREAMS` | `8` | 同時に受信できる RTSP のストリームの数 |
 | `TZ` | `Asia/Tokyo` | 時刻(ファイル名の日時、タイムゾーンのない `start_ts`)の解釈 |
 | `LOG_LEVEL` | `INFO` | |
@@ -202,6 +205,8 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `GET /api/jobs`, `/api/sources`, `/api/sources/{id}` ほか | ジョブ・取り込み元の確認、削除、再取り込み |
 | `POST /api/streams`、`GET /api/streams` ほか | RTSP のストリームの登録・状態の確認・停止・再開・削除 |
 | `GET /api/search/live` | 取り込み中に追加された窓のうち、文章に合うものを通知する(リアルタイム検索。Server-Sent Events) |
+| `GET /healthz` / `GET /readyz` | 死活監視(プロセスが動いているか)/ 準備完了の確認(DB・ベクトル DB・推論側・空き容量。処理できなければ 503)。どちらも認証不要 |
+| `POST /api/jobs/{id}/cancel` | 取り込みのジョブを取り消す(実行中は窓の区切りで止める) |
 | `GET /api/metrics` | 資源の使用状況(CPU・メモリ・ディスク・GPU)と推論の稼働率。ベンチマーク(`bench/`)が読む |
 | `GET /api/stats` | 取り込みの処理時間の集計(ジョブごとの内訳は `GET /api/jobs/{id}` の `timings`。`bench/bench.py` で計測) |
 | `GET /api/media/{id}`, `/api/thumb/{id}` | 元動画(Range 対応)とサムネイル |

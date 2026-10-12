@@ -27,6 +27,8 @@ import numpy as np
 
 from . import media
 from .config import PRESETS, Settings
+from .disk import InsufficientStorage
+from .disk import check as check_disk
 from .embedders import SAMPLE_RATE, AudioPart, Embedder, ImagePart, Part, TextPart
 from .store import Store
 
@@ -286,6 +288,15 @@ class _Interrupted(Exception):
     """停止の要求で、取り込みを途中で止めた。"""
 
 
+class _Cancelled(Exception):
+    """取り消しの要求(POST /api/jobs/{id}/cancel)で、取り込みを途中で止めた。"""
+
+
+# 時間をおけば成功する可能性がある失敗(推論側に接続できない、ディスクの空きが足りない)。再試行する
+_TRANSIENT = (ConnectionError, InsufficientStorage)
+RETRY_BASE_SEC = 30  # 再試行までの間隔(1 回目 30 秒、以降 2 倍。最大 10 分)
+
+
 class Ingestor:
     """取り込みジョブを、バックグラウンドのスレッドで1つずつ処理します。"""
 
@@ -296,6 +307,8 @@ class Ingestor:
         self._queue: queue.Queue[int | None] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._stopping = threading.Event()
+        self._current: int | None = None  # 実行中のジョブ
+        self._cancel: set[int] = set()  # 取り消しを求められた実行中のジョブ
 
     # ------------------------------------------------------------------ 起動・停止
     def start(self) -> None:
@@ -330,6 +343,41 @@ class Ingestor:
     def _check_stop(self) -> None:
         if self._stopping.is_set():
             raise _Interrupted()
+        if self._current is not None and self._current in self._cancel:
+            raise _Cancelled()
+
+    def cancel(self, job_id: int) -> dict | None:
+        """ジョブを取り消します。待っているジョブはすぐに、実行中のジョブは窓の区切りで止めます。
+
+        実行中に取り消した場合、それまでに作った窓は残します(検索できる)。取り込み直しは reindex で行えます。
+        """
+        job = self._store.get_job(job_id)
+        if job is None:
+            return None
+        if job["status"] == "queued":
+            self._store.update_job(job_id, status="cancelled", finished_at=time.time(), error="取り消しました")
+            self._store.update_source(job["source_id"], status="cancelled", error="取り消しました")
+        elif job["status"] == "running":
+            self._cancel.add(job_id)
+        return self._store.get_job(job_id)
+
+    def _handle_error(self, job_id: int, source: dict, exc: Exception) -> None:
+        """失敗を記録します。一時的な失敗(推論側に接続できない・空き容量の不足)は、間隔をあけて再試行します。"""
+        if isinstance(exc, _TRANSIENT):
+            job = self._store.get_job(job_id) or {}
+            attempts = int(job.get("attempts") or 0) + 1
+            if attempts <= self._settings.job_retries:
+                delay = min(RETRY_BASE_SEC * 2 ** (attempts - 1), 600)
+                retries = self._settings.job_retries
+                message = f"{type(exc).__name__}: {exc}({delay} 秒後に再試行します。{attempts}/{retries} 回目)"
+                log.warning("取り込みを再試行します: job=%s %s", job_id, message)
+                self._store.update_job(job_id, status="queued", progress=0, error=message, attempts=attempts)
+                self._store.update_source(source["id"], status="queued", error=message)
+                timer = threading.Timer(delay, self._queue.put, args=(job_id,))
+                timer.daemon = True
+                timer.start()
+                return
+        self._fail(job_id, source, exc)
 
     def submit(self, source_id: int) -> int:
         job_id = self._store.create_job(source_id)
@@ -376,7 +424,7 @@ class Ingestor:
 
     def _begin(self, job_id: int) -> dict | None:
         job = self._store.get_job(job_id)
-        if job is None:  # 取り込み元ごと削除された
+        if job is None or job["status"] in ("cancelled", "done", "failed"):  # 削除・取り消し済み
             return None
         source = self._store.get_source(job["source_id"])
         if source is None:
@@ -425,7 +473,9 @@ class Ingestor:
         source = self._begin(job_id)
         if source is None:
             return
+        self._current = job_id
         try:
+            check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
             info = self._embedder.info()
             self._store.ensure_compat(info.model_id, info.dims)
             if source["kind"] == "video":
@@ -441,9 +491,18 @@ class Ingestor:
             self._store.update_job(job_id, status="queued", progress=0)
             self._store.update_source(source["id"], status="queued")
             return
-        except Exception as exc:
-            self._fail(job_id, source, exc)
+        except _Cancelled:
+            log.info("取り込みを取り消しました: %s", source["name"])
+            self._store.update_job(job_id, status="cancelled", finished_at=time.time(), error="取り消しました")
+            self._store.update_source(source["id"], status="cancelled", error="取り消しました")
+            self._discard_media(source)
             return
+        except Exception as exc:
+            self._handle_error(job_id, source, exc)
+            return
+        finally:
+            self._current = None
+            self._cancel.discard(job_id)
         self._finish(job_id, source, timings)
 
     def _thumb_path(self, window_id: int) -> Path:
@@ -507,6 +566,7 @@ class Ingestor:
                         for k in [k for k in frames if k < keep]:
                             del frames[k]
                         if len(ready) >= batch or pending == len(plans):
+                            check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
                             self._store_windows(source, ready, timer)
                             ready = []
                             self._store.update_job(job_id, progress=pending)
@@ -629,6 +689,7 @@ class Ingestor:
         if not items:
             return
         try:
+            check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
             info = self._embedder.info()
             self._store.ensure_compat(info.model_id, info.dims)
             timings = self._index_images(items)
@@ -638,7 +699,7 @@ class Ingestor:
                 try:
                     timings = self._index_images([(job_id, source)])
                 except Exception as exc:
-                    self._fail(job_id, source, exc)
+                    self._handle_error(job_id, source, exc)
                 else:
                     self._finish(job_id, source, timings)
             return

@@ -14,7 +14,7 @@ WindowKind = Literal["frames", "tav", "audio", "image"]
 SearchKind = Literal["auto", "all", "frames", "tav", "audio", "image"]
 SourceKind = Literal["video", "audio", "image", "frames", "stream"]
 IngestKind = Literal["auto", "video", "audio", "image"]
-Status = Literal["queued", "running", "done", "failed", "expired"]
+Status = Literal["queued", "running", "done", "failed", "cancelled", "expired"]
 
 
 class _Open(BaseModel):
@@ -92,6 +92,9 @@ class InfoResponse(_Open):
     presets: dict[str, dict[str, Any]] = Field(description="取り込みのプリセット")
     index: IndexStatus
     watch: dict[str, Any] = Field(description="監視フォルダの状態")
+    disk: dict[str, Any] | None = Field(
+        None, description="DATA_DIR の空き容量(ok が偽なら MIN_FREE_DISK_MB を下回り、新しい取り込みを止めている)"
+    )
     retention: dict[str, Any] | None = Field(
         None, description="保存期間による削除の状態(days: 日数、total_deleted_windows: 削除した窓の数など)"
     )
@@ -288,6 +291,7 @@ class Job(_Open):
     source_id: int
     status: Status
     progress: int = Field(description="処理済みの窓の数")
+    attempts: int = Field(0, description="一時的な失敗(推論側に接続できない・空き容量の不足)で再試行した回数")
     total: int = Field(description="窓の総数")
     error: str | None = None
     created_at: float
@@ -307,6 +311,7 @@ class StreamState(_Open):
     frames: int | None = Field(None, description="受け取ったフレームの数(復号の間隔ごと)")
     windows: int | None = Field(None, description="作った窓の数")
     dropped_windows: int | None = Field(None, description="推論が追いつかず、捨てた窓の数")
+    skipped_low_disk: int | None = Field(None, description="空き容量の不足(MIN_FREE_DISK_MB)で保存しなかった窓の数")
     reconnects: int | None = Field(None, description="再接続した回数")
     lag_ms: int | None = Field(None, description="受信したフレームに対する、窓の作成の遅れ(ms)")
     decoder: str | None = Field(None, description="復号の方式(cpu / cuda / vaapi / qsv)")

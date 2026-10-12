@@ -27,7 +27,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import numpy as np
 
-from . import media
+from . import disk, media
 from .config import Settings
 from .embedders import SAMPLE_RATE, AudioPart, Embedder
 from .pipeline import IngestParams, build_window_parts, plan_windows, save_thumbnail, split_window_pcm
@@ -127,6 +127,7 @@ class StreamWorker:
             "frames": 0,
             "windows": 0,
             "dropped_windows": 0,
+            "skipped_low_disk": 0,  # 空き容量の不足で保存しなかった窓
             "reconnects": 0,
             "lag_ms": 0,
             "decoder": None,
@@ -371,6 +372,13 @@ class StreamWorker:
         ready: list[tuple[int, list[tuple[np.ndarray, int]], list | None]],
     ) -> None:
         if not ready:
+            return
+        try:
+            disk.check(self._s.data_dir, self._s.min_free_disk_mb)
+        except disk.InsufficientStorage as exc:
+            # 受信は続け(接続し直すと時間がかかるため)、窓は保存しない。空き容量が戻れば、次の窓から保存する
+            self.state["skipped_low_disk"] = self.state.get("skipped_low_disk", 0) + len(ready)
+            self.state["error"] = str(exc)
             return
         built = []
         for start, picked, slices in ready:

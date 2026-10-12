@@ -102,10 +102,12 @@ class Accepted:
 class FileIntake:
     """ファイルを検証し、取り込みキューに入れます。"""
 
-    def __init__(self, store: Store, ingestor: Ingestor, roots: tuple[Path, ...]) -> None:
+    def __init__(self, store: Store, ingestor: Ingestor, roots: tuple[Path, ...], disk_check=None) -> None:
         self._store = store
         self._ingestor = ingestor
         self._roots = roots
+        # 空き容量が足りなければ InsufficientStorage を出す関数(受け付けの前に確かめ、満杯のまま登録しない)
+        self._disk_check = disk_check or (lambda: None)
         # 重複の確認から登録までを直列にする(監視フォルダの走査と API が同じファイルを同時に受け付けないように)
         self._lock = threading.Lock()
 
@@ -161,6 +163,7 @@ class FileIntake:
         既存の取り込み元を返します。前回失敗したものは、retry_failed が真なら作り直します
         (監視フォルダでは偽にして、壊れたファイルを繰り返し処理しないようにします)。
         """
+        self._disk_check()
         path = path.resolve()
         name = name or path.name
         if start_ts is not None:
@@ -215,6 +218,7 @@ class FileIntake:
         (group-a/20260101_090000.mp4 → group-a)。root 直下のファイルは group_id を使います。
         settle_sec を指定すると、最終更新から指定秒数たっていないファイル(録画中の可能性がある)を後回しにします。
         """
+        self._disk_check()
         root = root.resolve()
         self.check_allowed(root)
         if not root.is_dir():
