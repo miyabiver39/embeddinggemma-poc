@@ -29,6 +29,13 @@ if [ "${VARIANT:-}" = "rocm" ] && [ -e /dev/dxg ] && [ ! -e /dev/kfd ]; then
   fi
 fi
 
+# AMD の GPU では、PyTorch の高速な注意機構(Flash / Mem Efficient。AOTriton)が、Radeon(RDNA3 / RDNA4)では「実験的」として
+# 無効になっており、遅い標準の計算に切り替わる。画像エンコーダの注意機構が 1 窓の時間の大半を占めていた(RX 9060 XT で
+# 1 窓 1.03 秒 → 有効にすると 0.26 秒。CPU 版との類似度 0.9999 以上で変わらず。docs/gpu.md)。無効にする場合は 0 を指定する
+if [ "${VARIANT:-}" = "rocm" ]; then
+  export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL="${TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL:-1}"
+fi
+
 set -- uvicorn --factory mediasearch.main:create_app \
   --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --log-level "$(echo "${LOG_LEVEL:-info}" | tr 'A-Z' 'a-z')"
 
