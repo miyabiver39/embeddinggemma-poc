@@ -170,7 +170,7 @@ EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:creat
 - コミットメッセージの末尾には、利用環境の指示(Co-Authored-By など)に従った行を付けます。
 - 設計に関わる変更では、`docs/design.md` を同じコミットで更新します。
 - API を変更したら `python scripts/export_openapi.py` で `docs/openapi.json` を更新します(古いとテストが失敗します)。
-- CI(`build.yml` / `codeql.yml`)は、文書(`*.md`)と `LICENSE` だけの変更では動きません。イメージのビルドは、イメージの中身(`src/`・`docker/`・`pyproject.toml`・`.dockerignore`)か `build.yml` が変わったときだけ行います。イメージを作り直したいときは、build ワークフローを手動で実行します。
+- CI(`build.yml` / `codeql.yml`)は、文書(`*.md`)と `LICENSE` だけの変更では動きません(プルリクエストでは、`build.yml` の `test` ジョブだけが中身の手順を省いて成功します。main のブランチ保護で `test` の成功を必須にしているため)。main へは直接 push できません。変更はプルリクエストで入れます。イメージのビルドは、イメージの中身(`src/`・`docker/`・`pyproject.toml`・`.dockerignore`)か `build.yml` が変わったときだけ行います。イメージを作り直したいときは、build ワークフローを手動で実行します。
 - リリースはタグ `v*` の push で作成します。SBOM と脆弱性検査の結果は自動で添付されます(`docs/release.md`)。
 - README のバッジのうち、テスト件数・カバレッジ・脆弱性の件数は、CI が `badges` ブランチに書き出す JSON を表示しています(`scripts/badges.py`)。`badges` ブランチは手で編集しません。
 - 同梱物を追加・変更したときは、`THIRD_PARTY_NOTICES.md` のライセンスの一覧も更新します。
