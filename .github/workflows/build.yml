@@ -4,6 +4,8 @@
 name: build
 
 # 文書(*.md)と LICENSE だけの変更では、テストもイメージのビルドも行わない(結果が変わらないため)。
+# main への push はワークフローごと省く。プルリクエストでは、test ジョブだけを動かして中身の手順を省き、すぐに成功で終える
+# (main のブランチ保護で test の成功を必須にしているため。ワークフローごと省くと、結果が届かずマージできなくなる)。
 # タグの push には、この絞り込みは効かない(GitHub の仕様)ため、リリースでは必ずビルドする。
 # テストだけに関わる変更(tests/・bench/・scripts/ など)では、テストだけ行い、イメージのビルドは省く(image ジョブの if)。
 on:
@@ -13,7 +15,6 @@ on:
     paths-ignore: ["**.md", "LICENSE"]
   pull_request:
     branches: [main]
-    paths-ignore: ["**.md", "LICENSE"]
   workflow_dispatch:
 
 # 既定は読み取りだけ。書き込みが要るジョブだけ、ジョブごとに権限を足す
@@ -31,6 +32,7 @@ jobs:
       contents: read
     outputs:
       image: ${{ steps.changes.outputs.image }}
+      code: ${{ steps.changes.outputs.code }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -50,13 +52,20 @@ jobs:
           elif [ "$EVENT" = push ] && [ "$REF_TYPE" = branch ] && [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
             base="$BEFORE"
           else
-            echo "image=true" >> "$GITHUB_OUTPUT"; exit 0
+            echo "image=true" >> "$GITHUB_OUTPUT"; echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if ! git fetch -q --no-tags --depth=1 origin "$base"; then
-            echo "image=true" >> "$GITHUB_OUTPUT"; exit 0
+            echo "image=true" >> "$GITHUB_OUTPUT"; echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           changed=$(git diff --name-only "$base" HEAD)
           echo "$changed"
+          # 文書(*.md)と LICENSE 以外の変更があれば、テストを行う
+          if [ -n "$(echo "$changed" | grep -vE '(\.md$|^LICENSE$)')" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "文書だけの変更のため、テストを省きます"
+          fi
           if echo "$changed" | grep -qE '^(src/|docker/|pyproject\.toml$|\.dockerignore$|\.github/workflows/build\.yml$)'; then
             echo "image=true" >> "$GITHUB_OUTPUT"
           else
@@ -64,14 +73,19 @@ jobs:
             echo "イメージの中身に関わる変更が無いため、イメージのビルドを省きます"
           fi
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        if: steps.changes.outputs.code == 'true'
         with:
           python-version: "3.12"
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - run: pip install -e ".[dev]"
-      - run: ruff check src tests scripts bench
-      - run: pytest -q -m "not model" --cov=mediasearch --cov-report=term --cov-report=json:coverage.json --junitxml=junit.xml
+      - if: steps.changes.outputs.code == 'true'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - if: steps.changes.outputs.code == 'true'
+        run: pip install -e ".[dev]"
+      - if: steps.changes.outputs.code == 'true'
+        run: ruff check src tests scripts bench
+      - if: steps.changes.outputs.code == 'true'
+        run: pytest -q -m "not model" --cov=mediasearch --cov-report=term --cov-report=json:coverage.json --junitxml=junit.xml
       - name: テストの結果を次のジョブに渡す(main への push のときだけ)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.changes.outputs.code == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-results
@@ -84,7 +98,7 @@ jobs:
   # 書き込みの権限はこのジョブだけに持たせる(テストのコードは、この権限のもとでは動かさない)
   badges:
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -105,7 +119,7 @@ jobs:
 
   image:
     needs: test
-    if: needs.test.outputs.image == 'true'
+    if: needs.test.outputs.image == 'true' && needs.test.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
