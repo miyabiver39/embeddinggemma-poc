@@ -49,6 +49,26 @@ def test_exact_and_filtered_search(tmp_path):
         again.close()
 
 
+@pytest.mark.parametrize("step", [1, 2, 3, 20])  # 候補が全体の 100% / 50% / 33% / 5%
+def test_filtered_search_matches_subset_search(tmp_path, step):
+    """候補が多いときの「全体を探してから絞る」方式は、候補のベクトルを取り出す方式と同じ結果を返す。"""
+    rng = np.random.default_rng(5)
+    vecs = _unit(rng, 400)
+    index = VectorIndex(tmp_path / "v.usearch")
+    try:
+        index.add(np.arange(1, 401), vecs)
+        index.remove([4, 8])  # 候補に、ベクトル DB に無いキーが混ざっていてもよい
+        cand = np.arange(1, 401, step)
+        for qi in range(10):
+            q = vecs[qi * 13] + rng.normal(scale=0.3, size=32).astype(np.float32)
+            got = index.search(q, 7, candidates=cand)
+            want = index._exact_subset(q, cand.astype(np.uint64), 7)
+            assert [k for k, _ in got] == [k for k, _ in want]
+            assert all(abs(a[1] - b[1]) < 1e-5 for a, b in zip(got, want, strict=True))
+    finally:
+        index.close()
+
+
 def test_journal_restores_changes_after_crash(tmp_path):
     """スナップショットを書き出す前に異常終了しても、ジャーナルから変更を戻せる。"""
     rng = np.random.default_rng(2)
