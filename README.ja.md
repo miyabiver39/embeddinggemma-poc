@@ -1,0 +1,293 @@
+# mediasearch — EmbeddingGemma 2 で動画・音声・画像・文章を横断検索する(開発用)
+
+[English](README.md) | 日本語
+
+[![build](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/build.yml)
+[![tests](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmiyabiver39%2Fembeddinggemma-poc%2Fbadges%2Ftests.json)](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/build.yml)
+[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmiyabiver39%2Fembeddinggemma-poc%2Fbadges%2Fcoverage.json)](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/build.yml)
+[![security scan](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/security.yml)
+[![vulnerabilities](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmiyabiver39%2Fembeddinggemma-poc%2Fbadges%2Fvulnerabilities.json)](docs/release.md)
+[![CodeQL](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/miyabiver39/embeddinggemma-poc/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/miyabiver39/embeddinggemma-poc/badge)](https://scorecard.dev/viewer/?uri=github.com/miyabiver39/embeddinggemma-poc)
+
+[![License](https://img.shields.io/github/license/miyabiver39/embeddinggemma-poc)](LICENSE)
+[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fmiyabiver39%2Fembeddinggemma-poc%2Fmain%2Fpyproject.toml)](pyproject.toml)
+[![Release](https://img.shields.io/github/v/release/miyabiver39/embeddinggemma-poc?include_prereleases&sort=semver)](https://github.com/miyabiver39/embeddinggemma-poc/releases)
+[![Container](https://img.shields.io/badge/container-ghcr.io-blue?logo=docker&logoColor=white)](https://github.com/miyabiver39/embeddinggemma-poc/pkgs/container/embeddinggemma-poc)
+[![SBOM](https://img.shields.io/badge/SBOM-SPDX%20%7C%20CycloneDX-blue)](docs/release.md)
+[![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?logo=dependabot)](.github/dependabot.yml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Platform](https://img.shields.io/badge/platform-linux%2Famd64-lightgrey)](docker/Dockerfile)
+[![GPU](https://img.shields.io/badge/GPU-CUDA%20%7C%20ROCm%20%7C%20Intel%20XPU-informational)](docs/gpu.md)
+[![Last commit](https://img.shields.io/github/last-commit/miyabiver39/embeddinggemma-poc)](https://github.com/miyabiver39/embeddinggemma-poc/commits/main)
+
+「赤い車が映っている場面」「サイレンが鳴っている区間」のような**言葉(または画像・音声)**で、録画映像の**該当時刻**を探すための
+バックエンド基盤です。他のシステムへの組み込みを想定した開発用で、
+Google の [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) を使います。
+
+- 取り込み(ffmpeg で時間窓に分割 → ベクトル化 → ベクトル DB に保存)と検索を **1つのコンテナ**で提供
+- 動画・音声・画像・テキストを**同じベクトル空間**で検索(テキスト→映像、画像→映像、音声→音声 など)
+- 開発確認用の **WebUI** 付き(`http://localhost:8000/`)。API リファレンスは **`/scalar`**(Scalar。閲覧と試し呼び出し)、`/docs`(Swagger UI)、[docs/openapi.json](docs/openapi.json)
+- **RTSP のストリーム**(ネットワークカメラなど)を受信しながらベクトル化し、**取り込み中の窓もすぐに検索**できます(新しい窓の通知も可)
+- **MCP サーバー**を内蔵(`http://localhost:8000/mcp`)。AI エージェントから検索・取り込みができます([docs/mcp.md](docs/mcp.md))
+- CPU / NVIDIA GPU / AMD GPU / Intel GPU に対応(イメージを選ぶだけ)
+- ビルドは GitHub Actions が行います。利用者は **`docker pull` / `docker run` だけ**です
+
+> ## ご利用前の注意事項(自己責任)
+> - **既定では認証が無効です。** 追加の設定なしで起動できるようにするためです。信頼できるネットワークの外で使う場合は、必ず `API_TOKEN` を設定し、TLS(HTTPS)を終端するリバースプロキシの内側に置いてください。アプリ自体は暗号化を行いません。
+> - 録画映像・音声には**個人情報**(顔・声・車のナンバーなど)が含まれ得ます。保存されるのは「ベクトル・サムネイル・元ファイルの参照」ですが、`API_TOKEN` を設定していない場合、サムネイルや元動画の配信 API には誰でもアクセスできます。取り扱いは利用者の責任です。
+> - 実施しているセキュリティ対策と残っているリスクは [docs/security.md](docs/security.md) にまとめています。
+> - 開発・検証用途です。運用での利用は自己責任でお願いします。
+
+## クイックスタート(まずは CPU)
+
+```bash
+docker run -d --name mediasearch -p 8000:8000 -v ./data:/data \
+  ghcr.io/miyabiver39/embeddinggemma-poc:cpu
+```
+
+`http://localhost:8000/` を開きます。「取り込み」タブで動画を選び、「検索」タブで日本語・英語の言葉を入力します。
+(モデルを同梱しているため、起動時のダウンロードはありません。起動時のモデル読み込みに数十秒かかります。)
+
+> pull が拒否される場合: リポジトリ管理者が GitHub の Packages 設定で、各イメージの公開範囲を **Public** にする必要があります。
+
+### 録画ディレクトリをそのまま取り込む
+
+```bash
+docker run -d --name mediasearch -p 8000:8000 -v ./data:/data -v /path/to/recordings:/recordings:ro \
+  ghcr.io/miyabiver39/embeddinggemma-poc:cpu
+
+# 1 ファイルを取り込む(録画開始時刻はファイル名の 20260101_090000 から読み取ります)
+curl -X POST localhost:8000/api/ingest/path -H 'Content-Type: application/json' \
+  -d '{"path":"/recordings/group-a/20260101_090000.mp4","group_id":"group-a","location":"玄関"}'
+
+# フォルダをまとめて取り込む(フォルダ名 group-a などをグループ ID にする。取り込み済みのファイルは対象外)
+curl -X POST localhost:8000/api/ingest/dir -H 'Content-Type: application/json' \
+  -d '{"dir":"/recordings","group_from_dir":true}'
+```
+
+- `start_ts` を省略すると、ファイル名に含まれる日時(`20260101_090000`、`2026-01-01T09-00-00` など)を録画開始時刻にします。読み取れない場合は受付時刻になります。
+- 同じファイルを再度指定しても重複して登録しません(既存の取り込み元を返します)。取り込み直す場合は `"force": true` を付けます。
+- 受付の時点で ffprobe による検証を行い、映像・音声として扱えないファイルは 422 で拒否します(取り込める拡張子は `docs/operations.md` を参照)。
+
+### RTSP のストリームを受信しながら取り込む
+
+```bash
+curl -H 'Content-Type: application/json' \
+  -d '{"url": "rtsp://user:pass@192.168.1.10:554/stream1", "group_id": "entrance"}' http://localhost:8000/api/streams
+curl http://localhost:8000/api/streams        # 受信の状態(作った窓の数、遅れ、エラー)。パスワードは *** で表示
+```
+
+窓は作った時点で検索できます。新しい窓のうち、文章に合うものを通知させることもできます(`GET /api/search/live`。[docs/api.md](docs/api.md))。
+登録はサーバーを再起動しても残り、切断されたら自動で接続し直します。
+
+### 録画フォルダを監視して自動で取り込む
+
+```bash
+docker run -d --name mediasearch -p 8000:8000 -v ./data:/data -v /path/to/recordings:/recordings:ro \
+  -e WATCH_DIRS=/recordings ghcr.io/miyabiver39/embeddinggemma-poc:cpu
+```
+
+`WATCH_DIRS` に指定したフォルダを定期的に走査し、新しい録画ファイルを自動で取り込みます。
+書き込み中のファイルを避けるため、最終更新から `WATCH_SETTLE_SEC` 秒(既定 30 秒)経過したファイルだけを対象にします。
+ファイルが入っているフォルダ名をグループ ID にします(`/recordings/group-a/...` なら `group-a`)。状態は WebUI の「状態」タブで確認できます。
+
+## イメージの種類
+
+| タグ | 用途 | 起動オプション |
+|---|---|---|
+| `:cpu`(= `:latest`) | CPU 推論。どこでも動く | なし |
+| `:cuda` | NVIDIA GPU(RTX 3060 など) | `--gpus all` |
+| `:rocm` | AMD GPU(RX 9060 XT など) | `--device=/dev/kfd --device=/dev/dri --group-add video` |
+| `:intel` | Intel GPU(Arc / Core Ultra 内蔵) | `--device=/dev/dri` |
+| `:slim` | モデル無し。ベクトル化を外部 compute に任せる app 専用 | なし |
+
+```bash
+# NVIDIA
+docker run -d -p 8000:8000 -v ./data:/data --gpus all ghcr.io/miyabiver39/embeddinggemma-poc:cuda
+# AMD
+docker run -d -p 8000:8000 -v ./data:/data --device=/dev/kfd --device=/dev/dri --group-add video \
+  ghcr.io/miyabiver39/embeddinggemma-poc:rocm
+# AMD(Windows の Docker Desktop / WSL2。/dev/kfd の代わりに /dev/dxg を使う)
+docker run -d -p 8000:8000 -v ./data:/data --device=/dev/dxg -v /usr/lib/wsl:/usr/lib/wsl:ro \
+  ghcr.io/miyabiver39/embeddinggemma-poc:rocm
+# Intel
+docker run -d -p 8000:8000 -v ./data:/data --device=/dev/dri ghcr.io/miyabiver39/embeddinggemma-poc:intel
+```
+
+GPU が使われているかは WebUI の「状態」タブ、または `curl localhost:8000/api/info` の `embedder.accelerator` で確認できます
+(`nvidia-cuda` / `amd-rocm` / `intel-xpu` / `cpu`)。
+**GPU 版のうち実機で確認したのは、NVIDIA の RTX 3060(Linux)と AMD の RX 9060 XT(Windows の WSL2)です**(Intel と、Linux ネイティブの AMD は未確認)。実機での確認手順・結果と既知の注意点は [docs/gpu.md](docs/gpu.md) を見てください。
+Intel の古い内蔵 GPU(Iris Xe など)は PyTorch の XPU 対応外の可能性が高く、その場合は CPU で動きます。
+
+## ベンチマーク
+
+同梱の計測ツール(`bench/`)で、合成の映像・音声・画像(`bench/make_samples.py` の既定)を使って計測した結果です。
+取り込みは 3 回の中央値です。条件の詳細と結果の読み方は [bench/README.md](bench/README.md) を見てください。
+
+| 計測の内容 | CPU(Ryzen 7 5700X・`:cpu`) | RTX 3060 12GB(`:cuda`) | RX 9060 XT 16GB(`:rocm`) |
+|---|---|---|---|
+| 動画の取り込み(1080p・60 秒・2 秒窓 30 件) | 215.8 秒(1 窓 7.19 秒) | 9.4 秒(1 窓 0.31 秒) | 7.8 秒(1 窓 0.26 秒) |
+| 実時間に対する取り込みの速さ | 0.28 倍 | 6.4 倍 | 7.7 倍 |
+| 音声の取り込み(60 秒・10 秒区切り 6 件) | 5.17 秒 | 1.01 秒 | 0.91 秒 |
+| 画像の取り込み(1080p・50 枚) | 0.29 枚/秒 | 5.12 枚/秒 | 5.62 枚/秒 |
+| 文章の検索(同時 4 件・30 秒) | 7.1 件/秒(p50 440 ms) | 17.4 件/秒(p50 166 ms) | 16.9 件/秒(p50 176 ms) |
+
+- RTX 3060: Ubuntu 26.04.1 LTS、Core i7-6700K、ドライバ 595.99.02。2026-11-19 に計測。GPU メモリの使用量は最大約 3.1GB、動画の復号も GPU で行います。
+- CPU と RX 9060 XT: Windows 11 + Docker Desktop(WSL2)。2026-10-13 に計測。RX 9060 XT は高速な注意機構を有効にした状態(`rocm` イメージの既定。[docs/gpu.md](docs/gpu.md))の値です。
+- GPU では、2 秒窓の映像を実時間の 6 倍以上の速さで取り込めます。処理時間の大半は推論で、音声と短い文章の検索は計算が小さいため、GPU による差が小さくなります。
+- 合成の素材での値です。実際の録画映像では、解像度・長さ・窓の設定によって変わります。
+
+## 3つの動かし方(ROLE)
+
+| ROLE | 中身 | 使いどころ |
+|---|---|---|
+| `all`(既定) | 取り込み + 検索 + DB + WebUI + ベクトル化 | 1コンテナで完結させたいとき |
+| `app` | 取り込み + 検索 + DB + WebUI(モデル無し) | ベクトル化を別マシンの GPU に任せたいとき |
+| `compute` | ベクトル化 API だけ(`/compute/*`) | GPU サーバに置く |
+
+```bash
+# GPU サーバ側
+docker run -d -p 8001:8000 --gpus all -e ROLE=compute ghcr.io/miyabiver39/embeddinggemma-poc:cuda
+# 軽いマシン側
+docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:8001 \
+  ghcr.io/miyabiver39/embeddinggemma-poc:slim
+```
+
+`docker compose --profile split up` で同じ構成を試せます([docker-compose.yml](docker-compose.yml))。
+外から使う場合に、Nginx で HTTPS を終端する構成は `docker compose -f deploy/compose.nginx.yml up -d` です([docs/nginx.md](docs/nginx.md))。
+動画の加工(フレーム抽出・音声の16kHz化)は常に app 側で行うため、compute には**画像と PCM 音声だけ**が流れます。
+自前で加工済みのフレームを `/api/ingest/frames` に渡すこともできます。
+
+## 設定(環境変数)
+
+| 変数 | 既定 | 説明 |
+|---|---|---|
+| `ROLE` | `all`(slim は `app`) | `all` / `app` / `compute` |
+| `EMBEDDING_BACKEND` | `local`(app は `remote`) | `local` 自プロセス / `remote` 外部 compute / `dummy` 動作確認用 |
+| `EMBEDDING_URL` | `http://localhost:8001` | remote のときの compute の URL |
+| `DEVICE` | `auto` | `auto` / `cpu` / `cuda`(AMD ROCm も `cuda`) / `xpu` |
+| `DTYPE` | `auto` | GPU は bf16、CPU は fp32。出力が NaN になる場合は `float32` に |
+| `DIMS` | `768` | 保存するベクトルの次元(768/512/256/128)。**DB 作成後は変更不可**(下記) |
+| `WINDOW_SEC` | `2` | 1つのベクトルにする時間窓(秒) |
+| `FRAMES_PER_WINDOW` | `2` | 窓あたりのフレーム数 |
+| `OVERLAP_SEC` | `0` | 窓の重なり(秒) |
+| `INCLUDE_AUDIO` | `false` | 動画の音声も同じベクトルに含める |
+| `AUDIO_CHUNK_SEC` | `10` | 音声ファイルの分割長(秒) |
+| `IMAGE_MAX_SIDE` | `448` | 画像を縮小する長辺(px) |
+| `FFMPEG_HWACCEL` | `auto` | 動画の復号に使う GPU(`auto` / `cuda` / `vaapi` / `qsv` / `none`)。使えない場合は CPU に切り替える(`docs/gpu.md`) |
+| `FFMPEG_HWACCEL_DEVICE` | (空) | GPU 復号のデバイス(例 `/dev/dri/renderD128`)。空なら自動 |
+| `FFMPEG_SKIP_FRAMES` | `noref` | 動画の復号を省く範囲。`noref`(参照されないフレームを省く。時刻のずれは 1〜2 フレーム)/ `none`(全フレーム)/ `keyframes`(キーフレームのみ。数倍速いが、時刻が数秒ずれることがある) |
+| `EMBED_BATCH` | `auto` | まとめて推論する最大の件数。`auto` は CPU で 1(まとめない。CPU では速くならないことを実測)、GPU で 4(効果は小さい。`docs/gpu.md`) |
+| `IMAGE_MAX_TOKENS` | `0` | 画像1枚あたりのトークン上限(0=モデル既定) |
+| `TOP_K` | `10` | 検索の既定件数 |
+| `DATA_DIR` | `/data` | DB・サムネイル・アップロード動画の保存先 |
+| `STORE_MEDIA` | `true` | `false` にすると、アップロードした動画・画像を取り込み後に削除し、サムネイルも作らない。検索結果は時刻・スコアなどの情報だけになる(取り込みごとに `store_media` でも指定できる) |
+| `WATCH_DIRS` | (空) | 自動で取り込む監視フォルダ(カンマ区切り)。空なら無効 |
+| `WATCH_INTERVAL_SEC` | `60` | 監視フォルダを走査する間隔(秒) |
+| `WATCH_SETTLE_SEC` | `30` | 最終更新からこの秒数が経過したファイルだけを取り込む(書き込み中のファイルを避ける) |
+| `WATCH_GROUP_FROM_DIR` | `true` | ファイルが入っているフォルダ名をグループ ID にする |
+| `WATCH_PRESET` | (空) | 監視フォルダの取り込みに使うプリセット(`object` / `action` / `speech`)。空なら上記の窓の既定値 |
+| `API_TOKEN` | (空) | 設定すると `/api` と `/compute` にトークンが必要になる(`docs/security.md`) |
+| `API_READ_TOKEN` | (空) | 検索・参照だけを許可するトークン(取り込み・変更・削除はできない)。`API_TOKEN` を設定したときだけ有効 |
+| `MAX_PENDING_SEARCHES` | `32` | 同時に処理する検索の上限。超えた分は 503(`Retry-After: 5`)で断り、API が応答しなくなるのを防ぐ。`0` で制限しない |
+| `EMBEDDING_TOKEN` | `API_TOKEN` と同じ | remote のとき、compute に送るトークン |
+| `INGEST_ROOTS` | `/recordings` | パス指定・フォルダ一括で取り込めるフォルダ(カンマ区切り)。`DATA_DIR` と監視フォルダは自動で追加 |
+| `MAX_UPLOAD_MB` | `4096` | 1 リクエストの大きさの上限(MB)。`0` で無制限 |
+| `ALLOWED_ORIGINS` | (空) | 別のオリジンのページから更新系の API を呼ぶ場合に許可するオリジン(カンマ区切り) |
+| `ALLOWED_HOSTS` | `*` | 受け付ける Host ヘッダー(カンマ区切り)。DNS リバインディング対策 |
+| `PUID` / `PGID` | `1000` | アプリを動かすユーザー / グループの ID。`PUID=0` で root のまま動かす |
+| `RETENTION_DAYS` | `0` | この日数より古い窓(録画の時刻が基準)を、ベクトル・サムネイルとともに削除する。`0` なら削除しない。ストリームごとに `retention_hours` でも指定できる |
+| `MIN_FREE_DISK_MB` | `1024` | `DATA_DIR` の空き容量がこれを下回ったら、新しい取り込みを止める(507。検索と削除は続けられる)。`0` で確認しない |
+| `JOB_RETRIES` | `3` | 推論側に接続できない・空き容量の不足など、一時的な失敗のときに取り込みを再試行する回数(30 秒から間隔を倍に) |
+| `JOB_HISTORY_DAYS` | `30` | 終わったジョブの履歴を残す日数(取り込み元ごとの最新のジョブは残す)。`0` で削除しない |
+| `BACKUP_DIR` | `DATA_DIR/backups` | バックアップの保存先。ディスクの故障に備え、別のディスク・NAS をマウントして指定するのが望ましい(`docs/operations.md`) |
+| `BACKUP_INTERVAL_HOURS` | `0` | この間隔で、動作中のまま自動でバックアップを取る(例 `24`)。`0` なら自動では取らない(`POST /api/admin/backup` で取れる) |
+| `BACKUP_KEEP` | `7` | 残すバックアップの数(古いものから削除)。`0` で削除しない |
+| `MAX_STREAMS` | `8` | 同時に受信できる RTSP のストリームの数 |
+| `TZ` | `Asia/Tokyo` | 時刻(ファイル名の日時、タイムゾーンのない `start_ts`)の解釈 |
+| `PUBLIC_URL` | (空) | 外から見たこのサーバーの URL(例 `https://search.example.com`)。通知ルールの Webhook の本文で、サムネイル・動画の URL を絶対 URL にする |
+| `LOG_LEVEL` | `INFO` | ログの出力の下限(`DEBUG` / `INFO` / `WARNING` / `ERROR`) |
+| `LOG_FORMAT` | `text` | `json` にすると、1 行 1 件の JSON で出す(ログの収集基盤向け。リクエスト ID・処理時間を含むアクセスログも出す) |
+
+取り込みのプリセット(`preset`): `object`(2秒窓・2フレーム・音声なし。物体やシーン向け)/ `action`(4秒窓・4フレーム・音声なし。動作向け)/ `speech`(6秒窓・6フレーム・音声あり。会話や音が重要なとき向け)。
+
+## 知っておくべき設計上のルール
+
+- **メタデータ(グループ ID・場所・時刻)はベクトルに埋め込みません。** 別の列に保存し、検索時に絞り込みます(ベクトルに混ぜると検索精度と再現性が落ちるため)。
+- DB には**モデルID・次元・窓の設定**を記録し、**違う設定での追記は 409 で拒否**します(ベクトル空間の混在防止)。`DIMS` を変えたいときは `DATA_DIR` を作り直して再取り込みしてください。
+- 「映像のみ(frames)」「映像+音声(tav)」「音声のみ(audio)」「静止画(image)」は種類(`kind`)を分けて保存し、検索時に選びます。`auto` は、文字・画像で検索したときは `INCLUDE_AUDIO` の設定に合わせて tav か frames と、image を探します。音声で検索したときの `auto` は `audio` を探します。
+- **動画・画像を保存しないモードがあります。** `STORE_MEDIA=false`(または取り込みの `store_media=false`)で取り込むと、ベクトルと情報(取り込み元の名前・時刻・グループ ID など)だけを残し、アップロードされたファイルは取り込み後に削除し、サムネイルも作りません。検索結果の `media_url` / `thumb_url` は `null` になります。パス指定で取り込んだファイルは利用者のものなので削除せず、配信の対象から外すだけです。元のファイルが無いため、取り込み直し(reindex)はできません。
+- **画像だけでも登録できます。** 動画から切り出せない場合や写真だけを扱う場合は、画像 1 枚を 1 件として取り込みます(`/api/ingest/image`、パス指定、フォルダ一括、監視フォルダのいずれも対応)。撮影日時は指定値、ファイル名の日時、EXIF の撮影日時の順に採用します。
+- **保存期間を設定できます。** ストリームや監視フォルダでは窓が増え続けます(2 秒窓のストリーム 1 本で 1 日約 4.3 万窓・ベクトル約 140MB)。`RETENTION_DAYS` を設定すると、古い窓を 10 分ごとに削除し、メモリとディスクの使用量を一定の範囲に保ちます。窓が無くなったファイルは状態が `expired` になり、元のファイルは削除しません。
+- **ベクトルは組み込み型のベクトル DB(USearch)に保存します。** 設定・取り込み元・窓の情報は SQLite(`mediasearch.db`)、ベクトルは `vectors.usearch` に保存します。どちらも `DATA_DIR` の中の 1 ファイルで、別のサーバーは不要です。件数が増えると近似検索(HNSW)に切り替えるため、検索時間はほぼ一定です。メモリはベクトルの大きさに比例します(768 次元・10 万窓で約 320MB)。
+
+## API の概要
+
+| | |
+|---|---|
+| `GET /api/info` | 状態・版・既定値・プリセット・索引の件数・監視フォルダの状態 |
+| `POST /api/ingest/video` / `audio` / `image` | ファイルのアップロード取り込み(画像は複数枚をまとめて送れる) |
+| `POST /api/ingest/path` | コンテナ内パスの取り込み |
+| `POST /api/ingest/dir` | コンテナ内フォルダの一括取り込み |
+| `POST /api/watch/scan` | 監視フォルダを今すぐ走査 |
+| `POST /api/ingest/frames` | 加工済みフレーム(+音声)の取り込み |
+| `POST /api/search/text` / `image` / `audio` | 検索(グループ ID・場所・期間・種別・最小スコアで絞り込み) |
+| `GET /api/jobs`, `/api/sources`, `/api/sources/{id}` ほか | ジョブ・取り込み元の確認、削除、再取り込み |
+| `POST /api/streams`、`GET /api/streams` ほか | RTSP のストリームの登録・状態の確認・停止・再開・削除 |
+| `GET /api/search/live` | 取り込み中に追加された窓のうち、文章に合うものを通知する(リアルタイム検索。Server-Sent Events) |
+| `GET /healthz` / `GET /readyz` | 死活監視(プロセスが動いているか)/ 準備完了の確認(DB・ベクトル DB・推論側・空き容量。処理できなければ 503)。どちらも認証不要 |
+| `PATCH /api/sources/{id}` | 取り込み元の名前・グループ ID・場所を変える(取り込み直しは不要) |
+| `POST /api/jobs/{id}/cancel` | 取り込みのジョブを取り消す(実行中は窓の区切りで止める) |
+| `GET /api/metrics` | 資源の使用状況(CPU・メモリ・ディスク・GPU)と推論の稼働率。ベンチマーク(`bench/`)が読む |
+| `GET /api/stats` | 取り込みの処理時間の集計(ジョブごとの内訳は `GET /api/jobs/{id}` の `timings`。`bench/bench.py` で計測) |
+| `GET /api/media/{id}`, `/api/thumb/{id}` | 元動画(Range 対応)とサムネイル |
+| `/compute/*` | ベクトル化 API(ROLE=compute / all) |
+| `/mcp` | MCP サーバー(AI エージェント向け。ROLE=all / app) |
+
+詳細は `/scalar`(Scalar)、`/docs`(Swagger UI)、`/redoc`、[docs/api.md](docs/api.md)(開発者向けガイド)、[docs/openapi.json](docs/openapi.json)(OpenAPI の仕様書)を参照してください。
+
+## ドキュメント
+
+- [docs/design.md](docs/design.md) — 設計書(構成、窓の設計、DB、API、ネイティブ化の計画)
+- [docs/api.md](docs/api.md) — API ガイド(認証、エラー、使い方の例、クライアントの自動生成)
+- [docs/mcp.md](docs/mcp.md) — MCP サーバー(AI エージェントからの利用)
+- [docs/operations.md](docs/operations.md) — 運用メモ(容量見積もり、チューニング、トラブルシュート)
+- [docs/nginx.md](docs/nginx.md) — Nginx を前段に置く構成(HTTPS・送信元ごとの上限・アクセスログ。`deploy/`)
+- [docs/gpu.md](docs/gpu.md) — GPU モード(RTX 3060 / RX 9060 XT / Intel)の確認手順
+- [docs/release.md](docs/release.md) — リリースの手順と、添付する SBOM・脆弱性検査結果
+- [docs/security.md](docs/security.md) — セキュリティ対策と、残っているリスク
+- [bench/README.md](bench/README.md) — ベンチマーク(速度・資源の使用率・ボトルネックの診断)
+- [SECURITY.md](SECURITY.md) — 脆弱性の報告方法
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — サードパーティのソフトウェアとライセンス
+- [AGENTS.md](AGENTS.md) — AI エージェント向けの作業ガイド
+
+## 開発
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"          # モデル不要のテスト用
+pytest -q                        # ダミー埋め込みでの通しテスト(ffmpeg が必要)
+pip install -e ".[model]"        # 実モデルを使う場合(transformers は AGENTS.md の固定コミットを推奨)
+RUN_MODEL_TESTS=1 pytest -q -m model
+EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:create_app --reload
+```
+
+## リリースと SBOM・脆弱性検査
+
+`v0.2.0` のようなタグを push すると、版付きのイメージ(`:0.2.0-cpu` など)を公開し、
+全イメージの **SBOM(SPDX / CycloneDX)と脆弱性検査の結果**を添付した GitHub のリリースを作成します。
+main の最新イメージは毎週検査し、結果を GitHub Actions の実行結果に残します。詳細は [docs/release.md](docs/release.md) を参照してください。
+
+## セキュリティ
+
+- 脆弱性を見つけた場合は、公開の Issue ではなく、GitHub の非公開の報告機能でお知らせください(手順は [SECURITY.md](SECURITY.md))。
+- 実施している対策と、利用者側で必要な設定は [docs/security.md](docs/security.md) を参照してください。
+- 公開イメージの SBOM と脆弱性検査の結果は、各リリースに添付しています。上の「vulnerabilities」バッジは、main の最新イメージを毎週検査した結果(全イメージのうち最も多い件数)です。
+
+## ライセンス
+
+- 本リポジトリのソースコード: [Apache License 2.0](LICENSE)
+- モデル(EmbeddingGemma 2、Google): Apache-2.0(モデルカードの記載による)。公開イメージに同梱しています。
+- 公開イメージには、FFmpeg(GPL-2.0 以降)、PyTorch などのオープンソースのソフトウェアのほか、GPU 用のイメージには
+  NVIDIA(CUDA)と Intel(oneAPI)の独自ライセンスのライブラリが含まれます。一覧は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
