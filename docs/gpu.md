@@ -1,8 +1,8 @@
 # GPU モードの確認手順
 
-> **作者の環境には GPU がないため、GPU 版(`cuda` / `rocm` / `intel`)は実機で動かしていません。**
-> PyTorch のホイールの存在(2.14.1 の cu126 / rocm7.2 / xpu が cp312 向けに公開されていること)までは確認しましたが、
-> モデルが各 GPU で正しい出力を返すかは未確認です。以下の手順で確認し、結果を Issue かコミットで残してください。
+> 実機で確認した GPU は、NVIDIA の RTX 3060 12GB(`cuda`。Linux)と、AMD の RX 9060 XT 16GB(`rocm`。Windows の WSL2)です
+> (結果は下の記録欄)。Intel の GPU(`intel`)と、Linux ネイティブの AMD(`/dev/kfd`)は未確認です。
+> 未確認の環境で動かした場合は、以下の手順で確認し、結果を Issue かコミットで残してください。
 
 ## 共通の確認(どの GPU でも)
 
@@ -96,7 +96,8 @@ EmbeddingGemma 2 では画像エンコーダの注意機構がこの影響を受
 - `vaapi` のデバイスは `/dev/dri/renderD128` などを自動で選びます。複数ある場合は `FFMPEG_HWACCEL_DEVICE` で指定します。
 - イメージには、`rocm` に AMD 用(mesa)、`intel` に Intel 用(iHD)の VA-API ドライバを入れています。`cuda` は、NVIDIA Container Toolkit が
   ドライバの復号ライブラリを渡すよう、イメージに `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` を設定しています。
-- **実機の GPU での復号は未確認です。** GPU が無い環境では、GPU を指定しても CPU に切り替わること(テスト `tests/test_decode.py`)までを確認しています。
+- 実機の GPU での復号は、RTX 3060(`cuda`。NVDEC)で確認しました(`timings.decoder` が `cuda`)。AMD・Intel の VA-API での復号は未確認です
+  (WSL2 の AMD は CPU で復号します)。GPU が無い環境では、GPU を指定しても CPU に切り替わること(テスト `tests/test_decode.py`)を確認しています。
 
 実機での確認:
 
@@ -169,7 +170,7 @@ python bench/compare.py bench/results/*-batch1 bench/results/*-batch8
 
 アプリは起動直後に一般ユーザー(uid 1000)へ切り替えて動きます(`docs/security.md`)。
 `/dev/dri` と `/dev/kfd` のグループはデバイスファイルから自動で引き継ぐため、通常は追加の設定は不要です。
-ただし実機の GPU では未確認です。GPU を掴めない(`accelerator: cpu`)場合は、切り分けのために `-e PUID=0`(root のまま動かす)でも試し、
+RTX 3060(`cuda`、`--gpus all`)では、一般ユーザーのまま GPU を使えることを確認しました。AMD・Intel の実機では未確認です。GPU を掴めない(`accelerator: cpu`)場合は、切り分けのために `-e PUID=0`(root のまま動かす)でも試し、
 結果の違いを下の記録欄に残してください。起動ログの「補助グループ=…」に、デバイスファイルのグループ番号が含まれているかも確認してください。
 
 ## 複数 GPU・選択
