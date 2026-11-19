@@ -132,7 +132,7 @@ ffmpeg -v error -hwaccel cuda -i <動画> -f null -                             
 | 文章・画像で探した場面が 1 位(正解率) | 31 / 32・16 / 16 | 31 / 32・16 / 16 |
 
 - 1 位が float32 と違った検索は、最適化の有無にかかわらず、float32 で 1 位と 2 位の点数の差が 0.0013 以下のもの(ほぼ同点)だけでした。
-- 起動時の準備: 初回は約 1 分(compile)。結果を `DATA_DIR/cache/torch` に保存するため、2 回目以降の起動は約 32 秒です(最適化なしは約 20 秒)。
+- 起動時の準備: 初回は約 1 分(compile)。結果を `DATA_DIR/cache/torch` に保存するため、2 回目以降の起動は約 32〜39 秒です(CI のイメージでは 37〜39 秒。2026-11-20)(最適化なしは約 20 秒)。
   `DATA_DIR` を作り直すと、初回と同じ時間がかかります。`DATA_DIR` は、ほかの利用者が書き込めない場所に置いてください(保存した compile の結果を読み込むため。`docs/security.md`)。
 - C コンパイラが無い場合(`cuda` 以外のイメージに相当する構成)や、準備に失敗した場合は、警告を出して最適化を使わずに動きます。
   `TORCH_COMPILE=off` で、compile と CUDA Graph を使わない設定にできます(詰め物の除去と `encode()` の無駄を省く処理は残ります)。
@@ -180,7 +180,7 @@ python bench/compare.py bench/results/*-batch1 bench/results/*-batch8
 
 | GPU | イメージ | 起動 | accelerator | CPUとの類似度 | 取り込み速度 | メモ |
 |---|---|---|---|---|---|---|
-| RTX 3060 12GB | cuda(Ubuntu 24.04 / 26.04.1、`--gpus all`) | 可(約 11〜18 秒。高速化ありは初回約 80 秒・2 回目以降約 32 秒) | nvidia-cuda(bf16) | 0.9999 以上(文章 5 件・画像 3 件。NaN なし。2026-10-13) | frames 約 0.18 秒/窓(1080p・2 秒窓・まとめる件数 4、推論の高速化あり。2026-11-20。高速化の前は約 0.31 秒)。動画の復号も GPU(`decoder: cuda`) | ドライバ 595.99.02、NVIDIA Container Toolkit 1.20.1、`torch 2.14.1+cu126`。CPU は Core i7-6700K。結果は `bench/README.md` |
+| RTX 3060 12GB | cuda(Ubuntu 24.04 / 26.04.1、`--gpus all`) | 可(約 11〜18 秒。高速化ありは初回約 80 秒・2 回目以降約 32〜39 秒) | nvidia-cuda(bf16) | 0.9999 以上(文章 5 件・画像 3 件。NaN なし。2026-10-13) | frames 約 0.18 秒/窓(1080p・2 秒窓・まとめる件数 4、推論の高速化あり。2026-11-20。高速化の前は約 0.31 秒)。動画の復号も GPU(`decoder: cuda`) | ドライバ 595.99.02、NVIDIA Container Toolkit 1.20.1、`torch 2.14.1+cu126`。CPU は Core i7-6700K。結果は `bench/README.md` |
 | RX 9060 XT 16GB | rocm(修正後。Windows 11 + Docker Desktop の WSL2、`/dev/dxg`) | 可(約 11 秒) | amd-rocm(bf16) | 0.9999 以上(文章 5 件・画像 3 件。NaN なし) | frames 約 0.26 秒/窓(1080p・2 秒窓・まとめる件数 4。注意機構の高速化の前は約 1.03 秒)。CPU(Ryzen 7 5700X)の約 28 倍 | ドライバ Adrenalin 26.8.1(32.0.31041.1004)、librocdxg 1.2.2、`torch 2.14.1+rocm7.2`。修正前のイメージは libatomic1 の不足で推論を開始できない |
 | Intel 内蔵 | intel | | | | | |
 | (GPU なし・4 vCPU) | cuda | 可(約 16 秒) | cpu | (未計測。検索スコアは cpu 版と小数 3 桁まで一致) | frames 約 8 秒/窓 | `torch 2.14.1+cu126`。GPU の確認にはならない |
