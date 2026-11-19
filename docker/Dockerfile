@@ -11,10 +11,12 @@
 # ビルドは GitHub Actions が行います(.github/workflows/build.yml)。
 # 手元でビルドする場合の例:  docker build -f docker/Dockerfile --build-arg VARIANT=cpu -t mediasearch:cpu .
 #
-# 注意: GPU 系(cuda / rocm / intel)は、作者の環境(GPU 無し)では動作確認できていません。
-#       実機での確認手順は docs/gpu.md を参照してください。
+# 実機で確認した GPU は、cuda(RTX 3060)と rocm(RX 9060 XT。Windows の WSL2)です。intel は未確認です。
+# 確認の手順と結果は docs/gpu.md を参照してください。
 # =============================================================================
-FROM ubuntu:24.04
+# ベースイメージは、タグではなく内容のハッシュ(digest)で固定する。同じタグの中身が差し替えられても、
+# 確認していないイメージでビルドしないため。更新は Dependabot が提案する(.github/dependabot.yml)
+FROM ubuntu:24.04@sha256:73b999393d07f2bf65a40373778a44dc9a6d54ad7718d29247d8ff9413c4d6a8
 
 ARG VARIANT=cpu
 # 依存のバージョンは「動作確認した組み合わせ」に固定しています(AGENTS.md 参照)
