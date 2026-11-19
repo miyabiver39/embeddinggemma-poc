@@ -22,3 +22,8 @@ updates:
     directory: /docker
     schedule:
       interval: weekly
+    # ベースの Ubuntu は LTS(24.04)に固定する。同じ版の中の更新(digest。セキュリティ修正を含む)だけを提案させる。
+    # 版を上げるとき(次の LTS など)は、GPU 版の動作確認とあわせて手で行う
+    ignore:
+      - dependency-name: ubuntu
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

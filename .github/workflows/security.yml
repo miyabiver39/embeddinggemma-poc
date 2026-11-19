@@ -54,11 +54,23 @@ jobs:
 
       - name: syft と grype を入れる
         # 公式のインストーラ(配布物のチェックサムを検証する)で最新版を入れます。
-        # 脆弱性データベースの形式は grype の版に依存するため、検査ツールは固定せず最新を使います。
+        # 脆弱性データベースの形式は grype の版に依存するため、検査ツール本体は固定せず最新を使います。
+        # インストーラ自体は、確認した版(syft v1.57.2 / grype v0.122.1)のコミットに固定し、ハッシュも照合します
+        # (配布元の main ブランチが書き換えられても、検証していないスクリプトを実行しないため)。
+        env:
+          SYFT_INSTALLER: https://raw.githubusercontent.com/anchore/syft/1a72047fd46c72e0a12ee77e24b23d2316753d08/install.sh
+          SYFT_INSTALLER_SHA256: 2ed88b163a4576521598f9e573bd3d64f39c7b5912a21fb9571a9d604ca64b3b
+          GRYPE_INSTALLER: https://raw.githubusercontent.com/anchore/grype/8f3ddeddc4a4ed6314248aaf0a7c510f98db8882/install.sh
+          GRYPE_INSTALLER_SHA256: 4bc8e844d1ca0b74082cb51e1587d58c35150756954660db3d3078e57c81cbfd
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$HOME/.local/bin"
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b "$HOME/.local/bin"
+          curl -sSfLo syft-install.sh "$SYFT_INSTALLER"
+          curl -sSfLo grype-install.sh "$GRYPE_INSTALLER"
+          echo "${SYFT_INSTALLER_SHA256}  syft-install.sh" | sha256sum -c -
+          echo "${GRYPE_INSTALLER_SHA256}  grype-install.sh" | sha256sum -c -
+          sh syft-install.sh -b "$HOME/.local/bin"
+          sh grype-install.sh -b "$HOME/.local/bin"
+          rm syft-install.sh grype-install.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: 検査するイメージを決める
@@ -106,7 +118,7 @@ jobs:
           # syft 独自形式の SBOM は grype の入力用なので、配布物には含めない
           rm out/sbom.syft.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: scan-${{ matrix.variant }}
           path: out/
@@ -120,9 +132,11 @@ jobs:
     permissions:
       contents: write # リリースへの添付に必要
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: scan-*
           path: reports
@@ -143,7 +157,7 @@ jobs:
           python3 scripts/badges.py vulns reports badges/vulnerabilities.json
           python3 scripts/badges.py publish badges --message "脆弱性検査の結果を更新"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: security-report
           path: notes.md
