@@ -6,6 +6,7 @@ HTTP の要求・応答の形に依存しない処理をここにまとめ、api
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -27,7 +28,19 @@ from .store import Store
 from .streams import StreamManager
 from .watcher import FolderWatcher
 
+log = logging.getLogger(__name__)
+
 KIND_CHOICES = ("auto", "all", "frames", "tav", "audio", "image")
+
+
+def _public_error(what: str, exc: BaseException) -> str:
+    """認証なしで返す応答(/readyz)用の、エラーの要約。
+
+    例外の文言には、ファイルのパス・接続先・内部の値が含まれることがあるため、応答には例外の種類だけを入れ、
+    詳細はサーバーのログに残します(ロードバランサーなど、誰からでも見える場所に内部の情報を出さないため)。
+    """
+    log.warning("/readyz: %sを確認できません: %s: %s", what, type(exc).__name__, exc)
+    return f"{type(exc).__name__}(詳細はサーバーのログ)"
 
 
 class InvalidInput(ValueError):
@@ -279,11 +292,11 @@ class Service:
             ctx.store.get_meta("schema_version")
             checks["database"] = {"ok": True}
         except Exception as exc:
-            checks["database"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            checks["database"] = {"ok": False, "error": _public_error("DB", exc)}
         try:
             checks["vectors"] = {"ok": True, "count": len(ctx.store.vectors)}
         except Exception as exc:
-            checks["vectors"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            checks["vectors"] = {"ok": False, "error": _public_error("ベクトル DB", exc)}
         try:
             info = ctx.embedder.info()
             warm = ctx.warmup_state
@@ -300,8 +313,11 @@ class Service:
                     embed_check["error"] = warm["error"]
             checks["embedder"] = embed_check
         except Exception as exc:  # 分離構成で compute に接続できない場合など
-            checks["embedder"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            checks["embedder"] = {"ok": False, "error": _public_error("推論側", exc)}
         d = disk.status(s.data_dir, s.min_free_disk_mb)
+        if "error" in d:  # パスや OS のエラーの文言は、認証なしの応答に含めない(ログに残す)
+            log.warning("/readyz: DATA_DIR の空き容量を確認できません: %s", d["error"])
+            d = {**d, "error": "空き容量を確認できません(詳細はサーバーのログ)"}
         checks["disk"] = {"ok": d["ok"], **{k: v for k, v in d.items() if k != "ok"}}
         ok = all(c["ok"] for c in checks.values())
         return ok, {"status": "ready" if ok else "not_ready", "checks": checks}

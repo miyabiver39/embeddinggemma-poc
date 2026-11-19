@@ -347,9 +347,11 @@ def build_api_router(ctx: Context) -> APIRouter:
         取り込み済みのファイルは重複として既存の取り込み元を返します(`force=true` で取り込み直し)。
         """
         path = Path(body.path)
+        # 許可したフォルダの外なら、拡張子やファイルの有無に関係なく 403 にする。存在の確認より先に行うのは、
+        # 400(無い)と 403(外)の違いから、許可していない場所のファイルの有無を調べられないようにするため
+        ctx.intake.check_allowed(path)
         if not path.is_file():
             raise HTTPException(400, f"ファイルが見つかりません: {body.path}(コンテナ内のパスで指定してください)")
-        ctx.intake.check_allowed(path)  # 許可したフォルダの外なら、拡張子に関係なく 403 にする
         kind = media_kind_of(path) if body.kind == "auto" else body.kind
         if kind is None:
             raise MediaError(f"映像・音声・画像として扱えない拡張子です: {path.name}")
