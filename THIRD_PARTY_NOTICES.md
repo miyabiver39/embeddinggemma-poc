@@ -42,6 +42,7 @@
 |---|---|---|
 | `cuda` | NVIDIA CUDA ランタイム・cuBLAS・cuDNN・NCCL など(`nvidia-*` パッケージ。PyTorch が利用) | **NVIDIA の独自ライセンス**(NVIDIA Software License Agreement / CUDA EULA) |
 | `cuda` | Triton | MIT |
+| `cuda` | GCC(Ubuntu の `gcc`)、GNU C ライブラリの開発用ファイル(`libc6-dev`)、Python のヘッダー(`python3-dev`)。推論の高速化(torch.compile)で、Triton が起動時に部品をコンパイルするために使う | GCC は **GPL-3.0 以降**(GCC Runtime Library Exception つき)、glibc は LGPL-2.1 以降、Python は PSF-2.0 |
 | `rocm` | AMD ROCm のライブラリ(PyTorch の ROCm 版に同梱) | 各ライブラリのライセンス(PyTorch のパッケージ内の記載を参照) |
 | `rocm` | Triton(ROCm 版) | MIT |
 | `rocm` | librocdxg(AMD。WSL2 で `/dev/dxg` から GPU を使うための部品。`/opt/rocm/lib`、版は `docker/Dockerfile` の `ROCDXG_VERSION`) | MIT |

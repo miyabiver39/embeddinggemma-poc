@@ -13,12 +13,15 @@ import logging
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 
 import numpy as np
 
 from ..config import Settings, resolve_embed_batch
+from . import accel
 from .base import (
+    SAMPLE_RATE,
     AudioPart,
     Embedder,
     EmbedderInfo,
@@ -31,6 +34,12 @@ from .batch import MicroBatcher
 from .gate import PriorityGate
 
 log = logging.getLogger(__name__)
+
+TEXT_BATCH = 8  # 検索の文章をまとめる最大の件数(TEXT_GRAPH_BATCHES の最大と合わせる)
+TEXT_WAIT_SEC = 0.003  # 同時に検索が来ているとき、次の文章を待つ時間
+# 文章の推論を CUDA Graph に記録する段階(accel.TextGraphs)。件数は TEXT_BATCH まで、長さは検索の文章が収まる 128 まで
+TEXT_GRAPH_BATCHES = (1, 2, 4, 8)
+TEXT_GRAPH_LENGTHS = (16, 32, 64, 128)
 
 
 # Intel GPU の有無を調べる子プロセスのコード。結果(デバイス数)を最後の行に出す
@@ -148,6 +157,9 @@ def resolve_dtype(requested: str, device: str):
 
 class LocalEmbedder(Embedder):
     def __init__(self, settings: Settings) -> None:
+        if settings.torch_compile != "off":
+            # compile の結果の保存先は、torch(inductor)を読み込む前に決める必要がある(後から変えても効かない)
+            accel.setup_compile_cache(settings.data_dir)
         import torch
 
         self._settings = settings
@@ -177,10 +189,96 @@ class LocalEmbedder(Embedder):
         self._modalities = list(getattr(self._model, "modalities", []) or [])
         self._apply_image_token_limit(settings.image_max_tokens)
         torch.set_grad_enabled(False)
+        # encode() は呼ぶたびにモデル全体の .to(device) と .eval() を行い、
+        # 1 回あたり十数〜30 ms かかる(RTX 3060 で実測)。
+        # ここで 1 回だけ行い、推論では前処理 → 転送 → 計算を直接呼ぶ(encode と同じ手順で、結果は完全に一致する)
+        self._model.eval()
         self._batch = resolve_embed_batch(settings.embed_batch, self._device)
-        # 窓(複数の画像・音声の並び)は、同時に来た要求をまとめて 1 回で推論する(batch_size が 2 以上のとき)
-        self._parts_batcher = MicroBatcher(self._encode_windows, self._batch) if self._batch > 1 else None
+        self._compiled = False
+        self._text_graphs: accel.TextGraphs | None = None
+        # 窓(複数の画像・音声の並び)は、同時に来た要求をまとめて 1 回で推論する(batch_size が 2 以上のとき)。
+        # 前処理(CPU)と推論(GPU)は別のスレッドで動かし、推論中に次の回の前処理を済ませる
+        self._parts_batcher = (
+            MicroBatcher(self._run_windows, self._batch, prepare=self._prepare_windows) if self._batch > 1 else None
+        )
+        # 検索の文章も、同時に来たものをまとめる。まとめても float32 の結果との類似度は 1 件ずつと同じ(最小 0.99997)。
+        # 同時に検索が来ているとき(前の回に 2 件以上まとまったとき)だけ、次の文章を 3 ms 待つ
+        # (検索結果を返してから次の要求が届くまでの間を待つため。HTTP 経由・同時 4 件で 1 ms: 205 件/秒、3 ms: 207、
+        # 5 ms: 175。同時 8 件で 261 / 273 / 329。RTX 3060 で実測)。単独の検索は待たない(待つと、その分だけ遅くなる)。
+        # 文章の前処理は 1 ms 未満のため、窓と違い前処理を別のスレッドに分けない
+        # (分けると、前処理が届いた順に 1 件ずつ取り出してしまい、まとまらない)
+        self._text_batcher = (
+            MicroBatcher(
+                lambda texts: self._run_texts(self._prepare_texts(texts)),
+                TEXT_BATCH,
+                wait_sec=TEXT_WAIT_SEC,
+                wait_only_when_busy=True,
+            )
+            if self._batch > 1 and self._accelerator == "nvidia-cuda"
+            else None
+        )
+        if self._accelerator == "nvidia-cuda":  # 起動時の準備で上のまとめ処理も使うため、作った後に行う
+            self._setup_acceleration(settings)
         log.info("モデルの読み込みが完了しました。対応する入力: %s、まとめる件数: %d", self._modalities, self._batch)
+
+    # ------------------------------------------------------------------ 高速化(embedders/accel.py)
+    def _setup_acceleration(self, settings: Settings) -> None:
+        """NVIDIA の GPU で、結果を変えない(float32 の結果に近づける)最適化を有効にします。"""
+        model = self._model[0].model
+        accel.trim_image_padding(model)
+        mode = settings.torch_compile
+        if mode == "off":
+            return
+        if not accel.compiler_available():
+            log.warning(
+                "C コンパイラが見つからないため、torch.compile を使わずに動きます(推論が約 1.4 倍遅くなります)。"
+                "cuda イメージには含まれています"
+            )
+            return
+        accel.compile_layers(model)
+        t0 = time.perf_counter()
+        log.info("推論の準備(torch.compile)を行います。初回は 1 分ほどかかります(結果は DATA_DIR/cache/torch に保存)")
+        try:
+            self._warmup(settings)
+        except Exception:
+            # compile に失敗しても、通常の計算で動き続ける(遅くなるだけで、結果は同じ)
+            log.warning("torch.compile の準備に失敗したため、使わずに動きます", exc_info=True)
+            accel.uncompile_layers(model)
+            return
+        self._compiled = True
+        self._install_text_graphs()
+        log.info("推論の準備が完了しました(%.1f 秒)", time.perf_counter() - t0)
+
+    def _install_text_graphs(self) -> None:
+        """文章の推論を CUDA Graph に記録します。失敗しても、記録を使わずに動き続ける(遅くなるだけ)。"""
+        graphs = accel.TextGraphs(self._model[0].model.language_model, TEXT_GRAPH_BATCHES, TEXT_GRAPH_LENGTHS)
+        try:
+            graphs.install()
+            # 記録を使った推論で、正しく計算できることを確かめる(NaN なども _to_numpy で検出する)
+            self.embed_texts(["warmup"])
+            self._run_texts(self._prepare_texts(["warmup", "a longer warmup sentence for padding"]))
+        except Exception:
+            log.warning("文章の推論の CUDA Graph を使わずに動きます(準備に失敗しました)", exc_info=True)
+            graphs.uninstall()
+            return
+        self._text_graphs = graphs
+
+    def _warmup(self, settings: Settings) -> None:
+        """よく使う形の入力で一度ずつ推論し、compile を起動時に済ませます(最初の検索・取り込みを待たせないため)。"""
+        from ..media import output_size
+
+        w, h = output_size(1920, 1080, settings.image_max_side)  # 16:9 の映像を縮小した大きさ
+        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        parts = [ImagePart(frame) for _ in range(max(settings.frames_per_window, 1))]
+        self.embed_texts(["warmup"])
+        self.embed_images([frame], high=True)
+        self.embed_audio(np.zeros(SAMPLE_RATE * max(settings.audio_chunk_sec, 1), dtype=np.float32))
+        self._run_windows(self._prepare_windows([parts]))
+        if self._batch > 1:
+            self._run_windows(self._prepare_windows([parts] * self._batch))
+            self.embed_images([frame] * self._batch)
+            # 長さの違う文章をまとめた形(詰め物とマスクがある)。検索の文章をまとめたときに使う
+            self._run_texts(self._prepare_texts(["warmup", "a longer warmup sentence for padding"] * (TEXT_BATCH // 2)))
 
     # ------------------------------------------------------------------ 内部処理
     def _apply_image_token_limit(self, limit: int) -> None:
@@ -229,30 +327,45 @@ class LocalEmbedder(Embedder):
             batch_size=self._batch,
         )
 
+    def _preprocess(self, inputs: list, prompt_name: str | None = None):
+        """前処理(文字の分割・画像の変換。CPU)。推論の順番待ちの外で行い、その間も GPU を使えるようにする。"""
+        prompt = self._model._resolve_prompt(None, prompt_name)
+        return self._model.preprocess(inputs, prompt=prompt)
+
+    def _forward(self, features, high: bool) -> np.ndarray:
+        """前処理済みの入力を GPU に送って計算し、(件数, 次元) の配列を返します。"""
+        import torch
+        from sentence_transformers.util import batch_to_device
+
+        with self._gate.acquire(high=high), torch.inference_mode():
+            out = self._model(batch_to_device(features, self._model.device))["sentence_embedding"]
+            arr = self._to_numpy(out)
+        return arr.reshape(-1, arr.shape[-1])
+
     def embed_texts(self, texts: Sequence[str], kind: str = "query") -> np.ndarray:
+        if kind == "query" and self._text_batcher is not None:
+            return np.stack(self._text_batcher.run_many(list(texts)))
         prompt = "query" if kind == "query" else "document"
-        with self._gate.acquire(high=True):
-            out = self._model.encode(list(texts), prompt_name=prompt, convert_to_tensor=True)
-        return finalize(self._to_numpy(out), self._dims)
+        return finalize(self._forward(self._preprocess(list(texts), prompt), high=True), self._dims)
+
+    def _prepare_texts(self, texts: list[str]):
+        return len(texts), self._preprocess(texts, "query")
+
+    def _run_texts(self, prepared) -> list[np.ndarray]:
+        count, features = prepared
+        return list(finalize(self._forward(features, high=True), self._dims).reshape(count, -1))
 
     def embed_images(self, images: Sequence[np.ndarray], high: bool = False) -> np.ndarray:
         """画像を batch_size 枚ずつ、1 回の推論でまとめてベクトルにします(1 なら 1 枚ずつ)。"""
         vectors = []
         for i in range(0, len(images), self._batch):
             chunk = [{"image": self._prepare_image(im)} for im in images[i : i + self._batch]]
-            with self._gate.acquire(high=high):
-                if len(chunk) == 1:
-                    out = self._model.encode(chunk[0], convert_to_tensor=True)
-                else:
-                    out = self._model.encode(chunk, convert_to_tensor=True, batch_size=len(chunk))
-            arr = self._to_numpy(out)
-            vectors.append(arr.reshape(-1, arr.shape[-1]))
+            vectors.append(self._forward(self._preprocess(chunk), high=high))
         return finalize(np.concatenate(vectors), self._dims)
 
     def embed_audio(self, pcm: np.ndarray, high: bool = False) -> np.ndarray:
-        with self._gate.acquire(high=high):
-            out = self._model.encode({"audio": pcm.astype(np.float32)}, convert_to_tensor=True)
-        return finalize(self._to_numpy(out), self._dims)
+        features = self._preprocess([{"audio": pcm.astype(np.float32)}])
+        return finalize(self._forward(features, high=high), self._dims)
 
     def embed_parts(self, parts: Sequence[Part], high: bool = False) -> np.ndarray:
         """並べた順序のまま、1回の推論で1ベクトルにします。
@@ -262,12 +375,12 @@ class LocalEmbedder(Embedder):
         """
         if self._parts_batcher is not None and not high:
             return self._parts_batcher.submit(parts).result()
-        return self._encode_windows([parts], high=high)[0]
+        return self._run_windows(self._prepare_windows([parts]), high=high)[0]
 
     def embed_parts_many(self, items: Sequence[Sequence[Part]], high: bool = False) -> list[np.ndarray]:
         if self._parts_batcher is not None and not high:
             return self._parts_batcher.run_many(list(items))
-        return [self._encode_windows([parts], high=high)[0] for parts in items]
+        return [self._run_windows(self._prepare_windows([parts]), high=high)[0] for parts in items]
 
     def _message(self, parts: Sequence[Part]) -> list[dict]:
         content: list[dict] = []
@@ -282,14 +395,18 @@ class LocalEmbedder(Embedder):
                 raise TypeError(f"未対応の部品です: {type(part)!r}")
         return [{"role": "user", "content": content}]
 
-    def _encode_windows(self, items: list[Sequence[Part]], high: bool = False) -> list[np.ndarray]:
-        """複数の窓を 1 回の推論でベクトルにします(まとめても結果が変わらないことを実測。コサイン類似度 1.00000)。"""
-        messages = [self._message(parts) for parts in items]
-        with self._gate.acquire(high=high):
-            out = self._model.encode(messages, convert_to_tensor=True, batch_size=len(messages))
-        vectors = finalize(self._to_numpy(out), self._dims)
-        return list(vectors.reshape(len(messages), -1))
+    def _prepare_windows(self, items: list[Sequence[Part]]):
+        """複数の窓の前処理(CPU)。まとめても結果が変わらないことを実測(コサイン類似度 1.00000)。"""
+        return len(items), self._preprocess([self._message(parts) for parts in items])
+
+    def _run_windows(self, prepared, high: bool = False) -> list[np.ndarray]:
+        """前処理済みの複数の窓を、1 回の推論でベクトルにします。"""
+        count, features = prepared
+        vectors = finalize(self._forward(features, high=high), self._dims)
+        return list(vectors.reshape(count, -1))
 
     def close(self) -> None:
         if self._parts_batcher is not None:
             self._parts_batcher.close()
+        if self._text_batcher is not None:
+            self._text_batcher.close()
