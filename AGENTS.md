@@ -20,7 +20,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 | セキュリティ | **実施できる対策は実施する**。ただし「追加の設定なしで起動できること」は崩さない(環境に依存する対策は環境変数で有効にする方式にし、安全でない既定のまま起動したときはログで警告する)。新しい API・入力経路を足すときは、認証・CSRF・パスの制限・大きさの上限の対象になっているかを確認する。TLS はアプリでは扱わず、リバースプロキシに任せる。README に自己責任の旨と、映像が個人情報にあたり得る点を明記する。詳細は `docs/security.md` |
 | ビルド | **GitHub Actions に任せる**。利用者は `docker pull` して起動するだけ |
 | 公開 | 公開リポジトリ。イメージは ghcr.io へ公開する |
-| 言語 | ドキュメント・コード中のコメント・docstring・WebUI は**日本語**(ビジネス文書の表現。絵文字は使わない)。識別子は英語 |
+| 言語 | ドキュメント・コード中のコメント・docstring・WebUI は**日本語**(ビジネス文書の表現。絵文字は使わない)。識別子は英語。例外として、README は英語版(`README.md`)を主とし、日本語版(`README.ja.md`)を併せて置く。README を変えたら両方を同じ内容に更新する |
 | 対象環境 | Linux コンテナ(CPU / NVIDIA CUDA / AMD ROCm / Intel XPU)。**Mac 環境は想定しない**(今後も不要) |
 | 速度 | 推論は、初回起動時に ONNX Runtime / OpenVINO / TensorRT などへ変換してキャッシュできるようにする |
 
@@ -99,7 +99,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 
 ```
 .
-├── AGENTS.md / README.md / LICENSE / SECURITY.md / THIRD_PARTY_NOTICES.md / docker-compose.yml
+├── AGENTS.md / README.md(英語)/ README.ja.md(日本語)/ LICENSE / SECURITY.md / THIRD_PARTY_NOTICES.md / docker-compose.yml
 ├── docs/                  design.md(設計書) operations.md(運用) gpu.md(GPU確認手順) security.md(セキュリティ対策) release.md(リリース)
 ├── src/mediasearch/
 │   ├── main.py            アプリ生成(ROLE で構成が変わる)
