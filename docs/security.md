@@ -28,6 +28,7 @@
 | 依存物の固定 | 有効 | なし | transformers のアーカイブをハッシュで照合し、モデルの版(Hugging Face のコミット)を固定しています。ベースイメージ(Ubuntu 24.04)は内容のハッシュ(digest)で固定しています |
 | 認証なしの応答の情報 | 有効 | なし | `/readyz` は認証なしで開けるため、失敗の理由は例外の種類だけを返し、文言(パス・接続先などを含み得る)はサーバーのログにだけ残します |
 | ファイルの有無の秘匿 | 有効 | なし | パス指定の取り込みは、ファイルの有無より先に、許可したフォルダの中かを確かめます。外のパスは、ファイルの有無にかかわらず 403 を返します(許可していない場所のファイルを探れないようにするため) |
+| ブランチの保護 | 有効 | なし | main への変更はプルリクエストだけで受け付け、CI のテスト(`test`)の成功を必須にしています。強制 push と削除は禁止です。Dependabot の脆弱性の通知と、自動の修正提案も有効にしています |
 | CI の供給網の対策 | 有効 | なし | GitHub Actions の Action はコミットのハッシュで固定し、版をコメントで示します(Dependabot が更新を提案)。ワークフローの権限は既定で読み取りだけにし、書き込みはそれが要るジョブ(バッジの更新・イメージの公開・リリースへの添付)にだけ与えます。プルリクエストのコードを動かすテストのジョブには書き込みの権限を持たせません。脆弱性検査のツールのインストーラは、コミットとハッシュで固定します |
 | 脆弱性の検査 | 有効 | なし | リリースごとと毎週、全イメージの SBOM を作り、既知の脆弱性を検査します(`docs/release.md`) |
 
@@ -83,6 +84,7 @@ GitHub の Security タブには、CodeQL(ソースコードの静的解析)と 
 | CodeQL `py/stack-trace-exposure`(`main.py` / `service.py` の `/readyz`) | 認証なしの `/readyz` が、例外の文言(パスや接続先を含み得る)を返していた | 例外の種類だけを返し、詳細はログに残す |
 | CodeQL `actions/unpinned-tag`、Scorecard `Pinned-Dependencies`(ワークフロー) | Action をタグで指定していた。インストーラを main ブランチから取得していた | コミットのハッシュで固定。インストーラはハッシュも照合 |
 | Scorecard `Pinned-Dependencies`(Dockerfile の `FROM`) | ベースイメージをタグで指定していた | digest で固定。Dependabot は Ubuntu 24.04 の中の更新だけを提案する |
+| Scorecard `Branch-Protection` | main のブランチ保護が無かった | main を保護した(プルリクエストを必須にし、直接の push・強制 push・削除を禁止。`build.yml` の `test` の成功を必須。管理者にも適用) |
 | Scorecard `Security-Policy` | `SECURITY.md` に、報告先の URL が書かれていなかった | 非公開の報告の画面の URL を追記 |
 | Scorecard `Token-Permissions`(`build.yml`) | ワークフロー全体の既定の権限が無く、テストのジョブに書き込みの権限があった | 既定を読み取りだけにし、バッジの書き込みを別のジョブに分けた |
 
@@ -94,7 +96,7 @@ GitHub の Security タブには、CodeQL(ソースコードの静的解析)と 
 | CodeQL `py/stack-trace-exposure`(`api.py` の画像の取り込み) | 応答に入るのは、アプリが作った検証の説明(読めない画像の名前と理由)です。利用者が送ったファイルのどれが、なぜ取り込めなかったかを返すための情報のため、そのまま返します |
 | Scorecard `Pinned-Dependencies`(Dockerfile の `pip install`) | PyTorch はバリアント(cpu / cu126 / rocm / xpu)ごとに配布元と配布物が違い、ハッシュの一覧を保てる仕組みが現時点でありません。版は固定し、transformers はハッシュで照合しています。入っている版は SBOM で確認できます |
 | Scorecard `Token-Permissions`(`security.yml` の report、`build.yml` の security と badges) | リリースへの添付と badges ブランチの更新に `contents: write` が必要です。書き込みはこれらのジョブだけに限っています |
-| Scorecard `Code-Review` / `Branch-Protection` | リポジトリの設定の項目で、コードの変更では直りません。複数人で保守するときは、main への直接の push を禁止し、レビューを必須にする設定を推奨します |
+| Scorecard `Code-Review` | 保守者が 1 人のため、他者のレビューの承認は必須にしていません(自分のプルリクエストを自分で承認できないため)。複数人で保守するときは、承認の必須化を推奨します |
 | Scorecard `Maintained` / `CI-Tests` / `SAST` | 作成から日が浅いこと、過去の変更の実績から計算される項目で、運用を続けると改善します(CI のテストと CodeQL は実施しています) |
 | Scorecard `Fuzzing` / `CII-Best-Practices` | 検証用途の範囲では、ファジングの導入と OpenSSF のベストプラクティスの登録は行いません |
 
