@@ -89,8 +89,9 @@ def test_ingest_path_and_audio(client, tmp_path):
     assert hits and {h["kind"] for h in hits} == {"audio"}
 
 
-def test_ingest_path_missing(client):
-    assert client.post("/api/ingest/path", json={"path": "/nonexistent.mp4"}).status_code == 400
+def test_ingest_path_missing(client, tmp_path):
+    # 許可したフォルダ(テストでは tmp_path)の中の、無いファイルは 400。外は有無によらず 403(test_disclosure.py)
+    assert client.post("/api/ingest/path", json={"path": str(tmp_path / "nonexistent.mp4")}).status_code == 400
 
 
 def test_dims_mismatch_refused(settings):

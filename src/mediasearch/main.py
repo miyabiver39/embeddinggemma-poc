@@ -248,7 +248,8 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
                         float(warmup_state["elapsed_ms"] or 0.0),
                     )
             except Exception as exc:
-                warmup_state["error"] = f"{type(exc).__name__}: {exc}"
+                # /readyz(認証なし)でも返すため、例外の種類だけを入れる。詳細は直後のログに残す
+                warmup_state["error"] = f"{type(exc).__name__}(詳細はサーバーのログ)"
                 log.exception("推論のウォームアップに失敗しました")
         stack = AsyncExitStack()
         if mcp_run:
@@ -356,7 +357,9 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
                     if warmup_state.get("error"):
                         check["error"] = warmup_state["error"]
             except Exception as exc:
-                check = {"ok": False, "error": str(exc)}
+                # 認証なしの応答なので、例外の文言(内部の情報を含み得る)は返さずログに残す
+                log.warning("/readyz: 推論側を確認できません: %s: %s", type(exc).__name__, exc)
+                check = {"ok": False, "error": f"{type(exc).__name__}(詳細はサーバーのログ)"}
             ok = check["ok"]
             body = {"status": "ready" if ok else "not_ready", "checks": {"embedder": check}}
         return JSONResponse(body, status_code=200 if ok else 503)
