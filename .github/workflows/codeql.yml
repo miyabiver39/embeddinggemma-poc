@@ -2,11 +2,14 @@
 # 結果は GitHub の Security タブ(Code scanning)に表示され、README のバッジにも反映されます。
 name: codeql
 
+# 文書(*.md)と LICENSE だけの変更では解析しない(解析の対象のコードが変わらないため。週 1 回の定期実行は行う)
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "LICENSE"]
   pull_request:
     branches: [main]
+    paths-ignore: ["**.md", "LICENSE"]
   schedule:
     - cron: "41 20 * * 0" # 毎週月曜 05:41(日本時間)。新しく追加された検出ルールで再検査する
   workflow_dispatch:

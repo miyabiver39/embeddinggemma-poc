@@ -3,12 +3,17 @@
 # タグ(v*)を push すると、版付きのイメージを公開し、SBOM と脆弱性検査の結果を添付したリリースを作ります(docs/release.md)。
 name: build
 
+# 文書(*.md)と LICENSE だけの変更では、テストもイメージのビルドも行わない(結果が変わらないため)。
+# タグの push には、この絞り込みは効かない(GitHub の仕様)ため、リリースでは必ずビルドする。
+# テストだけに関わる変更(tests/・bench/・scripts/ など)では、テストだけ行い、イメージのビルドは省く(image ジョブの if)。
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore: ["**.md", "LICENSE"]
   pull_request:
     branches: [main]
+    paths-ignore: ["**.md", "LICENSE"]
   workflow_dispatch:
 
 env:
@@ -19,8 +24,38 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # main への push 時に、README のバッジ(テスト件数・カバレッジ)を badges ブランチに書くため
+    outputs:
+      image: ${{ steps.changes.outputs.image }}
     steps:
       - uses: actions/checkout@v4
+      - name: イメージの中身に関わる変更があるか調べる
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # イメージに入るのは src/・docker/・pyproject.toml だけ(.dockerignore)。ワークフロー自体の変更も、ビルドで確かめる。
+          # 比べる元が分からないとき(タグ・手動実行・ブランチの作成)と、取得に失敗したときは、安全のためビルドする
+          if [ "$EVENT" = pull_request ]; then
+            base="$PR_BASE"
+          elif [ "$EVENT" = push ] && [ "$REF_TYPE" = branch ] && [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            base="$BEFORE"
+          else
+            echo "image=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if ! git fetch -q --no-tags --depth=1 origin "$base"; then
+            echo "image=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed=$(git diff --name-only "$base" HEAD)
+          echo "$changed"
+          if echo "$changed" | grep -qE '^(src/|docker/|pyproject\.toml$|\.dockerignore$|\.github/workflows/build\.yml$)'; then
+            echo "image=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=false" >> "$GITHUB_OUTPUT"
+            echo "イメージの中身に関わる変更が無いため、イメージのビルドを省きます"
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -39,6 +74,7 @@ jobs:
 
   image:
     needs: test
+    if: needs.test.outputs.image == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
