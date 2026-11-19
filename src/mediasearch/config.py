@@ -136,6 +136,9 @@ class Settings:
     allowed_origins: tuple[str, ...]  # 別オリジンからの更新系リクエストを許可するオリジン
     allowed_hosts: tuple[str, ...]  # 受け付ける Host ヘッダー("*" なら制限なし)
 
+    # --- 推論の高速化(embedders/accel.py) ---
+    torch_compile: str = "auto"  # auto / on / off。auto は NVIDIA の GPU で C コンパイラがあるときに使う
+
     @classmethod
     def from_env(cls) -> Settings:
         role = _env("ROLE", "all")
@@ -169,6 +172,10 @@ class Settings:
         if watch_preset and watch_preset not in PRESETS:
             raise ValueError(f"WATCH_PRESET は {list(PRESETS)} のいずれかにしてください: {watch_preset!r}")
 
+        torch_compile = _env("TORCH_COMPILE", "auto").lower()
+        if torch_compile not in ("auto", "on", "off"):
+            raise ValueError(f"TORCH_COMPILE は auto / on / off のいずれかにしてください: {torch_compile!r}")
+
         return cls(
             role=role,
             embedding_backend=backend,
@@ -182,6 +189,7 @@ class Settings:
             image_max_tokens=_env_int("IMAGE_MAX_TOKENS", 0),
             image_max_side=_env_int("IMAGE_MAX_SIDE", 448),
             embed_batch=_env("EMBED_BATCH", "auto").lower(),
+            torch_compile=torch_compile,
             ffmpeg_hwaccel=_env("FFMPEG_HWACCEL", "auto"),
             ffmpeg_hwaccel_device=_env("FFMPEG_HWACCEL_DEVICE", ""),
             ffmpeg_skip_frames=skip_frames,

@@ -79,3 +79,72 @@ def test_video_ingest_with_batching_gives_same_windows(settings, tmp_path):
             hits = c.post("/api/search/text", json={"query": "red", "min_score": -1, "top_k": 50}).json()["results"]
             results.append(sorted((h["start_ms"], round(h["score"], 5)) for h in hits))
     assert results[0] == results[1] and len(results[0]) == 5  # 9 秒・2 秒窓(端数 1 秒の窓を含む)
+
+
+def test_prepare_runs_in_its_own_thread_and_overlaps_with_inference():
+    """prepare を渡すと、推論中に次の回の前処理が進む(前処理と推論の合計より早く終わる)。"""
+    calls: list[tuple[str, list]] = []
+
+    def prepare(items):
+        calls.append(("prepare", list(items)))
+        time.sleep(0.1)
+        return [x * 2 for x in items]
+
+    def fn(prepared):
+        calls.append(("run", list(prepared)))
+        time.sleep(0.1)
+        return [x + 1 for x in prepared]
+
+    b = MicroBatcher(fn, max_batch=1, prepare=prepare)
+    try:
+        t0 = time.perf_counter()
+        assert b.run_many([1, 2, 3, 4]) == [3, 5, 7, 9]
+        elapsed = time.perf_counter() - t0
+        # 重ならなければ 0.8 秒。重なれば約 0.5 秒(前処理 4 回の後に推論 1 回分)
+        assert elapsed < 0.7, elapsed
+    finally:
+        b.close()
+
+
+def test_failed_prepare_is_retried_one_by_one():
+    def prepare(items):
+        if "bad" in items:
+            raise ValueError("bad input")
+        return items
+
+    b = MicroBatcher(lambda prepared: [x.upper() for x in prepared], max_batch=8, prepare=prepare)
+    try:
+        futures = [b.submit(x) for x in ("a", "bad", "c")]
+        assert futures[0].result() == "A" and futures[2].result() == "C"
+        with pytest.raises(ValueError):
+            futures[1].result()
+    finally:
+        b.close()
+
+
+def test_zero_wait_does_not_delay_a_single_request():
+    b = MicroBatcher(lambda items: items, max_batch=8, wait_sec=0)
+    try:
+        t0 = time.perf_counter()
+        assert b.submit("x").result() == "x"
+        assert time.perf_counter() - t0 < 0.05
+    finally:
+        b.close()
+
+
+def test_overlapping_stage_is_not_double_counted():
+    """推論を 2 つ並行させても、embed は「どれかが動いていた時間」として数える。"""
+    from mediasearch.pipeline import StageTimer
+
+    timer = StageTimer()
+
+    def work():
+        with timer.overlapping("embed"):
+            time.sleep(0.2)
+
+    threads = [threading.Thread(target=work) for _ in range(2)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert 0.18 < timer.stages["embed"] < 0.35
