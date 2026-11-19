@@ -10,10 +10,15 @@ GPU の種類ごとの手順は docs/gpu.md を参照してください。
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from functools import lru_cache, partial
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -25,16 +30,30 @@ from .base import (
     ImagePart,
     Part,
     TextPart,
+    WindowBatchEncode,
+    WindowBatchPreparer,
     finalize,
 )
 from .batch import MicroBatcher
 from .gate import PriorityGate
+
+if TYPE_CHECKING:
+    from torch import Tensor
+
+    from .rocm import PreparedWindows
 
 log = logging.getLogger(__name__)
 
 
 # Intel GPU の有無を調べる子プロセスのコード。結果(デバイス数)を最後の行に出す
 _XPU_PROBE = "import torch; print(torch.xpu.device_count())"
+
+
+@dataclass(frozen=True)
+class _PreparedWindow:
+    parts: Sequence[Part]
+    batch: PreparedWindows
+    index: int
 
 
 def run_probe(code: str, timeout: float = 120) -> str | None:
@@ -154,12 +173,27 @@ class LocalEmbedder(Embedder):
         self._device = resolve_device(settings.device)
         if not self._device.startswith("xpu"):
             hide_xpu()  # sentence-transformers(transformers)を読み込む前に行う
-        from sentence_transformers import SentenceTransformer
 
         self._torch_dtype = resolve_dtype(settings.dtype, self._device)
         self._accelerator = accelerator_name(self._device)
         self._dims = settings.dims
         self._gate = PriorityGate()
+        rx9060xt = False
+        if (
+            self._accelerator == "amd-rocm"
+            and settings.model_id == "google/embeddinggemma-2"
+            and torch.cuda.is_available()
+        ):
+            gpu = torch.cuda.get_device_properties(self._device)
+            # WSL2 では予約領域を引いた値が返るため、16 GB 版の判定には 15 GiB を使う。
+            rx9060xt = gpu.name == "AMD Radeon RX 9060 XT" and gpu.total_memory >= 15 * 2**30
+        if rx9060xt:
+            # GPU が演算する構成では、CPU 前処理と推論のスレッドが実行枠を奪い合わないようにする。
+            if not (os.environ.get("OMP_NUM_THREADS") or os.environ.get("MKL_NUM_THREADS")):
+                torch.set_num_threads(min(torch.get_num_threads(), 2))
+            from .rocm import ResidentSentenceTransformer as SentenceTransformer
+        else:
+            from sentence_transformers import SentenceTransformer
 
         log.info(
             "モデルを読み込みます: %s (device=%s, accelerator=%s, dtype=%s)",
@@ -176,6 +210,8 @@ class LocalEmbedder(Embedder):
         )
         self._modalities = list(getattr(self._model, "modalities", []) or [])
         self._apply_image_token_limit(settings.image_max_tokens)
+        self._query_cache = lru_cache(maxsize=256)(self._encode_texts) if rx9060xt else None
+        self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rocm-inference") if rx9060xt else None
         torch.set_grad_enabled(False)
         self._batch = resolve_embed_batch(settings.embed_batch, self._device)
         # 窓(複数の画像・音声の並び)は、同時に来た要求をまとめて 1 回で推論する(batch_size が 2 以上のとき)
@@ -231,28 +267,42 @@ class LocalEmbedder(Embedder):
 
     def embed_texts(self, texts: Sequence[str], kind: str = "query") -> np.ndarray:
         prompt = "query" if kind == "query" else "document"
-        with self._gate.acquire(high=True):
-            out = self._model.encode(list(texts), prompt_name=prompt, convert_to_tensor=True)
-        return finalize(self._to_numpy(out), self._dims)
+        if self._query_cache is not None and prompt == "query" and len(texts) == 1 and len(texts[0]) <= 1024:
+            # 1 件ずつ推論したベクトルだけを再利用する。検索結果は毎回その時点の索引から求める。
+            return self._query_cache((texts[0],), prompt).copy()
+        return self._encode_texts(texts, prompt)
+
+    def _encode_texts(self, texts: Sequence[str], prompt: str) -> np.ndarray:
+        arr = self._encode_array(list(texts), high=True, prompt_name=prompt)
+        return finalize(arr, self._dims)
+
+    def _encode_array(self, inputs: list | dict, *, high: bool, **kwargs) -> np.ndarray:
+        encode = partial(self._model.encode, inputs, convert_to_tensor=True, **kwargs)
+        return self._run_encode(encode, high=high)
+
+    def _run_encode(self, encode: Callable[[], Tensor], *, high: bool) -> np.ndarray:
+        with self._gate.acquire(high=high):
+            if self._worker is not None:
+                # ROCm のキューと演算ライブラリの状態を同じスレッドで使い、CPU への転送も終えてから返す。
+                return self._worker.submit(lambda: self._to_numpy(encode())).result()
+            out = encode()
+        return self._to_numpy(out)
 
     def embed_images(self, images: Sequence[np.ndarray], high: bool = False) -> np.ndarray:
         """画像を batch_size 枚ずつ、1 回の推論でまとめてベクトルにします(1 なら 1 枚ずつ)。"""
         vectors = []
         for i in range(0, len(images), self._batch):
             chunk = [{"image": self._prepare_image(im)} for im in images[i : i + self._batch]]
-            with self._gate.acquire(high=high):
-                if len(chunk) == 1:
-                    out = self._model.encode(chunk[0], convert_to_tensor=True)
-                else:
-                    out = self._model.encode(chunk, convert_to_tensor=True, batch_size=len(chunk))
-            arr = self._to_numpy(out)
+            if len(chunk) == 1:
+                arr = self._encode_array(chunk[0], high=high)
+            else:
+                arr = self._encode_array(chunk, high=high, batch_size=len(chunk))
             vectors.append(arr.reshape(-1, arr.shape[-1]))
         return finalize(np.concatenate(vectors), self._dims)
 
     def embed_audio(self, pcm: np.ndarray, high: bool = False) -> np.ndarray:
-        with self._gate.acquire(high=high):
-            out = self._model.encode({"audio": pcm.astype(np.float32)}, convert_to_tensor=True)
-        return finalize(self._to_numpy(out), self._dims)
+        arr = self._encode_array({"audio": pcm.astype(np.float32)}, high=high)
+        return finalize(arr, self._dims)
 
     def embed_parts(self, parts: Sequence[Part], high: bool = False) -> np.ndarray:
         """並べた順序のまま、1回の推論で1ベクトルにします。
@@ -269,6 +319,31 @@ class LocalEmbedder(Embedder):
             return self._parts_batcher.run_many(list(items))
         return [self._encode_windows([parts], high=high)[0] for parts in items]
 
+    def video_batch_preparer(self) -> WindowBatchPreparer | None:
+        if self._worker is None or self._batch > 4 or not self._model.supports_prepared_windows:
+            return None
+        if not 0 < self._settings.image_max_side <= 448:
+            return None
+        processor = getattr(self._model[0], "processor", None)
+        image_processor = getattr(processor, "image_processor", None)
+        if getattr(image_processor, "max_soft_tokens", None) in (70, 140, 280):
+            return self._prepare_video_batch
+        return None
+
+    def _prepare_video_batch(self, items: list[Sequence[Part]]) -> WindowBatchEncode:
+        # サイズの大きい入力をいくつも保持しないよう、標準的な窓に先読みを限定する。
+        if sum(len(parts) for parts in items) > 16:
+            return partial(self.embed_parts_many, items)
+        try:
+            batch = self._model.prepare_windows([self._message(parts) for parts in items])
+        except Exception:
+            # 入力に問題がある場合は従来どおり推論時に確認し、バッチ失敗時の再試行も維持する。
+            return partial(self.embed_parts_many, items)
+        prepared = [_PreparedWindow(parts, batch, i) for i, parts in enumerate(items)]
+        if self._parts_batcher is not None:
+            return partial(self._parts_batcher.run_many, prepared)
+        return partial(self._encode_windows, prepared)
+
     def _message(self, parts: Sequence[Part]) -> list[dict]:
         content: list[dict] = []
         for part in parts:
@@ -282,14 +357,25 @@ class LocalEmbedder(Embedder):
                 raise TypeError(f"未対応の部品です: {type(part)!r}")
         return [{"role": "user", "content": content}]
 
-    def _encode_windows(self, items: list[Sequence[Part]], high: bool = False) -> list[np.ndarray]:
-        """複数の窓を 1 回の推論でベクトルにします(まとめても結果が変わらないことを実測。コサイン類似度 1.00000)。"""
-        messages = [self._message(parts) for parts in items]
-        with self._gate.acquire(high=high):
-            out = self._model.encode(messages, convert_to_tensor=True, batch_size=len(messages))
-        vectors = finalize(self._to_numpy(out), self._dims)
+    def _encode_windows(self, items: list[Sequence[Part] | _PreparedWindow], high: bool = False) -> list[np.ndarray]:
+        """複数の窓を 1 回で推論し、入力順のベクトルを返します。"""
+        first = items[0]
+        # ストリームとの混在や 1 件ずつの再試行時は、実際のバッチをそのまま前処理する。
+        if isinstance(first, _PreparedWindow) and len(items) == len(first.batch.order) and all(
+            isinstance(window, _PreparedWindow) and window.batch is first.batch and window.index == i
+            for i, window in enumerate(items)
+        ):
+            arr = self._run_encode(partial(self._model.encode_prepared, first.batch), high=high)
+            return list(finalize(arr[first.batch.order], self._dims))
+        messages = [self._message(item.parts if isinstance(item, _PreparedWindow) else item) for item in items]
+        arr = self._encode_array(messages, high=high, batch_size=len(messages))
+        vectors = finalize(arr, self._dims)
         return list(vectors.reshape(len(messages), -1))
 
     def close(self) -> None:
+        if self._query_cache is not None:
+            self._query_cache.cache_clear()
         if self._parts_batcher is not None:
             self._parts_batcher.close()
+        if self._worker is not None:
+            self._worker.shutdown()

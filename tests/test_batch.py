@@ -79,3 +79,37 @@ def test_video_ingest_with_batching_gives_same_windows(settings, tmp_path):
             hits = c.post("/api/search/text", json={"query": "red", "min_score": -1, "top_k": 50}).json()["results"]
             results.append(sorted((h["start_ms"], round(h["score"], 5)) for h in hits))
     assert results[0] == results[1] and len(results[0]) == 5  # 9 秒・2 秒窓(端数 1 秒の窓を含む)
+
+
+@needs_ffmpeg
+def test_video_prefetch_prepares_next_batch_while_encoding(settings, tmp_path):
+    class PreparingEmbedder(DummyEmbedder):
+        def video_batch_preparer(self):
+            next_batch = threading.Event()
+            prepared = 0
+
+            def prepare(items):
+                nonlocal prepared
+                prepared += 1
+                first = prepared == 1
+                if not first:
+                    next_batch.set()
+
+                def encode():
+                    if first:
+                        assert next_batch.wait(5), "次のバッチの前処理が推論中に進みませんでした"
+                    return self.embed_parts_many(items)
+
+                return encode
+
+            return prepare
+
+    video = tmp_path / "20260101_090000.mp4"
+    make_video(video, "red", seconds=9)
+    embedder = PreparingEmbedder(768, batch_size=2)
+    with TestClient(create_app(settings, embedder=embedder)) as client:
+        accepted = client.post("/api/ingest/path", json={"path": str(video)}).json()
+        job = wait_done(client, accepted["job_id"])
+        assert job["status"] == "done", job["error"]
+        assert job["timings"]["windows"] == 5
+        assert "prepare" in job["timings"]["stages_ms"]
