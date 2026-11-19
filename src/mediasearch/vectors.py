@@ -32,6 +32,11 @@ log = logging.getLogger(__name__)
 
 # この件数以下は総当たりで探す(USearch の SIMD 実装で、768 次元・5 万件が数十ミリ秒)
 EXACT_LIMIT = 50_000
+# 絞り込みの候補が全体のこの割合以上なら、候補のベクトルを取り出さずに、全体を総当たりで探してから候補だけを残す。
+# 文字の検索の既定(auto)は種類で絞り込むため、候補はほぼ全体になる。候補のベクトルを毎回取り出すと、
+# 4.5 万件で 1 回 140 ms かかっていた(この方式では 21 ms。候補が 1 割のときはどちらも約 16 ms で、
+# それより少なければ候補のベクトルを取り出すほうが速い。Core i7-6700K で実測)
+FILTERED_SCAN_RATIO = 0.1
 # 近似検索の探索幅。既定(64)より広げて、取りこぼしを減らす
 EXPANSION_SEARCH = 128
 # ジャーナルにこの件数の変更がたまったら、スナップショットを書き出してジャーナルを空にする
@@ -196,8 +201,33 @@ class VectorIndex:
                 m = index.search(query, min(top_k, total), exact=True)
                 return [(int(k), 1.0 - float(d)) for k, d in zip(m.keys, m.distances, strict=True)]
         if candidates is not None and len(candidates) <= EXACT_LIMIT:
+            if total <= EXACT_LIMIT and len(candidates) >= total * FILTERED_SCAN_RATIO:
+                return self._exact_filtered(query, top_k, candidates, total)
             return self._exact_subset(query, candidates, top_k)
         return self._approx(query, top_k, candidates, total)
+
+    def _exact_filtered(
+        self, query: np.ndarray, top_k: int, candidates: np.ndarray, total: int
+    ) -> list[tuple[int, float]]:
+        """全体を総当たりで探して多めに取り、候補だけを残します。足りなければ取る数を増やします。
+
+        結果は _exact_subset と同じ(どちらも全候補の中のコサイン類似度の上位)。候補のベクトルを取り出さない分、速い。
+        """
+        allowed = np.unique(np.asarray(candidates, dtype=np.uint64))  # 昇順(searchsorted で含まれるかを調べる)
+        if len(allowed) == 0:
+            return []
+        ratio = len(allowed) / total
+        count = min(total, max(top_k * 4, int(top_k / ratio * 2)))
+        while True:
+            with self._lock:
+                m = self._index.search(query, count, exact=True)
+            keys = np.asarray(m.keys, dtype=np.uint64)
+            pos = np.minimum(np.searchsorted(allowed, keys), len(allowed) - 1)
+            keep = allowed[pos] == keys
+            hits = [(int(k), 1.0 - float(d)) for k, d in zip(keys[keep], np.asarray(m.distances)[keep], strict=True)]
+            if len(hits) >= top_k or count >= total:
+                return hits[:top_k]
+            count = min(total, count * 4)
 
     def _exact_subset(self, query: np.ndarray, keys: np.ndarray, top_k: int) -> list[tuple[int, float]]:
         if len(keys) == 0:
