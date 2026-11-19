@@ -85,13 +85,15 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 - [x] RX 9060 XT 16GB(Windows 11 + Docker Desktop の WSL2、`/dev/dxg`)で `:rocm` が `amd-rocm` / bf16 で動く(2026-10-13)。CPU 版との類似度 0.9999 以上・NaN なし。1080p・2 秒窓で 1 窓約 0.26 秒(Ryzen 7 5700X の CPU 版は約 7.2 秒)。Radeon では高速な注意機構が既定で無効のため、`TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` が必要(無いと 1 窓約 1.03 秒)。修正前のイメージは `libatomic1` の不足で `import torch` が失敗していた。WSL2 では librocdxg と `ROCPROFILER_REGISTER_ENABLED=0` が必要(`docs/gpu.md`)
   同じ機種で 2026-11-19〜20 に、高速な注意機構を既定で有効にする前のビルド `056b937` で取り込みと検索を再計測した。 [README.ja.md の再計測結果](README.ja.md#windows-での再計測)
 - [x] RTX 3060 12GB(Ubuntu 24.04、ドライバ 595.99.02)で `:cuda` が `nvidia-cuda` / bf16 で動く(2026-10-13)。CPU 版との類似度 0.9999 以上・NaN なし。1080p・2 秒窓で 1 窓約 0.29 秒。動画の復号も GPU(NVDEC)で行われる。2026-11-19 に Ubuntu 26.04.1 で測り直し、1 窓約 0.31 秒・画像 5.12 枚/秒・検索(並行 4)17.4 件/秒・GPU メモリ最大約 3.1GB(`bench/README.md`、README の「ベンチマーク」)
+- [x] RTX 3060 12GB で推論の高速化(層ごとの torch.compile・画像の詰め物の除去・文章の CUDA Graph・検索の文章のまとめ。`embedders/accel.py`)が動く(2026-11-20)。1080p・2 秒窓で 1 窓約 0.18 秒(高速化の前 0.31 秒)、検索(並行 4)194 件/秒・p50 19 ms(前 17.4 件/秒・166 ms)、単独の検索 p50 7.6 ms(前 51 ms)。float32 で計算した結果との点数の差は高速化の前より小さく(平均 0.00068 → 0.00051)、合成の場面を探した正解率は同じ。初回の起動は約 80 秒(2 回目以降約 32 秒)(`docs/gpu.md`)
 - [x] イメージの容量(ghcr の圧縮サイズ): slim 0.27GB / cpu 1.46GB / cuda 4.94GB / rocm 7.89GB / intel 3.82GB。展開後は slim 1.1GB / cpu 5.1GB / intel 14.1GB / cuda 14.4GB
 
 未確認(推測を含む。実測してから記述を確定すること):
 
 - [ ] xpu(Intel GPU)の動作と bf16 の NaN の有無。rocm の Linux ネイティブ(`/dev/kfd`)での動作と速度
 - [ ] Intel の GPU での 1 窓あたりの処理時間
-- [ ] EMBED_BATCH がほとんど効かない原因(窓をまとめても推論の時間が件数に比例する)
+- [ ] EMBED_BATCH がほとんど効かない原因(窓をまとめても推論の時間が件数に比例する)。RTX 3060 では、画像側の計算が GPU の実効性能(約 18 TFLOPS)で動いており、まとめても計算量が減らないためと考えられる
+- [ ] 推論の高速化(torch.compile・CUDA Graph)の AMD / Intel の GPU での効果と品質(現在は NVIDIA の GPU だけで有効)
 - [ ] ONNX Runtime / OpenVINO / TensorRT へ変換したときのベクトル一致度と速度(フェーズ 2)
 - [ ] 実際の録画映像での検索精度
 - [ ] リリース時の SBOM・脆弱性検査ワークフロー(`security.yml`)のタグ契機での実行とリリースへの添付(手動実行では 5 イメージの SBOM 作成・検査・集計まで成功を確認済み)
@@ -118,7 +120,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 │   ├── streams.py         RTSP のストリームの受信と取り込み
 │   ├── media.py           ffmpeg / ffprobe
 │   ├── config.py          環境変数とプリセット
-│   ├── embedders/         Embedder インターフェースと local / remote / dummy
+│   ├── embedders/         Embedder インターフェースと local / remote / dummy、accel.py(推論の高速化。NVIDIA)
 │   └── web/index.html     開発用 WebUI
 ├── tests/                 pytest(実モデルのテストは RUN_MODEL_TESTS=1 のときだけ)
 ├── bench/                 ベンチマーク(速度・資源の使用率・ボトルネックの診断。イメージには含めない。bench/README.md)
