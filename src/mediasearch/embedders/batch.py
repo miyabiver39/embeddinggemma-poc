@@ -34,17 +34,20 @@ class MicroBatcher:
         wait_sec: float = 0.005,
         prepare: Callable[[list[Any]], Any] | None = None,
         wait_only_when_busy: bool = False,
+        should_yield: Callable[[], bool] | None = None,
     ) -> None:
         """prepare を渡したときは fn(prepare(要求のリスト)) -> 結果のリスト、渡さないときは fn(要求のリスト)。
 
         wait_only_when_busy が真なら、前の回が 1 件だけだったとき(同時に要求が来ていないとき)は次の要求を待たない。
         単独の要求に待ち時間を足さず、同時に来ているときだけまとめるため(検索の文章に使う)。
+        should_yield が真を返す間(高優先の検索が待機中など)は、追加の要求を待たずに現在のバッチをすぐ実行へ回す。
         """
         self._fn = fn
         self._prepare = prepare
         self._max = max(int(max_batch), 1)
         self._wait = wait_sec
         self._wait_only_when_busy = wait_only_when_busy
+        self._should_yield = should_yield
         self._last_size = 1
         self._queue: queue.Queue = queue.Queue()
         # 前処理を済ませた回を、推論のスレッドへ渡す。1 回分だけ先に用意する(先読みしすぎてメモリを使わないように)
@@ -77,6 +80,9 @@ class MicroBatcher:
             stop = False
             wait = self._wait if (self._last_size > 1 or not self._wait_only_when_busy) else 0
             while len(batch) < self._max:
+                if self._should_yield is not None and self._should_yield():
+                    # 高優先(検索)が待機中なら、追加の取り込みを待たずに現在のバッチをすぐ解放する
+                    break
                 try:
                     nxt = self._queue.get(timeout=wait)
                 except queue.Empty:

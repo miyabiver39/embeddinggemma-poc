@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -103,6 +105,37 @@ class Embedder(ABC):
 
         with ThreadPoolExecutor(max_workers=min(batch, len(items))) as pool:
             return list(pool.map(lambda parts: self.embed_parts(parts, high=high), items))
+
+    def prepare_parts_batch(self, items: Sequence[Sequence[Part]]) -> Any:
+        """複数の窓に対する CPU 前処理(テンソル化・pin_memory 等)を推論より先に実行します。
+
+        動画取り込みの Producer-Consumer パイプラインで、窓 N の推論中に別スレッドで窓 N+1 の
+        前処理をオーバーラップさせるためのフックです。既定の実装はそのまま返します。
+        """
+        return list(items)
+
+    def embed_prepared_parts(self, prepared: Any, high: bool = False) -> list[np.ndarray]:
+        """prepare_parts_batch() の結果を受け取り、推論のみを実行してベクトル列を返します。"""
+        return self.embed_parts_many(prepared, high=high)
+
+    def warmup(self) -> dict[str, Any]:
+        """起動直後の初回推論遅延を抑えるため、対応モダリティごとに 1 回ダミー推論を実行します。"""
+        t0 = time.perf_counter()
+        modalities = set(self.info().modalities or [])
+        ran: list[str] = []
+        if not modalities or "text" in modalities:
+            self.embed_texts(["warmup"], kind="query")
+            ran.append("text")
+        if not modalities or "image" in modalities:
+            dummy_img = np.zeros((64, 64, 3), dtype=np.uint8)
+            self.embed_images([dummy_img], high=False)
+            ran.append("image")
+        if not modalities or "audio" in modalities:
+            dummy_pcm = np.zeros(SAMPLE_RATE // 2, dtype=np.float32)
+            self.embed_audio(dummy_pcm, high=False)
+            ran.append("audio")
+        elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
+        return {"ok": True, "skipped": False, "modalities": ran, "elapsed_ms": elapsed_ms}
 
     def metrics(self) -> dict:
         """推論の使用状況(GET /api/metrics の inference)。順番待ちの制御を持つ実装は、その積算値を返します。"""

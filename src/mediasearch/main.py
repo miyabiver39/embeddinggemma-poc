@@ -194,7 +194,20 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
 
     # モデルの読み込みなど重い初期化は、アプリを作るこの時点で1回だけ行う(ルーターもここで登録する)
     s.data_dir.mkdir(parents=True, exist_ok=True)
+    if s.embedding_backend == "local":
+        from .embedders.local import configure_torch_cache
+
+        configure_torch_cache(s.torch_cache_dir)
     emb = embedder or build_embedder(s)
+    warmup_required = bool(s.warmup_on_start and s.embedding_backend != "remote")
+    warmup_state: dict[str, Any] = {
+        "required": warmup_required,
+        "done": not warmup_required,
+        "skipped": not warmup_required,
+        "modalities": [],
+        "elapsed_ms": None,
+        "error": None,
+    }
     store: Store | None = None
     ingestor: Ingestor | None = None
     intake: FileIntake | None = None
@@ -217,6 +230,26 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # Ready になる直前(および取り込みワーカー開始前)に、ダミー入力でウォームアップ推論を 1 回行う
+        if warmup_state["required"]:
+            try:
+                res = emb.warmup()
+                warmup_state.update(
+                    done=True,
+                    skipped=bool(res.get("skipped", False)),
+                    modalities=list(res.get("modalities") or []),
+                    elapsed_ms=res.get("elapsed_ms"),
+                    error=None,
+                )
+                if not warmup_state["skipped"]:
+                    log.info(
+                        "推論のウォームアップが完了しました(%s、%.1f ms)",
+                        ", ".join(warmup_state["modalities"]) or "-",
+                        float(warmup_state["elapsed_ms"] or 0.0),
+                    )
+            except Exception as exc:
+                warmup_state["error"] = f"{type(exc).__name__}: {exc}"
+                log.exception("推論のウォームアップに失敗しました")
         stack = AsyncExitStack()
         if mcp_run:
             await stack.enter_async_context(mcp_run())
@@ -265,6 +298,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
     app.openapi = lambda: _openapi_with_security(app)
 
     app.state.embedder = emb
+    app.state.warmup = warmup_state
     app.add_middleware(SecurityMiddleware, settings=s)
     # いちばん外側(後から追加したものが外側になる): 認証で断った要求にも ID を付け、数に入れる
     request_stats = RequestStats()
@@ -274,7 +308,7 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
         app.include_router(build_compute_router(emb))
     if store and ingestor and intake and watcher:
         limiter = SearchLimiter(s.max_pending_searches)
-        ctx = Context(s, store, emb, ingestor, intake, watcher, streams, retention, limiter)
+        ctx = Context(s, store, emb, ingestor, intake, watcher, streams, retention, limiter, warmup_state=warmup_state)
         ctx.alerts = AlertEngine(ctx, Service(ctx))
         ctx.backups = BackupManager(s, store)
         app.state.ctx = ctx  # テストや拡張から、同じ部品を使えるようにする
@@ -309,9 +343,18 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
         """
         if ctx_holder:
             ok, body = Service(ctx_holder[0]).readiness()
-        else:  # ROLE=compute: 推論ができるかだけを確かめる
+        else:  # ROLE=compute: 推論ができるか(およびウォームアップ完了)を確かめる
             try:
-                check = {"ok": True, "accelerator": emb.info().accelerator}
+                warm_ok = True if not warmup_state["required"] else bool(warmup_state["done"])
+                check: dict[str, Any] = {
+                    "ok": warm_ok,
+                    "accelerator": emb.info().accelerator,
+                    "warmed_up": bool(warmup_state["done"] and not warmup_state["skipped"]),
+                }
+                if not warm_ok:
+                    check["status"] = "warming_up"
+                    if warmup_state.get("error"):
+                        check["error"] = warmup_state["error"]
             except Exception as exc:
                 check = {"ok": False, "error": str(exc)}
             ok = check["ok"]

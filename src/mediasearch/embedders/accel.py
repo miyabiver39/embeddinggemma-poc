@@ -41,16 +41,22 @@ def compiler_available() -> bool:
     return bool(cc and shutil.which(cc)) or shutil.which("gcc") is not None or shutil.which("cc") is not None
 
 
-def setup_compile_cache(data_dir: Path) -> Path | None:
-    """compile の結果の保存先を DATA_DIR/cache/torch にします(既に環境変数で指定されていれば、それを使う)。"""
-    root = Path(data_dir) / "cache" / "torch"
+def setup_compile_cache(data_dir: Path, cache_dir: Path | None = None) -> Path | None:
+    """compile の結果の保存先を DATA_DIR/cache/torch(または cache_dir)にします(環境変数指定を優先)。"""
+    root = Path(cache_dir) if cache_dir is not None else Path(data_dir) / "cache" / "torch"
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError as exc:  # 書けない場所なら、保存せずに続ける(毎回の起動で compile する)
         log.warning("compile の結果の保存先を作れませんでした(%s)。起動のたびに準備を行います", exc)
         return None
-    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(root / "inductor"))
-    os.environ.setdefault("TRITON_CACHE_DIR", str(root / "triton"))
+    inductor_dir = Path(os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(root / "inductor")))
+    os.environ.setdefault("TORCHINDUCTOR_FX_GRAPH_CACHE", "1")
+    triton_dir = Path(os.environ.setdefault("TRITON_CACHE_DIR", str(root / "triton")))
+    for path in (inductor_dir, triton_dir):
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            log.warning("PyTorch キャッシュフォルダを作成できません(%s): %s", path, exc)
     return root
 
 

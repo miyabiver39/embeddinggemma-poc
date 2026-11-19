@@ -19,11 +19,14 @@ def image_to_jpeg(image: np.ndarray, quality: int = 90) -> bytes:
 
 
 def jpeg_to_image(data: bytes) -> np.ndarray:
-    return np.asarray(Image.open(io.BytesIO(data)).convert("RGB"))
+    with Image.open(io.BytesIO(data)) as img:
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        return np.asarray(img)
 
 
 def pcm_to_bytes(pcm: np.ndarray) -> bytes:
-    clipped = np.clip(pcm.astype(np.float32), -1.0, 1.0)
+    clipped = np.clip(np.asarray(pcm, dtype=np.float32), -1.0, 1.0)
     return (clipped * 32767.0).astype("<i2").tobytes()
 
 

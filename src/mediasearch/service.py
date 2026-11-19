@@ -90,6 +90,7 @@ class Context:
     search_limiter: SearchLimiter | None = None
     alerts: Any = None  # AlertEngine(循環の読み込みを避けるため、型は Any)
     backups: Any = None  # BackupManager
+    warmup_state: dict[str, Any] | None = None  # 起動時ウォームアップの状態(/readyz で確認)
 
     @property
     def media_dir(self) -> Path:
@@ -285,7 +286,19 @@ class Service:
             checks["vectors"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         try:
             info = ctx.embedder.info()
-            checks["embedder"] = {"ok": True, "backend": info.backend, "accelerator": info.accelerator}
+            warm = ctx.warmup_state
+            warm_ok = True if warm is None or not warm.get("required") else bool(warm.get("done"))
+            embed_check: dict[str, Any] = {
+                "ok": warm_ok,
+                "backend": info.backend,
+                "accelerator": info.accelerator,
+                "warmed_up": bool(warm.get("done") and not warm.get("skipped")) if warm else False,
+            }
+            if not warm_ok:
+                embed_check["status"] = "warming_up"
+                if warm and warm.get("error"):
+                    embed_check["error"] = warm["error"]
+            checks["embedder"] = embed_check
         except Exception as exc:  # 分離構成で compute に接続できない場合など
             checks["embedder"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         d = disk.status(s.data_dir, s.min_free_disk_mb)
