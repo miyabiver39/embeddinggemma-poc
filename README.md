@@ -202,6 +202,9 @@ You can also send your own pre-processed frames to `/api/ingest/frames`.
 | `FFMPEG_SKIP_FRAMES` | `noref` | Frames skipped when decoding. `noref` (skip non-reference frames; timing is off by 1-2 frames) / `none` (all frames) / `keyframes` (keyframes only; several times faster, but timing can be off by a few seconds) |
 | `EMBED_BATCH` | `auto` | Maximum number of items embedded together. `auto` is 1 on CPU (no batching; measured not to be faster on CPU) and 4 on GPU (small effect, see `docs/gpu.md`) |
 | `TORCH_COMPILE` | `auto` | Inference optimizations (torch.compile, CUDA Graphs). `auto` uses them on NVIDIA GPUs when a C compiler is available (the `cuda` image). `off` disables them (faster startup, slower inference). The prepared results are cached in `DATA_DIR/cache/torch` (`docs/gpu.md`) |
+| `TORCH_CACHE_DIR` | `DATA_DIR/cache/torch` | Persistent directory for PyTorch (`TORCHINDUCTOR_CACHE_DIR` / `TRITON_CACHE_DIR`) compilation caches (explicit per-variable overrides take precedence) |
+| `WARMUP_ON_START` | `true` | Runs one dummy warmup inference (text, image, audio) right before `/readyz` becomes ready (skipped for `remote`, or when already warmed up by `TORCH_COMPILE`) |
+| `INGEST_PREFETCH` | `2` | Bounded queue capacity (1-16) for the video ingestion producer-consumer pipeline. Overlaps frame decoding and preprocessing for window N+1 with inference of window N while applying backpressure to bound memory usage |
 | `IMAGE_MAX_TOKENS` | `0` | Token limit per image (0 = model default) |
 | `TOP_K` | `10` | Default number of search results |
 | `DATA_DIR` | `/data` | Where the DB, thumbnails and uploaded videos are stored |
