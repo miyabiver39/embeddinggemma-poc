@@ -200,6 +200,9 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `FFMPEG_SKIP_FRAMES` | `noref` | 動画の復号を省く範囲。`noref`(参照されないフレームを省く。時刻のずれは 1〜2 フレーム)/ `none`(全フレーム)/ `keyframes`(キーフレームのみ。数倍速いが、時刻が数秒ずれることがある) |
 | `EMBED_BATCH` | `auto` | まとめて推論する最大の件数。`auto` は CPU で 1(まとめない。CPU では速くならないことを実測)、GPU で 4(効果は小さい。`docs/gpu.md`) |
 | `TORCH_COMPILE` | `auto` | 推論の高速化(torch.compile・CUDA Graph)。`auto` は NVIDIA の GPU で C コンパイラがあるとき(`cuda` イメージ)に使う。`off` で使わない(起動は速くなるが、推論は遅くなる)。準備の結果は `DATA_DIR/cache/torch` に保存する(`docs/gpu.md`) |
+| `TORCH_CACHE_DIR` | `DATA_DIR/cache/torch` | PyTorch(`TORCHINDUCTOR_CACHE_DIR` / `TRITON_CACHE_DIR`)のコンパイルキャッシュ永続化先(各環境変数での個別上書きを優先) |
+| `WARMUP_ON_START` | `true` | 起動時に `/readyz` が Ready になる直前でダミー入力(テキスト・画像・音声)による 1 回のウォームアップ推論を行う(`remote` や `TORCH_COMPILE` で実施済みの場合を除く) |
+| `INGEST_PREFETCH` | `2` | 動画取り込みの Producer-Consumer パイプラインの有界キュー上限(1〜16)。窓 N の推論中に窓 N+1 の復号・前処理を先行実行しつつ、バックプレッシャーでメモリ肥大化を防ぐ |
 | `IMAGE_MAX_TOKENS` | `0` | 画像1枚あたりのトークン上限(0=モデル既定) |
 | `TOP_K` | `10` | 検索の既定件数 |
 | `DATA_DIR` | `/data` | DB・サムネイル・アップロード動画の保存先 |
