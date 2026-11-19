@@ -13,6 +13,13 @@ export ROLE
 # DEVICE の既定は auto。GPU を渡していなければ CPU で動きます
 echo "[mediasearch] VARIANT=${VARIANT:-?} ROLE=${ROLE} DEVICE=${DEVICE:-auto} DATA_DIR=${DATA_DIR}"
 
+# PyTorch(Inductor / FX Graph / Triton)のコンパイルキャッシュを永続ディレクトリ(DATA_DIR 配下)へ逃がす。
+# コンテナ再作成後もキャッシュを再利用でき、コールドスタート時の遅延を抑えられる(環境変数で上書き可能)。
+export TORCH_CACHE_DIR="${TORCH_CACHE_DIR:-${DATA_DIR}/cache/torch}"
+export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-${TORCH_CACHE_DIR}/inductor}"
+export TORCHINDUCTOR_FX_GRAPH_CACHE="${TORCHINDUCTOR_FX_GRAPH_CACHE:-1}"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${TORCH_CACHE_DIR}/triton}"
+
 # AMD の GPU を Windows の WSL2(Docker Desktop)から使う場合: /dev/kfd が無く、/dev/dxg 経由になる(docs/gpu.md)。
 #   - HSA_ENABLE_DXG_DETECTION=1: ROCm 7.2 の実行環境に、librocdxg(イメージに同梱)で GPU を探させる
 #   - ROCPROFILER_REGISTER_ENABLED=0: PyTorch に同梱の rocprofiler-sdk が、WSL2 に無い KFD の情報(/sys/class/kfd)を読もうとして
@@ -47,10 +54,11 @@ if [ "$(id -u)" != "0" ] || [ "$PUID" = "0" ]; then
 fi
 
 # データ置き場: 所有者が違うものだけを変更する(以前の版で root が作ったファイルの引き継ぎ。2 回目以降はほぼ何もしない)
-mkdir -p "$DATA_DIR"
+mkdir -p "$DATA_DIR" "$TORCHINDUCTOR_CACHE_DIR" "$TRITON_CACHE_DIR"
 if ! find "$DATA_DIR" \( ! -user "$PUID" -o ! -group "$PGID" \) -exec chown "$PUID:$PGID" {} + 2>/dev/null; then
   echo "[mediasearch] 警告: ${DATA_DIR} の所有者を変更できないファイルがあります(読み取り専用のマウントなど)"
 fi
+chown "$PUID:$PGID" "$TORCH_CACHE_DIR" "$TORCHINDUCTOR_CACHE_DIR" "$TRITON_CACHE_DIR" 2>/dev/null || true
 
 # GPU のデバイスファイル(Intel / AMD の /dev/dri、AMD の /dev/kfd)のグループを引き継ぐ。
 # ホストのグループ番号はコンテナ内の video / render と一致しないことがあるため、実際のファイルから調べる。

@@ -144,6 +144,26 @@ def decode_step_ms(plans: list[WindowPlan]) -> int:
     return max(step, 100) if step else 1000
 
 
+def decode_select_grid(need: list[list[int]]) -> tuple[int, int]:
+    """全窓で必要なフレーム番号(need)が等間隔の格子に乗る場合、(先頭オフセット, 間引き間隔)を返します。
+
+    既定の 2 秒窓・2 フレームでは sample_ms = [500, 1500, 2500, ...] となり、
+    step=500ms に対して必要な番号は 1, 3, 5, ... (offset=1, stride=2) だけです。
+    ffmpeg の scale フィルタの前に select で偶数フレームを落とすことで、出力画素を完全一致させたまま
+    縮小・色変換・パイプ転送の負荷を半減できます。
+    """
+    indices = [k for row in need for k in row]
+    if not indices:
+        return 0, 1
+    offset = min(indices)
+    stride = 0
+    for k in indices:
+        stride = math.gcd(stride, k - offset)
+    if stride <= 1:
+        return 0, 1
+    return offset, stride
+
+
 def audio_slice_bounds(start_ms: int, end_ms: int, count: int) -> list[tuple[int, int]]:
     """窓を、フレームの数だけ等分します(各フレームに、その前後の音声を対応させる)。"""
     if count <= 0 or end_ms <= start_ms:
@@ -266,45 +286,15 @@ class StageTimer:
         return out
 
 
-def _prefetch(iterable, size: int = 32):
-    """別のスレッドで iterable を先読みします(ffmpeg の復号と、推論を並行させるため)。"""
-    q: queue.Queue = queue.Queue(maxsize=size)
-    done = object()
-    stop = threading.Event()
-
-    def run() -> None:
-        it = iter(iterable)
+def _put_bounded(q: queue.Queue, item: object, stop: threading.Event) -> bool:
+    """有界キューへ要素を投入します。バックプレッシャーで待機中でも停止要求があれば抜けます。"""
+    while not stop.is_set():
         try:
-            for item in it:
-                if stop.is_set():
-                    break
-                q.put(item)
-            q.put(done)
-        except BaseException as exc:  # 呼び出し側で同じ例外を出す
-            q.put(exc)
-        finally:
-            close = getattr(it, "close", None)
-            if close:  # 途中で止めた場合も、ffmpeg のプロセスを確実に終わらせる
-                close()
-
-    th = threading.Thread(target=run, name="decode", daemon=True)
-    th.start()
-    try:
-        while True:
-            item = q.get()
-            if item is done:
-                return
-            if isinstance(item, BaseException):
-                raise item
-            yield item
-    finally:
-        stop.set()
-        while th.is_alive():  # 生成側が put で止まっていれば、取り出して終わらせる
-            try:
-                q.get(timeout=0.1)
-            except queue.Empty:
-                pass
-        th.join()
+            q.put(item, timeout=0.1)
+            return True
+        except queue.Full:
+            continue
+    return False
 
 
 class _Interrupted(Exception):
@@ -532,10 +522,12 @@ class Ingestor:
         return thumbs.path_for(self._settings.data_dir / "thumbs", window_id)
 
     def _index_video(self, job_id: int, source: dict) -> dict:
-        """動画を窓ごとにベクトルにします。
+        """動画を窓ごとにベクトルにします(Producer-Consumer パイプライン)。
 
-        ffmpeg は 1 回だけ起動し、先頭から最後まで連続で復号します(VideoFrameReader)。復号は別スレッドで
-        先読みし、推論と並行させます。音声も 1 回の ffmpeg でまとめて変換します(AudioTrack)。
+        Producer スレッド(name="decode")が ffmpeg からの連続復号・窓の組み立て・音声切り出し・
+        CPU 前処理(テンソル化・GPU 向け pin_memory)までを先行実行し、有界キュー(maxsize=INGEST_PREFETCH、
+        既定 2)越しに Consumer(ingestor スレッド)へ渡します。これにより窓 N の推論中に窓 N+1 の
+        復号と前処理をオーバーラップさせつつ、バックプレッシャーでメモリ肥大化を防ぎます。
         """
         timer = StageTimer()
         params = IngestParams(**source["params"])
@@ -556,67 +548,134 @@ class Ingestor:
         self._store.update_job(job_id, total=len(plans), progress=0)
 
         step = decode_step_ms(plans)
+        need = [[round(t / step) for t in plan.sample_ms] for plan in plans]
+        select_offset, select_stride = decode_select_grid(need)
         hwaccel, device = media.select_hwaccel(
             self._settings.ffmpeg_hwaccel, self._settings.ffmpeg_hwaccel_device
         )
+        source_size = (info.width, info.height) if info.width > 0 and info.height > 0 else None
         with timer.stage("probe"):
             reader = media.VideoFrameReader(
-                path, step, self._settings.image_max_side, hwaccel, device, self._settings.ffmpeg_skip_frames
+                path,
+                step,
+                self._settings.image_max_side,
+                hwaccel,
+                device,
+                self._settings.ffmpeg_skip_frames,
+                source_size=source_size,
+                select_offset=select_offset,
+                select_stride=select_stride,
             )
-        need = [[round(t / step) for t in plan.sample_ms] for plan in plans]
-        # 推論は別のスレッドで行い、その間に前の回の保存と、次の回の復号・組み立てを進める。
+        batch = max(self._embedder.info().batch_size, 1)
+        prefetch = max(self._settings.ingest_prefetch, 1)
+        # 推論は別のスレッドで行い、その間に前の回の保存(DB・サムネイル)と、Producer 側の復号・前処理を進める。
         # 先に次の回を推論に出してから前の回を保存するため、推論中の回は最大 2 つ
         embed_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ingest-embed")
         inflight: tuple[list[dict], Future] | None = None
         with tempfile.TemporaryDirectory(prefix="mediasearch-") as tmp:
             audio = media.AudioTrack(path, tmp) if use_audio else None
-            try:
+            work_q: queue.Queue = queue.Queue(maxsize=prefetch)
+            done = object()
+            stop = threading.Event()
+
+            def produce() -> None:
+                it = iter(reader)
                 frames: dict[int, np.ndarray] = {}
-                pending = 0  # 次に処理する窓
+                pending = 0  # 次に組み立てる窓
                 last_index = -1
-                stream = _prefetch(reader)
-                batch = max(self._embedder.info().batch_size, 1)
                 ready: list[dict] = []  # フレームが揃い、推論を待っている窓(batch 件たまったらまとめて推論する)
-                stored = 0
-                while pending < len(plans):
+                batch_audio_sec = 0.0
+                try:
+                    while pending < len(plans) and not stop.is_set():
+                        item = next(it, None)
+                        if item is not None:
+                            last_index = item[0] // step
+                            frames[last_index] = item[1]
+                        # 必要なフレームが揃った窓から順に前処理し、batch 件ごとに有界キューへ積む
+                        while pending < len(plans) and (item is None or max(need[pending]) <= last_index):
+                            if stop.is_set():
+                                return
+                            win, audio_sec = self._prepare_window(plans[pending], need[pending], frames, audio)
+                            ready.append(win)
+                            batch_audio_sec += audio_sec
+                            pending += 1
+                            keep = min(need[pending]) if pending < len(plans) else last_index + 1
+                            for k in [k for k in frames if k < keep]:
+                                del frames[k]
+                            if len(ready) >= batch or pending == len(plans):
+                                t_prep = time.perf_counter()
+                                prepared = self._embedder.prepare_parts_batch([w["parts"] for w in ready])
+                                prep_sec = time.perf_counter() - t_prep
+                                packet = (ready, prepared, batch_audio_sec, prep_sec)
+                                if not _put_bounded(work_q, packet, stop):
+                                    return
+                                ready = []
+                                batch_audio_sec = 0.0
+                        if item is None:
+                            break
+                    if ready and not stop.is_set():
+                        t_prep = time.perf_counter()
+                        prepared = self._embedder.prepare_parts_batch([w["parts"] for w in ready])
+                        prep_sec = time.perf_counter() - t_prep
+                        if not _put_bounded(work_q, (ready, prepared, batch_audio_sec, prep_sec), stop):
+                            return
+                    _put_bounded(work_q, done, stop)
+                except BaseException as exc:  # Consumer 側で同じ例外を送出する
+                    _put_bounded(work_q, exc, stop)
+                finally:
+                    close = getattr(it, "close", None)
+                    if close:  # 途中で止めた場合も、ffmpeg のプロセスを確実に終わらせる
+                        close()
+
+            producer = threading.Thread(target=produce, name="decode", daemon=True)
+            producer.start()
+            stored = 0
+            try:
+                while True:
                     self._check_stop()
                     t = time.perf_counter()
-                    item = next(stream, None)
+                    packet = work_q.get()
                     timer.add("decode", time.perf_counter() - t)
-                    if item is not None:
-                        last_index = item[0] // step
-                        frames[last_index] = item[1]
-                    # 必要なフレームが揃った窓から順に処理する(動画が probe の長さより短い場合は、手元の分で処理)
-                    while pending < len(plans) and (item is None or max(need[pending]) <= last_index):
-                        ready.append(self._prepare_window(plans[pending], need[pending], frames, audio, timer))
-                        pending += 1
-                        keep = min(need[pending]) if pending < len(plans) else last_index + 1
-                        for k in [k for k in frames if k < keep]:
-                            del frames[k]
-                        if len(ready) >= batch or pending == len(plans):
-                            check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
-                            submitted = (ready, embed_pool.submit(self._embed_windows, ready, timer))
-                            ready = []
-                            if inflight is not None:
-                                stored += self._save_windows(source, inflight[0], inflight[1].result(), timer)
-                                self._store.update_job(job_id, progress=stored)
-                            inflight = submitted
-                    if item is None:
+                    if packet is done:
                         break
+                    if isinstance(packet, BaseException):
+                        raise packet
+                    ready, prepared, audio_sec, prep_sec = packet
+                    if audio_sec > 0:
+                        timer.add("audio", audio_sec)
+                    if prep_sec > 0:
+                        timer.add("preprocess", prep_sec)
+                    self._check_stop()
+                    check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
+                    submitted = (ready, embed_pool.submit(self._embed_windows, ready, prepared, timer))
+                    if inflight is not None:
+                        prev_ready, prev_fut = inflight
+                        inflight = submitted
+                        stored += self._save_windows(source, prev_ready, prev_fut.result(), timer)
+                        self._store.update_job(job_id, progress=stored)
+                    else:
+                        inflight = submitted
                 if inflight is not None:
-                    stored += self._save_windows(source, inflight[0], inflight[1].result(), timer)
+                    prev_ready, prev_fut = inflight
                     inflight = None
+                    stored += self._save_windows(source, prev_ready, prev_fut.result(), timer)
                     self._store.update_job(job_id, progress=stored)
             finally:
+                stop.set()
                 if inflight is not None:  # 途中で止めた場合も、推論中の回が終わるのを待ってから片付ける
                     inflight[1].cancel()
                 embed_pool.shutdown(wait=True)
-                stream.close()
+                while producer.is_alive():  # 生成側が put で止まっていれば、取り出して終わらせる
+                    try:
+                        work_q.get(timeout=0.1)
+                    except queue.Empty:
+                        pass
+                producer.join()
                 if audio is not None:
                     audio.close()
         timer.extra.update(
             decoder=reader.decoder, skip_frames=reader.skip_used, decode_step_ms=step, decoded_frames=reader.frames,
-            embed_batch=max(self._embedder.info().batch_size, 1),
+            embed_batch=batch, prefetch=prefetch, select_stride=select_stride,
         )  # fmt: skip
         return timer.result(len(plans), info.duration_ms)
 
@@ -626,9 +685,8 @@ class Ingestor:
         need: list[int],
         frames: dict[int, np.ndarray],
         audio: media.AudioTrack | None,
-        timer: StageTimer,
-    ) -> dict:
-        """1 窓ぶんの入力を組み立てます(推論はまだしない。まとめて推論するため)。"""
+    ) -> tuple[dict, float]:
+        """1 窓ぶんの入力を組み立てます(推論はまだしない。Producer スレッドから呼ぶ)。"""
         picked, times = [], []
         for k, t in zip(need, plan.sample_ms, strict=True):
             if k in frames:
@@ -640,15 +698,20 @@ class Ingestor:
         if not picked:
             raise media.MediaError(f"{plan.start_ms}ms からの窓でフレームを1枚も取り出せません")
         slices = None
+        audio_sec = 0.0
         if audio is not None:
-            with timer.stage("audio"):
-                pcm = audio.slice(plan.start_ms, plan.end_ms)
+            t0 = time.perf_counter()
+            pcm = audio.slice(plan.start_ms, plan.end_ms)
+            audio_sec = time.perf_counter() - t0
             slices = split_window_pcm(pcm, plan.start_ms, plan.end_ms, len(picked))
-        return {"plan": plan, "parts": build_window_parts(picked, times, slices), "thumb": picked[len(picked) // 2]}
+        win = {"plan": plan, "parts": build_window_parts(picked, times, slices), "thumb": picked[len(picked) // 2]}
+        return win, audio_sec
 
-    def _embed_windows(self, ready: list[dict], timer: StageTimer) -> list[np.ndarray]:
-        """組み立てた窓をまとめて推論します(EMBED_BATCH が 1 なら 1 件ずつ推論する)。推論のスレッドで動く。"""
+    def _embed_windows(self, ready: list[dict], prepared, timer: StageTimer) -> list[np.ndarray]:
+        """前処理済みの窓をまとめて推論します(EMBED_BATCH が 1 なら 1 件ずつ推論する)。推論のスレッドで動く。"""
         with timer.overlapping("embed"):
+            if prepared is not None:
+                return self._embedder.embed_prepared_parts(prepared, high=False)
             return self._embedder.embed_parts_many([w["parts"] for w in ready], high=False)
 
     def _save_windows(self, source: dict, ready: list[dict], vecs: list[np.ndarray], timer: StageTimer) -> int:

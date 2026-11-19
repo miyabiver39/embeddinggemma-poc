@@ -71,14 +71,22 @@ class DummyEmbedder(Embedder):
         )
 
     def embed_texts(self, texts: Sequence[str], kind: str = "query") -> np.ndarray:
-        return finalize(np.stack([_text_vec(t) for t in texts]), self._dims)
+        with self._gate.acquire(high=(kind == "query")):
+            return finalize(np.stack([_text_vec(t) for t in texts]), self._dims)
 
     def embed_images(self, images: Sequence[np.ndarray], high: bool = False) -> np.ndarray:
-        with self._gate.acquire(high=high):
-            return finalize(np.stack([_image_vec(i) for i in images]), self._dims)
+        # LocalEmbedder と同じく batch_size 枚ごとにロックを解放し、合間に検索が割り込めるようにする
+        step = max(self._batch, 1)
+        chunks: list[np.ndarray] = []
+        for i in range(0, len(images), step):
+            chunk = images[i : i + step]
+            with self._gate.acquire(high=high):
+                chunks.append(np.stack([_image_vec(im) for im in chunk]))
+        return finalize(np.concatenate(chunks, axis=0), self._dims)
 
     def embed_audio(self, pcm: np.ndarray, high: bool = False) -> np.ndarray:
-        return finalize(_audio_vec(pcm), self._dims)
+        with self._gate.acquire(high=high):
+            return finalize(_audio_vec(pcm), self._dims)
 
     def embed_parts(self, parts: Sequence[Part], high: bool = False) -> np.ndarray:
         with self._gate.acquire(high=high):
