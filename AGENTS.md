@@ -83,6 +83,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 - [x] `:cuda` / `:intel` イメージは、GPU を渡さずに起動すると CPU で動き、検索スコアが `:cpu` と一致する(`:intel` は修正前はセグメンテーション違反で起動できなかった。`docs/gpu.md`)。`:rocm` は容量の都合で未実施
 - [x] 取り込みの受付(拡張子・ffprobe の検証、重複確認、ファイル名の日時、フォルダ一括、監視フォルダ)が `:cpu` イメージ上で実モデルとともに動く。`/etc/shadow` などメディア以外のパスは 422 で拒否される
 - [x] RX 9060 XT 16GB(Windows 11 + Docker Desktop の WSL2、`/dev/dxg`)で `:rocm` が `amd-rocm` / bf16 で動く(2026-10-13)。CPU 版との類似度 0.9999 以上・NaN なし。1080p・2 秒窓で 1 窓約 0.26 秒(Ryzen 7 5700X の CPU 版は約 7.2 秒)。Radeon では高速な注意機構が既定で無効のため、`TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` が必要(無いと 1 窓約 1.03 秒)。修正前のイメージは `libatomic1` の不足で `import torch` が失敗していた。WSL2 では librocdxg と `ROCPROFILER_REGISTER_ENABLED=0` が必要(`docs/gpu.md`)
+  同じ機種で 2026-11-19〜20 に、高速な注意機構を既定で有効にする前のビルド `056b937` で取り込みと検索を再計測した。 [README.ja.md の再計測結果](README.ja.md#windows-での再計測)
 - [x] RTX 3060 12GB(Ubuntu 24.04、ドライバ 595.99.02)で `:cuda` が `nvidia-cuda` / bf16 で動く(2026-10-13)。CPU 版との類似度 0.9999 以上・NaN なし。1080p・2 秒窓で 1 窓約 0.29 秒。動画の復号も GPU(NVDEC)で行われる。2026-11-19 に Ubuntu 26.04.1 で測り直し、1 窓約 0.31 秒・画像 5.12 枚/秒・検索(並行 4)17.4 件/秒・GPU メモリ最大約 3.1GB(`bench/README.md`、README の「ベンチマーク」)
 - [x] イメージの容量(ghcr の圧縮サイズ): slim 0.27GB / cpu 1.46GB / cuda 4.94GB / rocm 7.89GB / intel 3.82GB。展開後は slim 1.1GB / cpu 5.1GB / intel 14.1GB / cuda 14.4GB
 

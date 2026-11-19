@@ -140,6 +140,26 @@ Ingestion figures are the median of 3 runs. See [bench/README.md](bench/README.m
 - On a GPU, two-second-window video is ingested more than 6 times faster than real time. Most of the time is spent on inference; audio and short text searches need little computation, so the GPU makes less of a difference there.
 - These figures are for synthetic media. With real recordings they vary with resolution, length and window settings.
 
+### Windows benchmark with build `056b937`
+
+Measured on 2026-11-19 and 2026-11-20 (JST) on the same Windows 11 Pro PC with Docker Desktop 4.96.3 (WSL2, 16 logical CPUs).
+Both public images used `ROLE=all` and `google/embeddinggemma-2` (768 dimensions). Build `056b937` predates the change that enables fast ROCm attention kernels by default.
+
+| Inference hardware | Image | Precision | Maximum batch size |
+|---|---|---|---:|
+| AMD Ryzen 7 5700X (8 cores, 16 threads) | `:cpu` | FP32 | 1 |
+| AMD Radeon RX 9060 XT (16 GB, via `/dev/dxg`) | `:rocm` | BF16 | 4 |
+
+| Measurement | CPU | GPU | GPU speed relative to CPU |
+|---|---:|---:|---:|
+| Video ingestion (1080p H.264, 30 fps, 60 s, 30 windows) | 245.0 s (8.17 s per window) | 30.19 s (1.01 s per window) | 8.1× |
+| Audio ingestion (60 s, 6 ten-second chunks) | 5.96 s | 0.99 s | 6.0× |
+| Image ingestion (50 1080p JPEGs) | 0.225 images/s | 1.921 images/s | 8.5× |
+| Text search (4 concurrent requests) | 4.57 req/s, p50 724 ms, p95 1,890 ms | 14.33 req/s, p50 159 ms, p95 771 ms | 3.1× (req/s) |
+
+- Both configurations decoded video on the CPU and embedded two frames per two-second window, with zero overlap and video-only input. Ingestion reached 0.24× real time on the CPU and 1.99× real time on the GPU.
+- After warm-up, video and audio ingestion were each measured three times and reported as medians. Image ingestion was measured once per configuration. Text search used the default queries with `top_k=10` and an index of 86 entries. Each search metric is the median of three 30-second trials. Search throughput ranged from 4.30 to 6.30 req/s on the CPU and from 7.50 to 14.37 req/s on the GPU.
+
 ## Three ways to run (ROLE)
 
 | ROLE | Contents | When to use |
