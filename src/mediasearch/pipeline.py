@@ -19,7 +19,7 @@ import queue
 import tempfile
 import threading
 import time
-from collections.abc import Generator
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -31,7 +31,6 @@ from .config import PRESETS, Settings
 from .disk import InsufficientStorage
 from .disk import check as check_disk
 from .embedders import SAMPLE_RATE, AudioPart, Embedder, ImagePart, Part, TextPart
-from .embedders.base import WindowBatchEncode, WindowBatchPreparer
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -205,6 +204,9 @@ def save_thumbnail(image: np.ndarray, dest: Path) -> None:
     thumb.save(dest, format="JPEG", quality=80)
 
 
+_TIMER_LOCK = threading.Lock()
+
+
 class StageTimer:
     """取り込みの処理時間を、段階ごとに積算します(ベンチマーク用。ジョブの timings として保存)。
 
@@ -212,12 +214,15 @@ class StageTimer:
     embed(推論)/ store(DB への保存)/ thumb(サムネイルの保存)。
     復号は推論と並行して進むため、decode は「推論側が次のフレームを待った時間」です。0 に近いほど、
     推論が律速になっています。
+    動画の取り込みでは、推論と保存も並行して進むため、embed は推論が動いていた時間(別のスレッドで計測し、
+    並行した分は重ねて数えない)です。段階の合計は total_ms より大きくなることがあります。
     """
 
     def __init__(self) -> None:
         self._t0 = time.perf_counter()
         self.stages: dict[str, float] = {}
         self.extra: dict[str, object] = {}
+        self._active: dict[str, tuple[int, float]] = {}  # 並行して動いている段階の数と、動き始めた時刻
 
     @contextmanager
     def stage(self, name: str):
@@ -227,8 +232,24 @@ class StageTimer:
         finally:
             self.add(name, time.perf_counter() - t)
 
+    @contextmanager
+    def overlapping(self, name: str):
+        """複数のスレッドで同時に動く段階(推論)の時間を、重ねて数えずに積算します(どれかが動いていた時間)。"""
+        with _TIMER_LOCK:
+            count, since = self._active.get(name, (0, 0.0))
+            self._active[name] = (count + 1, time.perf_counter() if count == 0 else since)
+        try:
+            yield
+        finally:
+            with _TIMER_LOCK:
+                count, since = self._active[name]
+                self._active[name] = (count - 1, since)
+                if count == 1:
+                    self.stages[name] = self.stages.get(name, 0.0) + time.perf_counter() - since
+
     def add(self, name: str, seconds: float) -> None:
-        self.stages[name] = self.stages.get(name, 0.0) + seconds
+        with _TIMER_LOCK:  # 推論のスレッドからも加算するため
+            self.stages[name] = self.stages.get(name, 0.0) + seconds
 
     def result(self, windows: int, media_ms: int) -> dict:
         total = time.perf_counter() - self._t0
@@ -245,8 +266,8 @@ class StageTimer:
         return out
 
 
-def _prefetch(iterable, size: int = 32, *, name: str = "decode"):
-    """別スレッドで先読みし、復号や前処理を推論と並行させます。"""
+def _prefetch(iterable, size: int = 32):
+    """別のスレッドで iterable を先読みします(ffmpeg の復号と、推論を並行させるため)。"""
     q: queue.Queue = queue.Queue(maxsize=size)
     done = object()
     stop = threading.Event()
@@ -266,7 +287,7 @@ def _prefetch(iterable, size: int = 32, *, name: str = "decode"):
             if close:  # 途中で止めた場合も、ffmpeg のプロセスを確実に終わらせる
                 close()
 
-    th = threading.Thread(target=run, name=name, daemon=True)
+    th = threading.Thread(target=run, name="decode", daemon=True)
     th.start()
     try:
         while True:
@@ -542,73 +563,62 @@ class Ingestor:
             reader = media.VideoFrameReader(
                 path, step, self._settings.image_max_side, hwaccel, device, self._settings.ffmpeg_skip_frames
             )
-        batch = max(self._embedder.info().batch_size, 1)
-        prepare = self._embedder.video_batch_preparer()
+        need = [[round(t / step) for t in plan.sample_ms] for plan in plans]
+        # 推論は別のスレッドで行い、その間に前の回の保存と、次の回の復号・組み立てを進める。
+        # 先に次の回を推論に出してから前の回を保存するため、推論中の回は最大 2 つ
+        embed_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ingest-embed")
+        inflight: tuple[list[dict], Future] | None = None
         with tempfile.TemporaryDirectory(prefix="mediasearch-") as tmp:
             audio = media.AudioTrack(path, tmp) if use_audio else None
-            batches = self._video_batches(reader, plans, audio, batch, prepare, timer)
-            if prepare is not None:
-                # 復号済みの窓を CPU で前処理し、現在のバッチの GPU 推論と並行させる。
-                batches = _prefetch(batches, size=1, name="prepare-video")
             try:
-                for ready, pending, encode in batches:
+                frames: dict[int, np.ndarray] = {}
+                pending = 0  # 次に処理する窓
+                last_index = -1
+                stream = _prefetch(reader)
+                batch = max(self._embedder.info().batch_size, 1)
+                ready: list[dict] = []  # フレームが揃い、推論を待っている窓(batch 件たまったらまとめて推論する)
+                stored = 0
+                while pending < len(plans):
                     self._check_stop()
-                    check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
-                    self._store_windows(source, ready, timer, encode)
-                    self._store.update_job(job_id, progress=pending)
+                    t = time.perf_counter()
+                    item = next(stream, None)
+                    timer.add("decode", time.perf_counter() - t)
+                    if item is not None:
+                        last_index = item[0] // step
+                        frames[last_index] = item[1]
+                    # 必要なフレームが揃った窓から順に処理する(動画が probe の長さより短い場合は、手元の分で処理)
+                    while pending < len(plans) and (item is None or max(need[pending]) <= last_index):
+                        ready.append(self._prepare_window(plans[pending], need[pending], frames, audio, timer))
+                        pending += 1
+                        keep = min(need[pending]) if pending < len(plans) else last_index + 1
+                        for k in [k for k in frames if k < keep]:
+                            del frames[k]
+                        if len(ready) >= batch or pending == len(plans):
+                            check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
+                            submitted = (ready, embed_pool.submit(self._embed_windows, ready, timer))
+                            ready = []
+                            if inflight is not None:
+                                stored += self._save_windows(source, inflight[0], inflight[1].result(), timer)
+                                self._store.update_job(job_id, progress=stored)
+                            inflight = submitted
+                    if item is None:
+                        break
+                if inflight is not None:
+                    stored += self._save_windows(source, inflight[0], inflight[1].result(), timer)
+                    inflight = None
+                    self._store.update_job(job_id, progress=stored)
             finally:
-                batches.close()
+                if inflight is not None:  # 途中で止めた場合も、推論中の回が終わるのを待ってから片付ける
+                    inflight[1].cancel()
+                embed_pool.shutdown(wait=True)
+                stream.close()
                 if audio is not None:
                     audio.close()
         timer.extra.update(
             decoder=reader.decoder, skip_frames=reader.skip_used, decode_step_ms=step, decoded_frames=reader.frames,
-            embed_batch=batch,
+            embed_batch=max(self._embedder.info().batch_size, 1),
         )  # fmt: skip
         return timer.result(len(plans), info.duration_ms)
-
-    def _video_batches(
-        self,
-        reader: media.VideoFrameReader,
-        plans: list[WindowPlan],
-        audio: media.AudioTrack | None,
-        batch: int,
-        prepare: WindowBatchPreparer | None,
-        timer: StageTimer,
-    ) -> Generator[tuple[list[dict], int, WindowBatchEncode | None], None, None]:
-        step = reader.step_ms
-        need = [[round(t / step) for t in plan.sample_ms] for plan in plans]
-        frames: dict[int, np.ndarray] = {}
-        pending = 0
-        last_index = -1
-        ready: list[dict] = []
-        stream = _prefetch(reader)
-        try:
-            while pending < len(plans):
-                self._check_stop()
-                t = time.perf_counter()
-                item = next(stream, None)
-                timer.add("decode", time.perf_counter() - t)
-                if item is not None:
-                    last_index = item[0] // step
-                    frames[last_index] = item[1]
-                # 動画の末尾が probe の長さより短い場合は、手元のフレームで残りの窓を処理する。
-                while pending < len(plans) and (item is None or max(need[pending]) <= last_index):
-                    ready.append(self._prepare_window(plans[pending], need[pending], frames, audio, timer))
-                    pending += 1
-                    keep = min(need[pending]) if pending < len(plans) else last_index + 1
-                    for k in [k for k in frames if k < keep]:
-                        del frames[k]
-                    if len(ready) >= batch or pending == len(plans):
-                        encode = None
-                        if prepare is not None:
-                            with timer.stage("prepare"):
-                                encode = prepare([window["parts"] for window in ready])
-                        yield ready, pending, encode
-                        ready = []
-                if item is None:
-                    break
-        finally:
-            stream.close()
 
     def _prepare_window(
         self,
@@ -636,14 +646,13 @@ class Ingestor:
             slices = split_window_pcm(pcm, plan.start_ms, plan.end_ms, len(picked))
         return {"plan": plan, "parts": build_window_parts(picked, times, slices), "thumb": picked[len(picked) // 2]}
 
-    def _store_windows(
-        self, source: dict, ready: list[dict], timer: StageTimer, encode: WindowBatchEncode | None = None
-    ) -> None:
-        """組み立てた窓をまとめて推論し、保存します(EMBED_BATCH が 1 なら 1 件ずつ推論する)。"""
-        if not ready:
-            return
-        with timer.stage("embed"):
-            vecs = encode() if encode is not None else self._embedder.embed_parts_many([w["parts"] for w in ready])
+    def _embed_windows(self, ready: list[dict], timer: StageTimer) -> list[np.ndarray]:
+        """組み立てた窓をまとめて推論します(EMBED_BATCH が 1 なら 1 件ずつ推論する)。推論のスレッドで動く。"""
+        with timer.overlapping("embed"):
+            return self._embedder.embed_parts_many([w["parts"] for w in ready], high=False)
+
+    def _save_windows(self, source: dict, ready: list[dict], vecs: list[np.ndarray], timer: StageTimer) -> int:
+        """推論した窓を保存し、保存した件数を返します(DB への書き込みは、取り込みのスレッドだけで行う)。"""
         for w, vec in zip(ready, vecs, strict=True):
             plan = w["plan"]
             kind = "tav" if any(isinstance(p, AudioPart) for p in w["parts"]) else "frames"
@@ -661,6 +670,7 @@ class Ingestor:
                 with timer.stage("thumb"):
                     # 復号済みのフレームから作る(表示のたびに ffmpeg を起動しなくて済む)
                     save_thumbnail(w["thumb"], self._thumb_path(window_id))
+        return len(ready)
 
     def _index_audio(self, job_id: int, source: dict) -> dict:
         timer = StageTimer()

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -51,8 +51,6 @@ class AudioPart:
 
 
 Part = TextPart | ImagePart | AudioPart
-WindowBatchEncode = Callable[[], list[np.ndarray]]
-WindowBatchPreparer = Callable[[list[Sequence[Part]]], WindowBatchEncode]
 
 
 def finalize(vectors: np.ndarray, dims: int) -> np.ndarray:
@@ -105,10 +103,6 @@ class Embedder(ABC):
 
         with ThreadPoolExecutor(max_workers=min(batch, len(items))) as pool:
             return list(pool.map(lambda parts: self.embed_parts(parts, high=high), items))
-
-    def video_batch_preparer(self) -> WindowBatchPreparer | None:
-        """ファイルの取り込みで、次のバッチを先読みできる場合に前処理を返します。"""
-        return None
 
     def metrics(self) -> dict:
         """推論の使用状況(GET /api/metrics の inference)。順番待ちの制御を持つ実装は、その積算値を返します。"""

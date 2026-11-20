@@ -46,10 +46,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #      intel のみ、Intel GPU 用の実行環境(Level Zero / OpenCL ドライバ)も入れる
 #      rocm / intel は、ffmpeg が GPU で動画を復号するための VA-API ドライバも入れる(AMD: mesa、Intel: iHD)。
 #      rocm は、PyTorch の ROCm 版が読み込む libatomic1(無いと import torch が失敗する。実測)と、WSL2 用の librocdxg も入れる。
-#      cuda は、NVIDIA のドライバがコンテナに渡す復号ライブラリ(NVDEC)を使う(NVIDIA_DRIVER_CAPABILITIES の video)
+#      cuda は、NVIDIA のドライバがコンテナに渡す復号ライブラリ(NVDEC)を使う(NVIDIA_DRIVER_CAPABILITIES の video)。
+#      cuda は、推論の高速化(torch.compile)のため C コンパイラと Python のヘッダーも入れる(Triton が GPU の
+#      計算を呼び出す部品を、起動時にコンパイルする。無いと高速化を使わずに動く。src/mediasearch/embedders/accel.py)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       python3 python3-venv python3-pip ffmpeg ca-certificates tzdata curl \
+ && if [ "$VARIANT" = "cuda" ]; then \
+      apt-get install -y --no-install-recommends gcc libc6-dev python3-dev; \
+    fi \
  && if [ "$VARIANT" = "intel" ]; then \
       apt-get install -y --no-install-recommends libze1 libze-intel-gpu1 intel-opencl-icd intel-media-va-driver; \
     fi \

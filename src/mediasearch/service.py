@@ -216,10 +216,9 @@ class Service:
 
     def decorate_hits(self, hits: list[dict]) -> list[dict]:
         """検索結果に、表示や再生に必要な情報(取り込み元の名前・日時・URL)を付けます。"""
-        sources: dict[int, dict] = {}
+        sources = self.ctx.store.get_sources(h["source_id"] for h in hits)  # 1 回の問い合わせで読む
         for h in hits:
-            src = sources.get(h["source_id"]) or self.ctx.store.get_source(h["source_id"]) or {}
-            sources[h["source_id"]] = src
+            src = sources.get(h["source_id"]) or {}
             h["source_name"] = src.get("name")
             h["abs_time"] = fmt_ts(h["abs_ts"])
             stored = media_stored(src)
