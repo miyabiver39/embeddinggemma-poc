@@ -38,6 +38,7 @@ from bench import DEFAULT_QUERIES  # noqa: E402
 TOTAL_SEC = 480  # 素材の合計の長さ(make_samples.py --split-set)
 DEFAULT_PRECISION = ("bfloat16", 448, 768)
 BASELINE_PRECISION = ("float32", 448, 768)  # 品質の基準
+MODEL_REVISION = "914f7f89142e33e77833254d9c9b90c3cef7303b"  # イメージ(docker/Dockerfile)と同じモデルの版
 
 
 # ---------------------------------------------------------------------- 計測の組み合わせ
@@ -76,9 +77,13 @@ def cond_key(rec: dict) -> tuple:
             rec.get("win"), rec.get("rep"))  # fmt: skip
 
 
-# ---------------------------------------------------------------------- コンテナ
+# ---------------------------------------------------------------------- サーバーの起動
 class Server:
-    """計測用のコンテナを、条件を変えて起動し直します。"""
+    """計測用のサーバーを、条件を変えて起動し直します。
+
+    launcher が docker なら、イメージからコンテナを起動します(機種どうしで同じイメージを使うため、こちらが基本)。
+    process なら、この Python 環境に入れた mediasearch を uvicorn で直接起動します(Docker を使えない Google Colab など)。
+    """
 
     def __init__(self, args) -> None:
         self.args = args
@@ -86,20 +91,35 @@ class Server:
         self.url = f"http://127.0.0.1:{args.port}"
         self.data_root = Path(args.data_root).resolve()
         self.media = Path(args.media).resolve()
+        self.proc: subprocess.Popen | None = None
+        self.log_path = Path(args.out).resolve() / "server.log"
+        # 取り込みで指定するパスの先頭(サーバーから見た素材の場所)
+        self.media_root = "/recordings" if args.launcher == "docker" else str(self.media)
 
     def stop(self) -> None:
-        subprocess.run(["docker", "rm", "-f", self.name], capture_output=True)
+        if self.args.launcher == "docker":
+            subprocess.run(["docker", "rm", "-f", self.name], capture_output=True)
+            return
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(30)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(10)
+        self.proc = None
 
-    def start(self, prec: tuple, w: int) -> Client:
-        dtype, side, dims = prec
-        self.stop()
+    def _dirs(self, dims: int) -> tuple[Path, Path]:
         data = self.data_root / f"data-d{dims}"  # DB は次元を記録して照合するため、DIMS ごとに分ける
         cache = self.data_root / "torch-cache"  # compile の結果は共通にして、作り直しを避ける
         for d in (data, cache):
             d.mkdir(parents=True, exist_ok=True)
-            os.chmod(d, 0o777)  # コンテナの利用者(uid 1000)が書けるように
-        env = {"DTYPE": dtype, "IMAGE_MAX_SIDE": side, "DIMS": dims, "INGEST_WORKERS": w,
-               "TORCH_CACHE_DIR": "/torch-cache", "LOG_LEVEL": "WARNING"}  # fmt: skip
+            if self.args.launcher == "docker":
+                os.chmod(d, 0o777)  # コンテナの利用者(uid 1000)が書けるように
+        return data, cache
+
+    def _launch_docker(self, env: dict, data: Path, cache: Path) -> None:
+        env = {**env, "TORCH_CACHE_DIR": "/torch-cache"}
         cmd = ["docker", "run", "-d", "--name", self.name, "-p", f"127.0.0.1:{self.args.port}:8000",
                "--stop-timeout", "30", "-v", f"{data}:/data", "-v", f"{cache}:/torch-cache",
                "-v", f"{self.media}:/recordings:ro"]  # fmt: skip
@@ -109,13 +129,43 @@ class Server:
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             raise RuntimeError(f"コンテナを起動できません: {res.stderr.strip()}")
+
+    def _launch_process(self, env: dict, data: Path, cache: Path) -> None:
+        # docker/entrypoint.sh と同じ設定(compile のキャッシュの置き場所)にそろえる
+        full = {**os.environ, **{k: str(v) for k, v in env.items()},
+                "ROLE": "all", "DATA_DIR": str(data), "INGEST_ROOTS": str(self.media),
+                "TORCH_CACHE_DIR": str(cache), "TORCHINDUCTOR_CACHE_DIR": str(cache / "inductor"),
+                "TORCHINDUCTOR_FX_GRAPH_CACHE": "1", "TRITON_CACHE_DIR": str(cache / "triton"),
+                "MODEL_REVISION": os.environ.get("MODEL_REVISION", MODEL_REVISION),
+                "PYTHONUNBUFFERED": "1"}  # fmt: skip
+        cmd = [self.args.python or sys.executable, "-m", "uvicorn", "--factory", "mediasearch.main:create_app",
+               "--host", "127.0.0.1", "--port", str(self.args.port), "--log-level", "warning"]  # fmt: skip
+        with self.log_path.open("a", encoding="utf-8") as log:
+            log.write(f"\n===== {datetime.now().isoformat(timespec='seconds')} {env} =====\n")
+            log.flush()
+            self.proc = subprocess.Popen(cmd, env=full, stdout=log, stderr=subprocess.STDOUT)
+
+    def _running(self) -> bool:
+        if self.args.launcher == "docker":
+            state = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", self.name],
+                                   capture_output=True, text=True).stdout.strip()  # fmt: skip
+            return state == "true"
+        return self.proc is not None and self.proc.poll() is None
+
+    def start(self, prec: tuple, w: int) -> Client:
+        dtype, side, dims = prec
+        self.stop()
+        data, cache = self._dirs(dims)
+        env = {"DTYPE": dtype, "IMAGE_MAX_SIDE": side, "DIMS": dims, "INGEST_WORKERS": w, "LOG_LEVEL": "WARNING"}
+        if self.args.launcher == "docker":
+            self._launch_docker(env, data, cache)
+        else:
+            self._launch_process(env, data, cache)
         client = Client(self.url, None, timeout=600)
         t0 = time.monotonic()
         while time.monotonic() - t0 < self.args.start_timeout:
-            state = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", self.name],
-                                   capture_output=True, text=True).stdout.strip()  # fmt: skip
-            if state != "true":
-                raise RuntimeError("コンテナが終了しました:\n" + self.logs())
+            if not self._running():
+                raise RuntimeError("サーバーが終了しました:\n" + self.logs())
             try:
                 client.get("/healthz")
                 info = client.get("/api/info")
@@ -126,16 +176,21 @@ class Server:
         raise RuntimeError(f"{self.args.start_timeout} 秒たっても /healthz が応答しません:\n" + self.logs())
 
     def logs(self, tail: int = 40) -> str:
-        res = subprocess.run(["docker", "logs", "--tail", str(tail), self.name], capture_output=True, text=True)
-        return (res.stdout + res.stderr).strip()
+        if self.args.launcher == "docker":
+            res = subprocess.run(["docker", "logs", "--tail", str(tail), self.name], capture_output=True, text=True)
+            return (res.stdout + res.stderr).strip()
+        try:
+            return "\n".join(self.log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-tail:])
+        except OSError:
+            return ""
 
 
 # ---------------------------------------------------------------------- 計測
-def files_for(media: Path, k: int) -> list[str]:
+def files_for(media: Path, k: int, root: str = "/recordings") -> list[str]:
     names = sorted(p.name for p in (media / "split" / f"k{k}").glob("*.mp4"))
     if len(names) != k:
         raise SystemExit(f"素材が足りません: {media / 'split' / f'k{k}'}(make_samples.py --split-set を実行してください)")
-    return [f"/recordings/split/k{k}/{n}" for n in names]
+    return [f"{root}/split/k{k}/{n}" for n in names]
 
 
 def delete_sources(c: Client, ids: list[int]) -> None:
@@ -282,6 +337,15 @@ def machine_info(args, image_digest: str, revision: str) -> dict:
     except (OSError, ValueError, IndexError):
         pass
     gpu = sh(["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"])
+    versions = None
+    if args.launcher == "process":
+        py = args.python or sys.executable
+        code = ("import importlib\nfor m in ('torch', 'torchvision', 'transformers', 'sentence_transformers'):\n"
+                "    try: v = importlib.import_module(m).__version__\n"
+                "    except Exception: v = 'なし'\n"
+                "    print(m, v)\n"
+                "import torch; print('cuda', torch.version.cuda)")
+        versions = sh([py, "-c", code]).replace("\n", "、")
     if not gpu and shutil.which("rocm-smi"):
         gpu = sh(["rocm-smi", "--showproductname"])
     return {
@@ -296,6 +360,8 @@ def machine_info(args, image_digest: str, revision: str) -> dict:
         "image_revision": revision,
         "image_digest": image_digest,
         "docker_args": args.docker_args,
+        "launcher": args.launcher,
+        "python_versions": versions,  # process のとき: torch・CUDA・transformers・sentence-transformers
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "notes": args.notes or "",
     }
@@ -304,7 +370,10 @@ def machine_info(args, image_digest: str, revision: str) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="共通ベンチマーク(bench/MATRIX.md)を実行します")
     ap.add_argument("--machine", required=True, help="機種の名前(例 rtx3060、rx9060xt)")
-    ap.add_argument("--image", required=True)
+    ap.add_argument("--launcher", choices=("docker", "process"), default="docker",
+                    help="docker: イメージから起動(基本)/ process: この環境の mediasearch を直接起動(Colab など)")
+    ap.add_argument("--image", help="docker のときのイメージ")
+    ap.add_argument("--python", help="process のときに使う Python(既定はこのスクリプトを動かしている Python)")
     ap.add_argument("--docker-args", default="", help='GPU を渡す引数(例 "--gpus all")')
     ap.add_argument("--media", required=True, help="make_samples.py --split-set で作ったフォルダ")
     ap.add_argument("--out", required=True, help="結果の保存先(results.jsonl などを置く)")
@@ -319,8 +388,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--start-timeout", type=float, default=900)
     ap.add_argument("--notes", help="決まりから外れた点・気づいたこと(machine.json に記録)")
     args = ap.parse_args(argv)
-    if shutil.which("docker") is None:
-        raise SystemExit("docker が見つかりません")
+    if args.launcher == "docker":
+        if not args.image:
+            ap.error("--launcher docker では --image が必要です")
+        if shutil.which("docker") is None:
+            raise SystemExit("docker が見つかりません(Docker を使えない環境では --launcher process を使ってください)")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     args.data_root = args.data_root or str(out / "server")
@@ -335,17 +407,23 @@ def main(argv: list[str] | None = None) -> int:
             if rec.get("ok"):
                 done.add(cond_key(rec))
 
-    insp = subprocess.run(["docker", "image", "inspect", args.image, "--format",
-                           '{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .RepoDigests 0}}'],
-                          capture_output=True, text=True)  # fmt: skip
-    if insp.returncode != 0:
-        raise SystemExit(f"イメージがありません。先に docker pull {args.image} を実行してください")
-    revision, _, digest = insp.stdout.strip().partition("|")
+    if args.launcher == "docker":
+        insp = subprocess.run(["docker", "image", "inspect", args.image, "--format",
+                               '{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .RepoDigests 0}}'],
+                              capture_output=True, text=True)  # fmt: skip
+        if insp.returncode != 0:
+            raise SystemExit(f"イメージがありません。先に docker pull {args.image} を実行してください")
+        revision, _, digest = insp.stdout.strip().partition("|")
+    else:  # process: リポジトリのコミットを記録する
+        repo = Path(__file__).resolve().parent.parent
+        revision = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True,
+                                  text=True).stdout.strip() or "unknown"  # fmt: skip
+        digest = ""
     info = machine_info(args, digest, revision)
     mfile = out / "machine.json"
     if not mfile.exists() or not args.resume:
         mfile.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"機種 {args.machine}、イメージ {args.image}(revision {revision[:7]})")
+    print(f"機種 {args.machine}、起動 {args.launcher}、{args.image or 'この環境の mediasearch'}(revision {revision[:7]})")
 
     experiments = {e.strip() for e in args.experiments.split(",") if e.strip()}
     containers = plan(args.quick, experiments, args.reps)
@@ -392,7 +470,7 @@ def main(argv: list[str] | None = None) -> int:
             for win in sorted({cell["win"] for cell, _ in todo}):
                 # ウォームアップ(窓の枚数ごとに compile などの準備が入るため。記録するが集計には使わない)
                 try:
-                    r = ingest_once(c, files_for(media, 8)[:1], win, TOTAL_SEC / 8)
+                    r = ingest_once(c, files_for(media, 8, server.media_root)[:1], win, TOTAL_SEC / 8)
                     delete_sources(c, r["_source_ids"])
                     write({**base, "experiment": todo[0][0]["experiment"], "k": 0, "w": cont["w"], "win": win,
                            "rep": 0, **r})  # fmt: skip
@@ -401,7 +479,7 @@ def main(argv: list[str] | None = None) -> int:
                 for cell, rep in [(cl, rp) for cl, rp in todo if cl["win"] == win]:
                     delete_sources(c, leftover)
                     try:
-                        r = ingest_once(c, files_for(media, cell["k"]), win)
+                        r = ingest_once(c, files_for(media, cell["k"], server.media_root), win)
                     except ApiError as exc:
                         r = {"ok": False, "error": str(exc), "_source_ids": []}
                     leftover = r.get("_source_ids") or []
@@ -411,7 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                           + ("" if r["ok"] else f" 失敗: {r.get('error')}"))  # fmt: skip
             if need_search:
                 if not leftover:  # 検索の対象が無ければ、8 本を取り込んでから測る
-                    r = ingest_once(c, files_for(media, 8), 2)
+                    r = ingest_once(c, files_for(media, 8, server.media_root), 2)
                     leftover = r["_source_ids"]
                 rec = search_once(c, args.search_sec)
                 write({**base, "experiment": "search", "w": cont["w"], **rec})

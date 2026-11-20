@@ -9,6 +9,7 @@
 |---|---|---|---|
 | `rtx3060` | NVIDIA RTX 3060 12GB | Ubuntu(Linux ネイティブ) | `:cuda` |
 | `rx9060xt` | AMD RX 9060 XT 16GB | Windows 11 + Docker Desktop(WSL2、`/dev/dxg`) | `:rocm` |
+| `colab-<GPU>`(例 `colab-a100`) | Google Colab の GPU(L4・A100 など) | Colab(Docker を使えない) | なし(イメージと同じ版の PyTorch・transformers・モデルを pip で入れる) |
 
 ## 1. 目的
 
@@ -95,9 +96,20 @@ python bench/make_samples.py ./bench-media --split-set
 - 素材のフォルダは `/recordings` に読み取り専用でマウントします。コンテナは `127.0.0.1:18000`(`--port`)で待ち受け、名前は `mediasearch-matrix` です。
 - 1 回の計測ごとに、取り込んだ取り込み元を削除してから次を測ります(DB が大きくなって速さが変わらないように)。
 
+### Docker を使えない環境(Google Colab)
+
+`--launcher process` を指定すると、コンテナの代わりに、その環境に入れた mediasearch を `uvicorn` で直接起動します。
+環境変数と compile のキャッシュの置き場所は、イメージの起動スクリプト(`docker/entrypoint.sh`)と同じにそろえます。
+手順は [matrix_colab.ipynb](matrix_colab.ipynb) にまとめています(Colab で開き、上から順に実行します)。
+
+- 依存関係は、イメージと同じ版にそろえます(PyTorch 2.14.1 の CUDA 12.6 版、torchvision 0.29.1、transformers 5.23.0、モデルの版 `914f7f8`)。
+- イメージの revision の代わりに、リポジトリのコミットと、PyTorch・transformers などの版を `machine.json` に記録します。
+- 結果は Google ドライブに保存します。接続が切れた場合は、同じセルを実行し直すと続きから再開します。
+- Colab の GPU は、ほかの利用者と同じ物理マシンを使うことがあり、値がばらつく可能性があります。3 回の値の幅(`completion_min` / `completion_max`)も確認してください。
+
 ## 6. 守ること
 
-1. **イメージをそろえる。** 計測の前に `docker pull` し、イメージの revision(ラベル `org.opencontainers.image.revision`)と digest を記録します。機種どうしで比べるときは、同じ revision から作られたイメージを使います。`INGEST_WORKERS` を含む版(fa80754 以降)が必要です。
+1. **イメージをそろえる。** 計測の前に `docker pull` し(Colab では、5 章の版で依存関係を入れ)、イメージの revision(ラベル `org.opencontainers.image.revision`)と digest を記録します。機種どうしで比べるときは、同じ revision から作られたイメージを使います。`INGEST_WORKERS` を含む版(fa80754 以降)が必要です。
 2. **ほかの GPU の処理を止める。** 計測の前に、GPU を使うほかのコンテナ・アプリを止めます。止められないものがあれば `notes` に書きます。
 3. **ウォームアップする。** コンテナを起動するたびに、窓の大きさごとに、測らない取り込みを 1 回行ってから計測します(初回は compile やカーネルの準備で遅くなるため)。
 4. **3 回測って中央値を使う。** 外れた値も消さずに記録します。
