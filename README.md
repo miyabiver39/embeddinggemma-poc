@@ -129,15 +129,16 @@ Ingestion figures are the median of 3 runs. See [bench/README.md](bench/README.m
 
 | Measurement | CPU (Ryzen 7 5700X, `:cpu`) | RTX 3060 12GB (`:cuda`) | RX 9060 XT 16GB (`:rocm`) |
 |---|---|---|---|
-| Video ingestion (1080p, 60 s, 30 two-second windows) | 215.8 s (7.19 s per window) | **5.2 s (0.17 s per window)** | 7.8 s (0.26 s per window) |
-| Ingestion speed relative to real time | 0.28x | **11.5x** | 7.7x |
-| Audio ingestion (60 s, 6 ten-second chunks) | 5.17 s | **0.70 s** | 0.91 s |
-| Image ingestion (1080p, 50 images) | 0.29 images/s | **9.67 images/s** | 5.62 images/s |
-| Text search (4 concurrent, 30 s) | 7.1 req/s (p50 440 ms) | **194 req/s (p50 19 ms)** | 16.9 req/s (p50 176 ms) |
+| Video ingestion (1080p, 60 s, 30 two-second windows) | 242.7 s (8.09 s per window) | **5.2 s (0.17 s per window)** | 7.8 s (0.26 s per window) |
+| Ingestion speed relative to real time | 0.25x | **11.5x** | 7.7x |
+| Audio ingestion (60 s, 6 ten-second chunks) | 5.71 s | **0.70 s** | 0.91 s |
+| Image ingestion (1080p, 50 images) | 0.28 images/s | **9.67 images/s** | 5.62 images/s |
+| Text search (4 concurrent, 30 s) | 8.1 req/s (p50 497 ms, p95 524 ms) | **194 req/s (p50 19 ms)** | 16.9 req/s (p50 176 ms) |
 
+- CPU (`:cpu`): Windows 11 Pro + Docker Desktop (WSL2, 16 logical CPUs), AMD Ryzen 7 5700X. Re-measured on 2026-11-21 with the CI-built `:cpu` image (`main` at `47f1668`, PyTorch 2.14.1+cpu, transformers 5.23.0, sentence-transformers 6.3.0). Startup (including warmup) took 11.8 s; single-request search responded in p50 134 ms (7.53 req/s); search during video ingestion kept p50 504 ms / p95 548 ms (p99 8.0 s, waiting at most one in-flight window). Compared with earlier CPU measurements (`056b937`: 4.57 req/s, p95 1,890 ms; 2026-10-13: 7.1 req/s, p95 1,297 ms), concurrent text search throughput rose and p95 latency fell sharply. With `SKIP_STATIC` on a synthetic 8-scene x 8 s video (64 s, 32 windows), 25 windows were skipped and ingestion dropped from 257.8 s (0.25x) to 56.8 s (1.13x real time); ingesting 100 document chunks (~76,000 chars) took 72.5 s (725 ms per chunk) ([bench/README.md](bench/README.md)).
 - RTX 3060: Ubuntu 26.04.1 LTS, Core i7-6700K, driver 595.99.02. Measured on 2026-11-20 with the CI-built `:cuda` image (main at c5a27c3), which includes the inference optimizations (torch.compile, CUDA Graphs and more; see "推論の高速化" in [docs/gpu.md](docs/gpu.md)) and the improvements from PR #14. Speed before and after PR #14 was the same within measurement error ([bench/README.md](bench/README.md)). Before the optimizations (2026-11-19): video 9.4 s (0.31 s per window), audio 1.01 s, images 5.12 images/s, search 17.4 req/s (p50 166 ms). A single search responds in p50 7.6 ms (51 ms before). Peak GPU memory use is about 3.5 GB, and video is also decoded on the GPU. The first start takes about 80 seconds to prepare the optimizations (about 37 seconds afterwards).
 - The RTX 3060 audio figure is after removing the audio-side optimization (torch.compile) for quality reasons (0.44 s before; see [docs/gpu.md](docs/gpu.md)).
-- CPU and RX 9060 XT: Windows 11 + Docker Desktop (WSL2). Measured on 2026-10-13. The RX 9060 XT figures are with the fast attention kernels enabled (the default of the `rocm` image; [docs/gpu.md](docs/gpu.md)).
+- RX 9060 XT: Windows 11 + Docker Desktop (WSL2). Measured on 2026-10-13 with the fast attention kernels enabled (the default of the `rocm` image; [docs/gpu.md](docs/gpu.md)).
 - On a GPU, two-second-window video is ingested more than 6 times faster than real time. Most of the time is spent on inference; audio and short text searches need little computation, so the GPU makes less of a difference there.
 - These figures are for synthetic media. With real recordings they vary with resolution, length and window settings.
 
