@@ -196,7 +196,7 @@ You can also send your own pre-processed frames to `/api/ingest/frames`.
 | `FRAMES_PER_WINDOW` | `2` | Frames per window |
 | `OVERLAP_SEC` | `0` | Overlap between windows (seconds) |
 | `INCLUDE_AUDIO` | `false` | Include the video's audio in the same vector |
-| `SKIP_STATIC` | `false` | Do not embed windows whose video has not changed from the previous window; extend the previous window instead (video-only windows). Reduces the number of windows and the ingestion time for cameras with little motion ([docs/design.md](docs/design.md)) |
+| `SKIP_STATIC` | `false` | Do not embed windows whose video has not changed from the previous window; extend the previous window instead (video-only windows; both file ingestion and RTSP streams; can be changed per ingestion or stream registration with `skip_static`). Reduces the number of windows and the inference load for cameras with little motion ([docs/design.md](docs/design.md)) |
 | `STATIC_THRESHOLD` | `4.0` | For `SKIP_STATIC`, the largest per-block brightness difference (0-255) still treated as "no change". Smaller values skip less |
 | `DOC_CHUNK_CHARS` | `800` | Approximate number of characters per document vector (100-4000). Chunks never span pages |
 | `DOC_OVERLAP_CHARS` | `100` | Number of characters from the end of a chunk repeated at the start of the next one (0 to half of `DOC_CHUNK_CHARS`) |
