@@ -19,7 +19,7 @@
    - 1 本の動画をそのまま取り込む場合と、同じ動画を 2・4・8 本に分けて同時に取り込む場合で、速さが変わるか
    - 合計 8 本の動画を、1 本ずつ・2 本同時・4 本同時・8 本同時で取り込んだとき、終わるまでの時間はどう変わるか
 2. **窓の大きさ**(1・2・4・6 秒)によって、速さとベクトルの数がどう変わるか
-3. **精度を下げると**(`DTYPE`・`IMAGE_MAX_SIDE`・`DIMS`)、どれだけ速くなり、品質がどれだけ下がるか
+3. **精度を下げると**(`DTYPE`・`IMAGE_MAX_SIDE`・`DIMS`、画像の上限トークン `IMAGE_MAX_TOKENS`)、どれだけ速くなり、品質がどれだけ下がるか
 
 ## 2. 用語
 
@@ -63,6 +63,13 @@
 - 基準は `float32`・448・768 です。DIMS が小さい条件では、基準のベクトルを先頭から同じ次元に切り詰め、長さを 1 にそろえてから比べます。
 - `float16` で NaN が出た場合や、起動に失敗した場合は、その条件を「失敗」として記録し、次の条件へ進みます(止めない)。
 
+### 実験 3: 画像の上限トークン(2 通り)
+
+- 精度は既定(`bfloat16`・448・768)のまま、`IMAGE_MAX_TOKENS` を 140 と 70 にして、実験 2 と同じ取り込み・検索・品質を測ります(既定の 280 は、実験 2 の既定の条件がそのまま比較の相手になります)。
+- 足した理由: `IMAGE_MAX_SIDE` は、推論の前に画像を縮小するだけです。モデルのプロセッサが、画像を上限トークンに合わせて拡大・縮小し直すため、推論の量は変わりません(1080p の映像の 1 枚は、渡す大きさが 448・336・224 px のどれでも 264 トークンでした。2026-11-21 にイメージの中のプロセッサで確認)。推論の量を減らす設定は `IMAGE_MAX_TOKENS` です。
+- モデルが受け付ける値は 70 / 140 / 280 / 560 / 1120 です。16:9 の映像の 1 枚は、140 で 120 トークン、70 で 66 トークンになります。
+- コンテナの起動は 2 × 2 = 4 回です。2026-11-21 より前のスクリプトで計測を始めた場合は、`--experiments tokens --resume` で、この実験だけを後から足せます。
+
 ## 4. 素材
 
 実在の映像は使いません。`bench/make_samples.py` で作る合成の素材だけを使います。
@@ -74,7 +81,7 @@ python bench/make_samples.py ./bench-media --split-set
 | 素材 | 内容 |
 |---|---|
 | `split/k1/` 〜 `split/k8/` | 1080p・30fps・H.264(GOP 2 秒)・480 秒の元の動画 1 本を、1 / 2 / 4 / 8 本に分けたもの。分けたファイルは元の動画から同じ設定でエンコードし直して作るため、合計のフレームの数(14400)と中身は、どの `k` でも同じ |
-| `quality/images/<448・336・224>/` | 品質の評価用の単色の画像 12 色。`IMAGE_MAX_SIDE` の条件ごとに、長辺をその大きさにしたもの(評価に使う `/compute/embed/images` は縮小しないため、送る側で縮小しておく) |
+| `quality/images/<448・336・224>/` | 品質の評価用の単色の画像 12 色。`IMAGE_MAX_SIDE` の条件ごとに、長辺をその大きさにしたもの(評価に使う `/compute/embed/images` は縮小しないため、送る側で縮小しておく)。単色のため、解像度(`IMAGE_MAX_SIDE`・`IMAGE_MAX_TOKENS`)による細部の失われ方は、この評価では分かりません。`DTYPE`・`DIMS` の差を見るためのものです |
 | `quality/queries.json` | 各画像に対応する正解の文章(日本語と英語) |
 
 素材は、機種ごとに作り直してかまいません(ffmpeg の版によりファイルは同一になりませんが、条件は同じです)。作るのに 5 分ほどかかります。
@@ -90,7 +97,7 @@ python bench/make_samples.py ./bench-media --split-set
 | `rx9060xt` | `ghcr.io/miyabiver39/embeddinggemma-poc:rocm` | `--device=/dev/dxg -v /usr/lib/wsl:/usr/lib/wsl:ro` |
 
 - `rx9060xt` では、スクリプト・素材・結果のフォルダをすべて WSL2 の中(Linux 側のファイルシステム)に置き、WSL2 のシェルから実行します(`/dev/dxg` と `/usr/lib/wsl` は WSL2 の中にしかないため。Windows 側のフォルダは読み書きが遅く、計測に影響します)。
-- スクリプトは、環境変数 `DTYPE` / `IMAGE_MAX_SIDE` / `DIMS` / `INGEST_WORKERS` を変えて起動し、`/healthz` が応答するまで待ちます。
+- スクリプトは、環境変数 `DTYPE` / `IMAGE_MAX_SIDE` / `DIMS` / `IMAGE_MAX_TOKENS` / `INGEST_WORKERS` を変えて起動し、`/healthz` が応答するまで待ちます。
 - そのほかの設定は既定のままです(`EMBED_BATCH`・`TORCH_COMPILE`・`FFMPEG_HWACCEL` などを変えない)。
 - `DATA_DIR` は `DIMS` ごとに分けます(DB が次元を記録して照合するため)。`TORCH_CACHE_DIR` は全条件で共通にし、compile をやり直さないようにします。置き場所は `--data-root`(既定は `<--out>/server`)です。
 - 素材のフォルダは `/recordings` に読み取り専用でマウントします。コンテナは `127.0.0.1:18000`(`--port`)で待ち受け、名前は `mediasearch-matrix` です。
@@ -116,7 +123,7 @@ python bench/make_samples.py ./bench-media --split-set
 5. **途中で止まったら、続きから再開する**(`--resume`)。最初からやり直す必要はありません。条件を変えて再開してはいけません。
 6. **数値は推測で書かない。** 取れなかった値(例: WSL2 の AMD では GPU の使用率が取れない)は空のままにし、理由を `notes` に書きます。
 7. 計測の途中で、計測に使うマシンの操作(ほかの重い処理)をしないでください。
-8. **メモリに注意する。** サーバーは、同時数と窓の枚数が大きいほどメモリを使います(RTX 3060 では、同時数 2・窓 6 秒で約 7GB。そのうち約 4GB は GPU への転送用の固定メモリ)。ほかのサービスが動くマシンでは、`--docker-args` に `--memory <上限> --memory-swap <上限>` を付け、メモリが足りないときにサーバーだけが止まるようにしてください。上限に達して止まった条件は、失敗として記録され、次の条件へ進みます。上限を付けたことは `notes` に書きます。
+8. **メモリに注意する。** サーバーは、同時数と窓の枚数が大きいほどメモリを使います。RTX 3060 では、同時数 2 以上で約 7GB になり、8 本・同時数 2・窓 6 秒では 8GB の上限を超えました。カーネルの記録では、そのうち 3〜4GB が GPU への転送用の固定メモリ(shmem)でした。ほかのサービスが動くマシンでは、`--docker-args` に `--memory <上限> --memory-swap <上限>` を付けてください。メモリが足りないときに、サーバーだけが止まるようにするためです。ただし、上限より空きのメモリが少ないと、上限に達する前にマシン全体のメモリが尽き、カーネルがほかのプロセスを止めることがあります。上限は、計測の前の空きのメモリ(`free -m` の available)より小さくします。上限に達して止まった条件は、失敗として記録され、次の条件へ進みます。上限を付けたことは `notes` に書きます。
 
 ## 7. 記録するもの
 
@@ -124,14 +131,14 @@ python bench/make_samples.py ./bench-media --split-set
 
 | 項目 | 内容 |
 |---|---|
-| `experiment` | `concurrency`(実験 1)/ `precision`(実験 2)/ `search` / `quality` |
-| `dtype` / `image_max_side` / `dims` | 精度の条件 |
+| `experiment` | `concurrency`(実験 1)/ `precision`(実験 2・3)/ `search` / `quality` |
+| `dtype` / `image_max_side` / `dims` / `image_max_tokens` | 精度の条件(`image_max_tokens` が無い行は既定の 280) |
 | `k` / `w` / `win` / `rep` | セルと、何回目か(ウォームアップは `rep = 0`) |
 | `completion_sec` | 完了時間(2 章) |
 | `windows` | 作られた窓の合計数 |
 | `sec_per_window` / `realtime_factor` | 完了時間 ÷ 窓の数 / 480 ÷ 完了時間 |
 | `jobs` | ジョブごとの `timings`(decode / embed / store などの内訳)と、`created_at`・`started_at`・`finished_at` |
-| `infer_util` / `gpu_util` / `gpu_mem_max_mb` / `cpu_util` / `mem_max_mb` | 計測中の資源の使用状況(`/api/metrics` から。`mem_max_mb` はコンテナ全体のメモリの最大。取れないものは null) |
+| `infer_util` / `gpu_util` / `gpu_mem_max_mb` / `cpu_util` / `mem_max_mb` / `mem_total_max_mb` | 計測中の資源の使用状況(`/api/metrics` から。取れないものは null)。`mem_max_mb` はコンテナ全体のメモリ(ページキャッシュと固定のメモリを除く)の最大、`mem_total_max_mb` はそれらも含む最大 |
 | `qps` / `latency_ms`(検索) | 件数/秒、p50 / p95 / p99 |
 | `cos_mean` / `cos_min` / `nan` / `top1_acc` / `margin`(品質) | 基準との cos 類似度、NaN の有無、文章から画像を探した 1 位の正解率、正解と 2 位の点数の差 |
 | `ok` / `error` | 成功したか、失敗の内容 |
@@ -152,7 +159,7 @@ python bench/make_samples.py ./bench-media --split-set
 python bench/matrix.py --machine <machine> --image <image> --docker-args "<GPU の引数>" \
   --media ./bench-media --quick --out bench/results/matrix-quick
 
-# 3. 本番(実験 1 と実験 2)。時間がかかるので、バックグラウンドで実行する
+# 3. 本番(実験 1〜3)。時間がかかるので、バックグラウンドで実行する
 python bench/matrix.py --machine <machine> --image <image> --docker-args "<GPU の引数>" \
   --media ./bench-media --out bench/results/matrix-<machine>
 
@@ -188,3 +195,5 @@ python bench/matrix_report.py bench/results/matrix-rtx3060 bench/results/matrix-
 3. 頭打ちの原因はどこか(推論の稼働率、GPU の使用率、CPU、復号の時間の内訳から判断する)
 4. 窓の大きさによって、1 秒の映像あたりの処理時間と、1 日あたりのベクトルの数・容量(1 窓約 3.2KB × DIMS/768 を目安)がどう変わるか
 5. 精度の条件ごとの速さと品質。既定(bf16・448・768)と比べて、速くて品質が下がらない条件はあるか。`float16` で NaN が出たか
+6. 画像の上限トークン(実験 3)を下げると、何 % 速くなったか
+7. 同時数・窓の大きさと、サーバーのメモリ(`mem_max_mb`・`mem_total_max_mb`)の関係。失敗した条件があれば、その原因
