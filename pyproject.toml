@@ -27,7 +27,7 @@ dependencies = [
 model = [
   "sentence-transformers>=6.1.0",
   "soundfile>=0.12",
-  "transformers",
+  "transformers>=5.23.0",  # EmbeddingGemma 2 を収録した最初の正式版。イメージでは 5.23.0 に固定(docker/Dockerfile)
 ]
 dev = [
   "pytest>=8.0",
