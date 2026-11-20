@@ -419,9 +419,12 @@ class AudioTrack:
 def cut_clip(path: str | Path, start_ms: int, end_ms: int, out_path: Path, kind: str, accurate: bool = False) -> None:
     """元のファイルの start_ms〜end_ms を切り出して out_path に書きます(動画は MP4、音声は M4A)。
 
-    動画は既定で再エンコードせずに切ります(速く、画質が変わらない)。このとき開始位置は、直前のキーフレームまで
-    さかのぼります(指定より少し前から始まる)。accurate=True では指定の位置ちょうどで切るために H.264 で
-    エンコードし直します(時間がかかる)。音声は、元の形式によらず AAC にエンコードします(WAV などをそのまま
+    動画は既定で再エンコードせずに切ります(速く、画質が変わらない)。復号は直前のキーフレームから始める必要があるため、
+    その分も含めて書き出し、MP4 の編集リスト(edit list)で指定の位置から再生されるようにします。タイムスタンプを
+    0 からに詰める(-avoid_negative_ts make_zero)と編集リストが作られず、キーフレームの間隔の分(実測で約 7 秒)だけ
+    前から始まってしまうため、詰めません。編集リストに対応しない再生ソフトでは少し前から始まるため、accurate=True で
+    指定の位置ちょうどで切れるようにしています(H.264 でエンコードし直すため時間がかかる)。
+    音声は、元の形式によらず AAC にエンコードします(WAV などをそのまま
     M4A に入れられないため)。字幕・データのストリームは含めません。
     """
     start = f"{start_ms / 1000:.3f}"
@@ -432,7 +435,7 @@ def cut_clip(path: str | Path, start_ms: int, end_ms: int, out_path: Path, kind:
     elif accurate:
         cmd += ["-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac"]
     else:
-        cmd += ["-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-avoid_negative_ts", "make_zero"]
+        cmd += ["-map", "0:v:0", "-map", "0:a?", "-c", "copy"]
     cmd += ["-movflags", "+faststart", str(out_path)]
     _run(cmd, timeout=max(120, (end_ms - start_ms) // 1000 * 4))
     if not out_path.is_file() or out_path.stat().st_size == 0:

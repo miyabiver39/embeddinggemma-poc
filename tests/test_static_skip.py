@@ -47,7 +47,8 @@ def _settings(settings, **kw):
 
 
 def _windows(client, source_id):
-    res = client.post("/api/search/text", json={"query": "x", "top_k": 1000, "merge": False, "kind": "all", "min_score": -1}).json()
+    body = {"query": "x", "top_k": 1000, "merge": False, "kind": "all", "min_score": -1}
+    res = client.post("/api/search/text", json=body).json()
     return sorted((h["start_ms"], h["end_ms"]) for h in res["results"] if h["source_id"] == source_id)
 
 
