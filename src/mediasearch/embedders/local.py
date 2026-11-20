@@ -24,8 +24,12 @@ import subprocess
 import sys
 import time
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import numpy as np
@@ -241,6 +245,14 @@ class LocalEmbedder(Embedder):
         self._accelerator = accelerator_name(self._device)
         self._dims = settings.dims
         self._gate = PriorityGate()
+        rx9060xt = False
+        if self._accelerator == "amd-rocm" and settings.model_id == "google/embeddinggemma-2":
+            gpu = torch.cuda.get_device_properties(self._device)
+            # WSL2 で予約領域を差し引いた値でも 16 GB 版を識別する。
+            rx9060xt = gpu.name == "AMD Radeon RX 9060 XT" and gpu.total_memory >= 15 * 2**30
+        if rx9060xt and not (os.environ.get("OMP_NUM_THREADS") or os.environ.get("MKL_NUM_THREADS")):
+            # CPU 前処理と動画の復号に CPU の実行枠を残す。
+            torch.set_num_threads(min(torch.get_num_threads(), 2))
 
         log.info(
             "モデルを読み込みます: %s (device=%s, accelerator=%s, dtype=%s)",
@@ -260,6 +272,9 @@ class LocalEmbedder(Embedder):
         self._target_device = torch.device(self._device)
         self._model.to(self._target_device)
         self._model.eval()
+        self._processor_lock = Lock() if rx9060xt else nullcontext()
+        self._query_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rocm-search") if rx9060xt else None
+        self._query_cache = lru_cache(maxsize=256)(self._encode_query) if rx9060xt else None
         self._use_pin_memory = bool(self._target_device.type == "cuda" and torch.cuda.is_available())
         self._modalities = list(getattr(self._model, "modalities", []) or [])
         self._apply_image_token_limit(settings.image_max_tokens)
@@ -424,23 +439,29 @@ class LocalEmbedder(Embedder):
         else:
             sorted_inputs = inputs
         prompt = self._resolved_prompts.get(prompt_name)
-        features = self._model.preprocess(sorted_inputs, prompt=prompt)
+        with self._processor_lock:
+            features = self._model.preprocess(sorted_inputs, prompt=prompt)
         if pin:
             features = pin_features(features)
         return _PreparedBatch(features=features, restore_idx=restore_idx, count=count)
 
     def _forward_prepared(self, prepared: _PreparedBatch, high: bool) -> np.ndarray:
         """前処理済みのテンソルに対してモデル本体の forward のみを PriorityGate 内で実行します。"""
-        with self._gate.acquire(high=high), self._torch.inference_mode():
-            features = move_features(
-                prepared.features, self._target_device, non_blocking=self._use_pin_memory
-            )
-            out = self._model(features)["sentence_embedding"]
-            arr = self._to_numpy(out)
+        with self._gate.acquire(high=high):
+            if high and self._query_worker is not None:
+                # 呼び出し元にかかわらず、検索の GPU 実行と結果の転送に同じスレッドを使う。
+                arr = self._query_worker.submit(self._forward_on_device, prepared.features).result()
+            else:
+                arr = self._forward_on_device(prepared.features)
         arr = arr.reshape(prepared.count, -1)
         if prepared.restore_idx is not None:
             arr = arr[prepared.restore_idx]
         return finalize(arr, self._dims)
+
+    def _forward_on_device(self, features: dict[str, Any]) -> np.ndarray:
+        with self._torch.inference_mode():
+            features = move_features(features, self._target_device, non_blocking=self._use_pin_memory)
+            return self._to_numpy(self._model(features)["sentence_embedding"])
 
     # ------------------------------------------------------------------ 公開 API
     def info(self) -> EmbedderInfo:
@@ -467,6 +488,8 @@ class LocalEmbedder(Embedder):
             return np.zeros((0, self._dims), dtype=np.float32)
         if kind == "query" and self._text_batcher is not None:
             return np.stack(self._text_batcher.run_many(items))
+        if kind == "query" and self._query_cache is not None and len(items) == 1 and len(items[0]) <= 1024:
+            return self._query_cache(items[0]).copy()
         prompt = "query" if kind == "query" else "document"
         high = kind == "query"
         step = max(self._batch, self._TEXT_BATCH_SIZE)
@@ -482,6 +505,9 @@ class LocalEmbedder(Embedder):
             chunks.append(self._forward_prepared(prepared, high=high))
         merged = np.concatenate(chunks, axis=0)
         return merged[np.argsort(order)]
+
+    def _encode_query(self, query: str) -> np.ndarray:
+        return self._forward_prepared(self._prepare_texts([query]), high=True)
 
     def _prepare_texts(self, texts: list[str]) -> _PreparedBatch:
         return self._preprocess_inputs(texts, prompt_name="query", pin=self._use_pin_memory)
@@ -556,3 +582,7 @@ class LocalEmbedder(Embedder):
             self._parts_batcher.close()
         if self._text_batcher is not None:
             self._text_batcher.close()
+        if self._query_worker is not None:
+            self._query_worker.shutdown()
+        if self._query_cache is not None:
+            self._query_cache.cache_clear()
