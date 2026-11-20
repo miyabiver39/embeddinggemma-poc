@@ -274,8 +274,8 @@ def ingest_once(c: Client, paths: list[str], win: int, video_sec: float = TOTAL_
         "gpu_mem_max_mb": metric("gpu_mem_mb", "max"),
         "cpu_util": metric("cpu_pct"),
         "mem_max_mb": metric("mem_anon_mb", "max") or metric("rss_mb", "max"),  # コンテナ全体(取れなければ本体)
-        # ページキャッシュとページロックのメモリ(GPU へ渡す前の固定のメモリ。shmem)も含む使用量。
-        # mem_max_mb には固定のメモリが入らないため、マシン全体のメモリが足りるかはこちらで見る
+        # コンテナ(cgroup)の使用量で、ページキャッシュも含む。mem_max_mb(anon)には、GPU へ渡す前の
+        # 固定のメモリ(shmem)が入らないため、あわせて記録する
         "mem_total_max_mb": metric("mem_mb", "max"),
         "cpu_by_thread": summary.get("cpu_by_thread"),
         "jobs": [{k: j.get(k) for k in ("id", "status", "created_at", "started_at", "finished_at", "timings")}

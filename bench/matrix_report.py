@@ -237,8 +237,10 @@ def bar_chart(title: str, xlabel: str, labels: list[str], series: dict[str, list
     nser = max(len(series), 1)
     bh = 10 if nser > 1 else 14
     gap = 8
-    left, right, top, bottom = 200, 150, 36, 40
-    w = 760
+    # 見出しの幅に合わせて左の余白を広げる(全角は 12px、半角は 7px として見積もる)
+    left = max(200, 16 + max((sum(12 if ord(ch) > 0x2000 else 7 for ch in lab) for lab in labels), default=0))
+    right, top, bottom = 150, 36, 40
+    w = left + 410 + right
     h = top + bottom + rows * (bh * nser + gap)
     pw = w - left - right
     vals = [v for ys in series.values() for v in ys if v is not None]
@@ -301,10 +303,21 @@ def scatter(title: str, xlabel: str, ylabel: str, points: list[tuple]) -> str:
     out.append(f'<text x="{left + pw / 2}" y="{h - 10}" text-anchor="middle" fill="#111">{_esc(xlabel)}</text>')
     out.append(f'<text x="16" y="{top + ph / 2}" text-anchor="middle" fill="#111" '
                f'transform="rotate(-90 16 {top + ph / 2})">{_esc(ylabel)}</text>')  # fmt: skip
+    # 重なる点と見出しは 1 つにまとめる(全部書くと読めなくなるため)。点の上の title には全部を残す
+    placed: list[list] = []
     for x, y, name, ci in pts:
         out.append(f'<circle cx="{sx(x):.1f}" cy="{sy(y):.1f}" r="5" fill="{COLORS[ci % len(COLORS)]}" '
                    f'fill-opacity="0.8"><title>{_esc(name)}: {x:g}, {y:g}</title></circle>')  # fmt: skip
-        out.append(f'<text x="{sx(x) + 7:.1f}" y="{sy(y) + 3:.1f}" font-size="9" fill="#374151">{_esc(name)}</text>')
+    for x, y, name, _ in sorted(pts, key=lambda p: p[0]):  # 左から順に見出しを置く
+        # 縦に近く、横は既にある見出しの幅(1 文字 7px と見積もる)に入るなら、重なるとみなす
+        near = next((p for p in placed if abs(p[1] - sy(y)) < 12 and -12 < sx(x) - p[0] < 7 * len(p[2]) + 60), None)
+        if near:
+            near[3] += 1
+        else:
+            placed.append([sx(x), sy(y), name, 0])
+    for px, py, name, more in placed:
+        label = name + (f" ほか {more} 件" if more else "")
+        out.append(f'<text x="{px + 7:.1f}" y="{py + 3:.1f}" font-size="9" fill="#374151">{_esc(label)}</text>')
     out.append("</svg>")
     return "\n".join(out)
 
