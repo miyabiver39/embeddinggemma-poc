@@ -3617,6 +3617,141 @@
         ]
       }
     },
+    "/api/sources/{source_id}/clip": {
+      "get": {
+        "tags": [
+          "配信"
+        ],
+        "summary": "取り込み元の一部を切り出す(MP4 / M4A)",
+        "description": "検索で見つかった区間を、ファイルとして書き出します(証拠の保存や共有のため)。\n\n長さは `CLIP_MAX_SEC`(既定 600 秒)まで。同時に処理できるのは 2 件までで、超えると 503 を返します。\n静止画と、保存しない設定(`store_media=false`)で取り込んだものは切り出せません。",
+        "operationId": "get_clip_api_sources__source_id__clip_get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Source Id"
+            }
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "開始位置(先頭からのミリ秒。検索結果の start_ms)",
+              "title": "Start Ms"
+            },
+            "description": "開始位置(先頭からのミリ秒。検索結果の start_ms)"
+          },
+          {
+            "name": "end_ms",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "切り出しの終了位置(ミリ秒。検索結果の end_ms)",
+              "title": "End Ms"
+            },
+            "description": "切り出しの終了位置(ミリ秒。検索結果の end_ms)"
+          },
+          {
+            "name": "accurate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "true: 指定の位置ちょうどで切る(H.264 でエンコードし直すため時間がかかる)。false: エンコードし直さずに切る(速い。開始は直前のキーフレームまでさかのぼる)",
+              "default": false,
+              "title": "Accurate"
+            },
+            "description": "true: 指定の位置ちょうどで切る(H.264 でエンコードし直すため時間がかかる)。false: エンコードし直さずに切る(速い。開始は直前のキーフレームまでさかのぼる)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "切り出したファイル(動画は MP4、音声は M4A。ダウンロードとして返す)",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "推論側(compute)に接続できない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
     "/api/thumb/{window_id}": {
       "get": {
         "tags": [

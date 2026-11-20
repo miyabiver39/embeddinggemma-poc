@@ -220,6 +220,7 @@ You can also send your own pre-processed frames to `/api/ingest/frames`.
 | `EMBEDDING_TOKEN` | same as `API_TOKEN` | Token sent to compute when remote |
 | `INGEST_ROOTS` | `/recordings` | Folders allowed for path and folder ingestion (comma-separated). `DATA_DIR` and the watched folders are added automatically |
 | `MAX_UPLOAD_MB` | `4096` | Maximum size of one request (MB). `0` for unlimited |
+| `CLIP_MAX_SEC` | `600` | Maximum length (seconds) of one clip cut out with `GET /api/sources/{id}/clip`. `0` disables clipping |
 | `ALLOWED_ORIGINS` | (empty) | Origins allowed to call state-changing APIs from a page on another origin (comma-separated) |
 | `ALLOWED_HOSTS` | `*` | Accepted Host headers (comma-separated). Protection against DNS rebinding |
 | `PUID` / `PGID` | `1000` | User / group ID the app runs as. `PUID=0` keeps it running as root |

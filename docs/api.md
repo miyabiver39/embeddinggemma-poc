@@ -181,6 +181,19 @@ curl -H 'Range: bytes=0-' -o clip.mp4 http://localhost:8000/api/media/12   # 元
 
 ブラウザの `<video>` では `"/api/media/12#t=4.0"` のように指定すると、該当の位置から再生できます。
 
+**見つかった区間を切り出す**(証拠の保存や共有のため。動画は MP4、音声は M4A):
+
+```bash
+# 検索結果の intervals の source_id・start_ms・end_ms を渡す
+curl -OJ 'http://localhost:8000/api/sources/12/clip?start_ms=4000&end_ms=8000'
+# 指定の位置ちょうどで切る(H.264 でエンコードし直すため時間がかかる)
+curl -OJ 'http://localhost:8000/api/sources/12/clip?start_ms=4000&end_ms=8000&accurate=true'
+```
+
+- 既定(`accurate=false`)はエンコードし直さずに切るため速く、画質も変わりません。開始は直前のキーフレームまでさかのぼります。
+- 長さは `CLIP_MAX_SEC`(既定 600 秒)まで。同時に処理するのは 2 件までで、超えると 503 です。
+- 静止画と、保存しない設定(`store_media=false`)で取り込んだものは切り出せません(VMS と連携する場合は、VMS の書き出しを使います)。
+
 `media_url` / `thumb_url` が `null` の場合は表示できません(音声の窓のサムネイル、または保存しない設定 `store_media=false` で取り込んだもの)。
 保存しない設定では、検索結果は取り込み元の名前・時刻・スコアなどの情報だけになります。
 
