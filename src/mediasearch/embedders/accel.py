@@ -97,11 +97,14 @@ def _layers(model) -> list:
 
 
 def compile_layers(model) -> None:
-    """画像側・文章側・音声側の各層を torch.compile します(実際の compile は最初の推論のとき)。
+    """画像側・文章側の各層を torch.compile します(実際の compile は最初の推論のとき)。
 
-    文章と音声の長さは毎回変わるため、文章側と音声側は長さを可変(dynamic)にして作り直しを防ぎます。
+    文章の長さは毎回変わるため、文章側は長さを可変(dynamic)にして作り直しを防ぎます。
     画像側は、まとめる件数や画像の大きさが変わったときだけ作り直します(大きさは動画ごとにほぼ一定)。
-    音声側は 10 秒の音声 1 件が 97 ms → 76 ms(float32 の結果との類似度は 0.99979 → 0.99982。RTX 3060 で実測)。
+
+    音声側は compile しません。compile すると速くなる(10 秒の音声 1 件が 97 ms → 76 ms)一方で、
+    合成のサイン波の音声で float32 の結果との類似度が下がり(0.9980 → 0.9951)、起動のたびに結果が変わりました
+    (同じ入力で 0.9932〜0.9951。RTX 3060 で実測、2026-11-20)。品質と再現性を優先します。
     """
     import torch
 
@@ -113,8 +116,6 @@ def compile_layers(model) -> None:
     for layer in model.vision_tower.encoder.layers:
         layer.compile()
     for layer in model.language_model.layers:
-        layer.compile(dynamic=True)
-    for layer in model.audio_tower.layers:
         layer.compile(dynamic=True)
 
 
