@@ -72,11 +72,11 @@ python bench/make_samples.py ./bench-media --split-set
 
 | 素材 | 内容 |
 |---|---|
-| `split/k1/` 〜 `split/k8/` | 1080p・30fps・H.264(GOP 2 秒)・480 秒の元の動画 1 本を、`-c copy` で 1 / 2 / 4 / 8 本に分けたもの。合計の長さと中身は、どの `k` でも同じ |
-| `quality/images/` | 品質の評価用の合成の画像 12 枚(色と図形。1080p) |
+| `split/k1/` 〜 `split/k8/` | 1080p・30fps・H.264(GOP 2 秒)・480 秒の元の動画 1 本を、1 / 2 / 4 / 8 本に分けたもの。分けたファイルは元の動画から同じ設定でエンコードし直して作るため、合計のフレームの数(14400)と中身は、どの `k` でも同じ |
+| `quality/images/<448・336・224>/` | 品質の評価用の単色の画像 12 色。`IMAGE_MAX_SIDE` の条件ごとに、長辺をその大きさにしたもの(評価に使う `/compute/embed/images` は縮小しないため、送る側で縮小しておく) |
 | `quality/queries.json` | 各画像に対応する正解の文章(日本語と英語) |
 
-素材は、機種ごとに作り直してかまいません(ffmpeg の版によりファイルは同一になりませんが、条件は同じです)。
+素材は、機種ごとに作り直してかまいません(ffmpeg の版によりファイルは同一になりませんが、条件は同じです)。作るのに 5 分ほどかかります。
 
 ## 5. サーバーの起動
 
@@ -88,10 +88,12 @@ python bench/make_samples.py ./bench-media --split-set
 | `rtx3060` | `ghcr.io/miyabiver39/embeddinggemma-poc:cuda` | `--gpus all` |
 | `rx9060xt` | `ghcr.io/miyabiver39/embeddinggemma-poc:rocm` | `--device=/dev/dxg -v /usr/lib/wsl:/usr/lib/wsl:ro` |
 
+- `rx9060xt` では、スクリプト・素材・結果のフォルダをすべて WSL2 の中(Linux 側のファイルシステム)に置き、WSL2 のシェルから実行します(`/dev/dxg` と `/usr/lib/wsl` は WSL2 の中にしかないため。Windows 側のフォルダは読み書きが遅く、計測に影響します)。
 - スクリプトは、環境変数 `DTYPE` / `IMAGE_MAX_SIDE` / `DIMS` / `INGEST_WORKERS` を変えて起動し、`/healthz` が応答するまで待ちます。
 - そのほかの設定は既定のままです(`EMBED_BATCH`・`TORCH_COMPILE`・`FFMPEG_HWACCEL` などを変えない)。
-- `DATA_DIR` は `DIMS` ごとに分けます(DB が次元を記録して照合するため)。`TORCH_CACHE_DIR` は全条件で共通にし、compile をやり直さないようにします。
-- 素材のフォルダは `/recordings` に読み取り専用でマウントします。
+- `DATA_DIR` は `DIMS` ごとに分けます(DB が次元を記録して照合するため)。`TORCH_CACHE_DIR` は全条件で共通にし、compile をやり直さないようにします。置き場所は `--data-root`(既定は `<--out>/server`)です。
+- 素材のフォルダは `/recordings` に読み取り専用でマウントします。コンテナは `127.0.0.1:18000`(`--port`)で待ち受け、名前は `mediasearch-matrix` です。
+- 1 回の計測ごとに、取り込んだ取り込み元を削除してから次を測ります(DB が大きくなって速さが変わらないように)。
 
 ## 6. 守ること
 
@@ -127,11 +129,13 @@ python bench/make_samples.py ./bench-media --split-set
 
 ## 8. 実行の手順
 
+Python は 3.10 以上が必要です(標準ライブラリだけで動きます)。環境によっては `python` を `python3` に読み替えてください。
+
 ```bash
 # 1. 素材を作る
 python bench/make_samples.py ./bench-media --split-set
 
-# 2. 試しに少しだけ実行して、動くことを確かめる(k=1,2・w=1,2・窓 2 秒・1 回。結果は別のフォルダ)
+# 2. 試しに少しだけ実行して、動くことを確かめる(k=1,2・w=1,2・窓 2 秒・1 回・精度は既定のみ。結果は別のフォルダ)
 python bench/matrix.py --machine <machine> --image <image> --docker-args "<GPU の引数>" \
   --media ./bench-media --quick --out bench/results/matrix-quick
 
