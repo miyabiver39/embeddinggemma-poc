@@ -71,7 +71,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 - [x] ONNX 版リポジトリ(`onnx-community/embeddinggemma-2-ONNX`)に `model.onnx` / `vision_encoder.onnx` / `audio_encoder.onnx` があり、fp32/fp16/q4/q4f16/quantized が公開されている(変換・精度比較は未実施)
 - [x] sentence-transformers 6.1.0 で text / image / audio / video(`(T,H,W,3)` 配列)/ 構造化メッセージ(順序つき混在入力)が 1 ベクトルを返す
 - [x] 時刻ラベルを挟んだ交互配置(TAV)は、構造化メッセージで再現できる
-- [x] `transformers` は PyPI 版に `embedding_gemma2` が無く、git のコミット `cb33194ad6152bd9fad6305378d92db385dd7b32` が必要。`torchvision` も必須
+- [x] `transformers` は、正式版 5.23.0(PyPI)で `embedding_gemma2` を使える。以前に使っていた git のコミット `cb33194` を含み、RTX 3060 で text / image / audio / 窓 / tav のベクトルが完全に一致(差 0。高速化あり・なしの両方)、速度も同じ(2026-11-20)。`torchvision` も必須
 - [x] `torchcodec` はサンドボックスで読み込めない → ファイル/URL を渡さず、ffmpeg で復号した配列を渡す(設計もそうしている)
 - [x] アプリ経由(実モデル・CPU)で「青い画面」→青い動画が 1 位(`RUN_MODEL_TESTS=1 pytest -m model`)
 - [x] GitHub Actions でテストと 5 イメージのビルド・ghcr.io への公開が成功。匿名で `docker pull` できる(公開設定の変更は不要だった)
@@ -95,6 +95,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 - [ ] Intel の GPU での 1 窓あたりの処理時間
 - [ ] EMBED_BATCH がほとんど効かない原因(窓をまとめても推論の時間が件数に比例する)。RTX 3060 では、画像側の計算が GPU の実効性能(約 18 TFLOPS)で動いており、まとめても計算量が減らないためと考えられる
 - [ ] 推論の高速化(torch.compile・CUDA Graph)の AMD / Intel の GPU での効果と品質(現在は NVIDIA の GPU だけで有効)
+- [ ] 音声側の torch.compile で、float32 の結果から離れ、起動ごとに結果が変わる原因(合成のサイン波で確認。音声側は compile の対象から外した。2026-11-20)
 - [ ] ONNX Runtime / OpenVINO / TensorRT へ変換したときのベクトル一致度と速度(フェーズ 2)
 - [ ] 実際の録画映像での検索精度
 - [ ] リリース時の SBOM・脆弱性検査ワークフロー(`security.yml`)のタグ契機での実行とリリースへの添付(手動実行では 5 イメージの SBOM 作成・検査・集計まで成功を確認済み)

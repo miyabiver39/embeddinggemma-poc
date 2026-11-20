@@ -129,11 +129,12 @@ Intel の古い内蔵 GPU(Iris Xe など)は PyTorch の XPU 対応外の可能�
 |---|---|---|---|
 | 動画の取り込み(1080p・60 秒・2 秒窓 30 件) | 215.8 秒(1 窓 7.19 秒) | **5.2 秒(1 窓 0.17 秒)** | 7.8 秒(1 窓 0.26 秒) |
 | 実時間に対する取り込みの速さ | 0.28 倍 | **11.5 倍** | 7.7 倍 |
-| 音声の取り込み(60 秒・10 秒区切り 6 件) | 5.17 秒 | **0.44 秒** | 0.91 秒 |
+| 音声の取り込み(60 秒・10 秒区切り 6 件) | 5.17 秒 | **0.70 秒** | 0.91 秒 |
 | 画像の取り込み(1080p・50 枚) | 0.29 枚/秒 | **9.67 枚/秒** | 5.62 枚/秒 |
 | 文章の検索(同時 4 件・30 秒) | 7.1 件/秒(p50 440 ms) | **194 件/秒(p50 19 ms)** | 16.9 件/秒(p50 176 ms) |
 
 - RTX 3060: Ubuntu 26.04.1 LTS、Core i7-6700K、ドライバ 595.99.02。2026-11-20 に、CI でビルドした `:cuda`(main の c5a27c3。推論の高速化(torch.compile・CUDA Graph など。[docs/gpu.md](docs/gpu.md) の「推論の高速化」)と PR #14 の改善を含む)で計測。PR #14 の前後で速度の差は誤差の範囲でした([bench/README.md](bench/README.md))。高速化の前(2026-11-19)は、動画 9.4 秒(1 窓 0.31 秒)・音声 1.01 秒・画像 5.12 枚/秒・検索 17.4 件/秒(p50 166 ms)でした。検索 1 件ずつの応答は p50 7.6 ms(高速化の前は 51 ms)。GPU メモリの使用量は最大約 3.5GB、動画の復号も GPU で行います。初回の起動は、高速化の準備のため約 80 秒かかります(2 回目以降は約 37 秒)。
+- RTX 3060 の音声の取り込みは、音声側の高速化(torch.compile)を品質の都合で外した後の値です(外す前は 0.44 秒。[docs/gpu.md](docs/gpu.md))。
 - CPU と RX 9060 XT: Windows 11 + Docker Desktop(WSL2)。2026-10-13 に計測。RX 9060 XT は高速な注意機構を有効にした状態(`rocm` イメージの既定。[docs/gpu.md](docs/gpu.md))の値です。
 - GPU では、2 秒窓の映像を実時間の 6 倍以上の速さで取り込めます。処理時間の大半は推論で、音声と短い文章の検索は計算が小さいため、GPU による差が小さくなります。
 - 合成の素材での値です。実際の録画映像では、解像度・長さ・窓の設定によって変わります。
@@ -292,7 +293,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"          # モデル不要のテスト用
 pytest -q                        # ダミー埋め込みでの通しテスト(ffmpeg が必要)
-pip install -e ".[model]"        # 実モデルを使う場合(transformers は AGENTS.md の固定コミットを推奨)
+pip install -e ".[model]"        # 実モデルを使う場合(transformers 5.23.0 以降。イメージは 5.23.0 に固定)
 RUN_MODEL_TESTS=1 pytest -q -m model
 EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:create_app --reload
 ```
