@@ -22,10 +22,12 @@ ARG VARIANT=cpu
 # 依存のバージョンは「動作確認した組み合わせ」に固定しています(AGENTS.md 参照)
 ARG TORCH_VERSION=2.14.1
 ARG TORCHVISION_VERSION=0.29.1
-# EmbeddingGemma 2 は transformers の正式リリース(PyPI)に未収録のため、確認済みのコミットを使う
-ARG TRANSFORMERS_COMMIT=cb33194ad6152bd9fad6305378d92db385dd7b32
-# 取得したアーカイブが改ざんされていないことを、ハッシュで確かめる(pip が照合し、違えばビルドが失敗する)
-ARG TRANSFORMERS_SHA256=4c30d29ff39f7398d9b0b4073594d2bcd2fbfe1bc31b12743ab08be34deef934
+# transformers は、EmbeddingGemma 2 を収録した正式リリース(PyPI)の、動作を確認した版に固定する
+# (5.23.0。以前に使っていた git のコミット cb33194 を含み、ベクトルが完全に一致することを RTX 3060 で確認。2026-11-20)
+ARG TRANSFORMERS_VERSION=5.23.0
+# 取得した配布物(wheel)が改ざんされていないことを、ハッシュで確かめる(pip が照合し、違えばビルドが失敗する)。
+# 版を変えるときは、PyPI に載っている wheel の sha256 に合わせて更新する
+ARG TRANSFORMERS_SHA256=018e82fd07490ad5bb58414f65e31576033dc7f36bed10c574843f69b90991bf
 ARG MODEL_ID=google/embeddinggemma-2
 # モデルの版(Hugging Face のコミット)を固定する。ビルドのたびに中身が変わることを防ぐ
 ARG MODEL_REVISION=914f7f89142e33e77833254d9c9b90c3cef7303b
@@ -93,7 +95,7 @@ COPY src ./src
 RUN if [ "$VARIANT" = "slim" ]; then \
       pip install .; \
     else \
-      pip install "transformers @ https://github.com/huggingface/transformers/archive/${TRANSFORMERS_COMMIT}.tar.gz#sha256=${TRANSFORMERS_SHA256}" \
+      pip install "transformers @ https://files.pythonhosted.org/packages/py3/t/transformers/transformers-${TRANSFORMERS_VERSION}-py3-none-any.whl#sha256=${TRANSFORMERS_SHA256}" \
       && pip install ".[model]"; \
     fi
 
