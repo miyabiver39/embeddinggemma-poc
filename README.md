@@ -161,6 +161,8 @@ Both public images used `ROLE=all` and `google/embeddinggemma-2` (768 dimensions
 - Both configurations decoded video on the CPU and embedded two frames per two-second window, with zero overlap and video-only input. Ingestion reached 0.24× real time on the CPU and 1.99× real time on the GPU.
 - After warm-up, video and audio ingestion were each measured three times and reported as medians. Image ingestion was measured once per configuration. Text search used the default queries with `top_k=10` and an index of 86 entries. Each search metric is the median of three 30-second trials. Search throughput ranged from 4.30 to 6.30 req/s on the CPU and from 7.50 to 14.37 req/s on the GPU.
 
+The RX 9060 XT 16 GB optimization raised repeated text search from 26.1 to 613.2 requests/s at four concurrent requests. Total video ingestion and first-time text search were roughly unchanged. The tested vectors matched bit for bit. [RX 9060 XT benchmark](bench/README.md#rx-9060-xt-16-gb-のローカル推論の高速化)
+
 ## Three ways to run (ROLE)
 
 | ROLE | Contents | When to use |
