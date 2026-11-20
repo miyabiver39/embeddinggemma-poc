@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 480 秒の取り込みの完了時間(窓 6 秒)</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">10</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">20</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">30</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">40</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">50</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">同時数 INGEST_WORKERS</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">完了時間(秒)</text>
+<circle cx="70.0" cy="109.0" r="3.5" fill="#2563eb"><title>1 本に分割 / 1: 38.383</title></circle>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">1 本に分割</text>
+<circle cx="70.0" cy="99.1" r="3.5" fill="#dc2626"><title>2 本に分割 / 1: 39.954</title></circle>
+<circle cx="230.0" cy="102.6" r="3.5" fill="#dc2626"><title>2 本に分割 / 2: 39.396</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="70.0,99.1 230.0,102.6"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">2 本に分割</text>
+<circle cx="70.0" cy="83.5" r="3.5" fill="#16a34a"><title>4 本に分割 / 1: 42.433</title></circle>
+<circle cx="230.0" cy="103.8" r="3.5" fill="#16a34a"><title>4 本に分割 / 2: 39.201</title></circle>
+<polyline fill="none" stroke="#16a34a" stroke-width="2" points="70.0,83.5 230.0,103.8"/>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">4 本に分割</text>
+<circle cx="70.0" cy="51.2" r="3.5" fill="#d97706"><title>8 本に分割 / 1: 47.577</title></circle>
+<circle cx="230.0" cy="95.1" r="3.5" fill="#d97706"><title>8 本に分割 / 2: 40.591</title></circle>
+<polyline fill="none" stroke="#d97706" stroke-width="2" points="70.0,51.2 230.0,95.1"/>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">8 本に分割</text>
+</svg>

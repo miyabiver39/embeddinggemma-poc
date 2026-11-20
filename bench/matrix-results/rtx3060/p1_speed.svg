@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="827" height="888" viewBox="0 0 827 888" font-family="sans-serif" font-size="12">
+<rect width="827" height="888" fill="#ffffff"/>
+<text x="413.5" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 精度の条件ごとの 1 窓あたりの時間(8 本・窓 2 秒)</text>
+<line x1="267.0" y1="36" x2="267.0" y2="848" stroke="#e5e7eb"/>
+<text x="267.0" y="864" text-anchor="middle" fill="#374151">0</text>
+<line x1="349.0" y1="36" x2="349.0" y2="848" stroke="#e5e7eb"/>
+<text x="349.0" y="864" text-anchor="middle" fill="#374151">0.2</text>
+<line x1="431.0" y1="36" x2="431.0" y2="848" stroke="#e5e7eb"/>
+<text x="431.0" y="864" text-anchor="middle" fill="#374151">0.4</text>
+<line x1="513.0" y1="36" x2="513.0" y2="848" stroke="#e5e7eb"/>
+<text x="513.0" y="864" text-anchor="middle" fill="#374151">0.6</text>
+<line x1="595.0" y1="36" x2="595.0" y2="848" stroke="#e5e7eb"/>
+<text x="595.0" y="864" text-anchor="middle" fill="#374151">0.8</text>
+<line x1="677.0" y1="36" x2="677.0" y2="848" stroke="#e5e7eb"/>
+<text x="677.0" y="864" text-anchor="middle" fill="#374151">1</text>
+<text x="472.0" y="880" text-anchor="middle" fill="#111">1 窓あたりの時間(秒)</text>
+<text x="261" y="50.0" text-anchor="end" fill="#111">bf16・448px・768次元</text>
+<rect x="267" y="36" width="70.8" height="9" fill="#2563eb"><title>bf16・448px・768次元 / 同時数 1: 0.1728</title></rect>
+<text x="341.8" y="44" font-size="10" fill="#374151">0.1728</text>
+<rect x="267" y="46" width="63.6" height="9" fill="#dc2626"><title>bf16・448px・768次元 / 同時数 4: 0.1551</title></rect>
+<text x="334.6" y="54" font-size="10" fill="#374151">0.1551</text>
+<text x="261" y="78.0" text-anchor="end" fill="#111">bf16・448px・256次元</text>
+<rect x="267" y="64" width="70.8" height="9" fill="#2563eb"><title>bf16・448px・256次元 / 同時数 1: 0.1727</title></rect>
+<text x="341.8" y="72" font-size="10" fill="#374151">0.1727</text>
+<rect x="267" y="74" width="63.6" height="9" fill="#dc2626"><title>bf16・448px・256次元 / 同時数 4: 0.1552</title></rect>
+<text x="334.6" y="82" font-size="10" fill="#374151">0.1552</text>
+<text x="261" y="106.0" text-anchor="end" fill="#111">bf16・448px・128次元</text>
+<rect x="267" y="92" width="70.9" height="9" fill="#2563eb"><title>bf16・448px・128次元 / 同時数 1: 0.1729</title></rect>
+<text x="341.9" y="100" font-size="10" fill="#374151">0.1729</text>
+<rect x="267" y="102" width="63.3" height="9" fill="#dc2626"><title>bf16・448px・128次元 / 同時数 4: 0.1544</title></rect>
+<text x="334.3" y="110" font-size="10" fill="#374151">0.1544</text>
+<text x="261" y="134.0" text-anchor="end" fill="#111">bf16・336px・768次元</text>
+<rect x="267" y="120" width="70.9" height="9" fill="#2563eb"><title>bf16・336px・768次元 / 同時数 1: 0.1729</title></rect>
+<text x="341.9" y="128" font-size="10" fill="#374151">0.1729</text>
+<rect x="267" y="130" width="63.4" height="9" fill="#dc2626"><title>bf16・336px・768次元 / 同時数 4: 0.1547</title></rect>
+<text x="334.4" y="138" font-size="10" fill="#374151">0.1547</text>
+<text x="261" y="162.0" text-anchor="end" fill="#111">bf16・336px・256次元</text>
+<rect x="267" y="148" width="70.8" height="9" fill="#2563eb"><title>bf16・336px・256次元 / 同時数 1: 0.1726</title></rect>
+<text x="341.8" y="156" font-size="10" fill="#374151">0.1726</text>
+<rect x="267" y="158" width="63.3" height="9" fill="#dc2626"><title>bf16・336px・256次元 / 同時数 4: 0.1545</title></rect>
+<text x="334.3" y="166" font-size="10" fill="#374151">0.1545</text>
+<text x="261" y="190.0" text-anchor="end" fill="#111">bf16・336px・128次元</text>
+<rect x="267" y="176" width="70.9" height="9" fill="#2563eb"><title>bf16・336px・128次元 / 同時数 1: 0.1729</title></rect>
+<text x="341.9" y="184" font-size="10" fill="#374151">0.1729</text>
+<rect x="267" y="186" width="63.5" height="9" fill="#dc2626"><title>bf16・336px・128次元 / 同時数 4: 0.1548</title></rect>
+<text x="334.5" y="194" font-size="10" fill="#374151">0.1548</text>
+<text x="261" y="218.0" text-anchor="end" fill="#111">bf16・224px・768次元</text>
+<rect x="267" y="204" width="70.8" height="9" fill="#2563eb"><title>bf16・224px・768次元 / 同時数 1: 0.1726</title></rect>
+<text x="341.8" y="212" font-size="10" fill="#374151">0.1726</text>
+<rect x="267" y="214" width="63.5" height="9" fill="#dc2626"><title>bf16・224px・768次元 / 同時数 4: 0.1548</title></rect>
+<text x="334.5" y="222" font-size="10" fill="#374151">0.1548</text>
+<text x="261" y="246.0" text-anchor="end" fill="#111">bf16・224px・256次元</text>
+<rect x="267" y="232" width="70.7" height="9" fill="#2563eb"><title>bf16・224px・256次元 / 同時数 1: 0.1725</title></rect>
+<text x="341.7" y="240" font-size="10" fill="#374151">0.1725</text>
+<rect x="267" y="242" width="64.1" height="9" fill="#dc2626"><title>bf16・224px・256次元 / 同時数 4: 0.1563</title></rect>
+<text x="335.1" y="250" font-size="10" fill="#374151">0.1563</text>
+<text x="261" y="274.0" text-anchor="end" fill="#111">bf16・224px・128次元</text>
+<rect x="267" y="260" width="70.7" height="9" fill="#2563eb"><title>bf16・224px・128次元 / 同時数 1: 0.1725</title></rect>
+<text x="341.7" y="268" font-size="10" fill="#374151">0.1725</text>
+<rect x="267" y="270" width="63.5" height="9" fill="#dc2626"><title>bf16・224px・128次元 / 同時数 4: 0.1548</title></rect>
+<text x="334.5" y="278" font-size="10" fill="#374151">0.1548</text>
+<text x="261" y="302.0" text-anchor="end" fill="#111">bf16・448px・768次元・上限 140 トークン</text>
+<rect x="267" y="288" width="41.1" height="9" fill="#2563eb"><title>bf16・448px・768次元・上限 140 トークン / 同時数 1: 0.1002</title></rect>
+<text x="312.1" y="296" font-size="10" fill="#374151">0.1002</text>
+<rect x="267" y="298" width="32.0" height="9" fill="#dc2626"><title>bf16・448px・768次元・上限 140 トークン / 同時数 4: 0.078</title></rect>
+<text x="303.0" y="306" font-size="10" fill="#374151">0.078</text>
+<text x="261" y="330.0" text-anchor="end" fill="#111">bf16・448px・768次元・上限 70 トークン</text>
+<rect x="267" y="316" width="35.9" height="9" fill="#2563eb"><title>bf16・448px・768次元・上限 70 トークン / 同時数 1: 0.0875</title></rect>
+<text x="306.9" y="324" font-size="10" fill="#374151">0.0875</text>
+<rect x="267" y="326" width="28.5" height="9" fill="#dc2626"><title>bf16・448px・768次元・上限 70 トークン / 同時数 4: 0.0695</title></rect>
+<text x="299.5" y="334" font-size="10" fill="#374151">0.0695</text>
+<text x="261" y="358.0" text-anchor="end" fill="#111">fp16・448px・768次元</text>
+<rect x="267" y="344" width="71.3" height="9" fill="#2563eb"><title>fp16・448px・768次元 / 同時数 1: 0.1738</title></rect>
+<text x="342.3" y="352" font-size="10" fill="#374151">0.1738</text>
+<rect x="267" y="354" width="63.9" height="9" fill="#dc2626"><title>fp16・448px・768次元 / 同時数 4: 0.1558</title></rect>
+<text x="334.9" y="362" font-size="10" fill="#374151">0.1558</text>
+<text x="261" y="386.0" text-anchor="end" fill="#111">fp16・448px・256次元</text>
+<rect x="267" y="372" width="71.2" height="9" fill="#2563eb"><title>fp16・448px・256次元 / 同時数 1: 0.1736</title></rect>
+<text x="342.2" y="380" font-size="10" fill="#374151">0.1736</text>
+<rect x="267" y="382" width="64.5" height="9" fill="#dc2626"><title>fp16・448px・256次元 / 同時数 4: 0.1572</title></rect>
+<text x="335.5" y="390" font-size="10" fill="#374151">0.1572</text>
+<text x="261" y="414.0" text-anchor="end" fill="#111">fp16・448px・128次元</text>
+<rect x="267" y="400" width="71.3" height="9" fill="#2563eb"><title>fp16・448px・128次元 / 同時数 1: 0.174</title></rect>
+<text x="342.3" y="408" font-size="10" fill="#374151">0.174</text>
+<rect x="267" y="410" width="63.5" height="9" fill="#dc2626"><title>fp16・448px・128次元 / 同時数 4: 0.155</title></rect>
+<text x="334.6" y="418" font-size="10" fill="#374151">0.155</text>
+<text x="261" y="442.0" text-anchor="end" fill="#111">fp16・336px・768次元</text>
+<rect x="267" y="428" width="71.4" height="9" fill="#2563eb"><title>fp16・336px・768次元 / 同時数 1: 0.1741</title></rect>
+<text x="342.4" y="436" font-size="10" fill="#374151">0.1741</text>
+<rect x="267" y="438" width="64.0" height="9" fill="#dc2626"><title>fp16・336px・768次元 / 同時数 4: 0.156</title></rect>
+<text x="335.0" y="446" font-size="10" fill="#374151">0.156</text>
+<text x="261" y="470.0" text-anchor="end" fill="#111">fp16・336px・256次元</text>
+<rect x="267" y="456" width="71.3" height="9" fill="#2563eb"><title>fp16・336px・256次元 / 同時数 1: 0.1738</title></rect>
+<text x="342.3" y="464" font-size="10" fill="#374151">0.1738</text>
+<rect x="267" y="466" width="64.2" height="9" fill="#dc2626"><title>fp16・336px・256次元 / 同時数 4: 0.1565</title></rect>
+<text x="335.2" y="474" font-size="10" fill="#374151">0.1565</text>
+<text x="261" y="498.0" text-anchor="end" fill="#111">fp16・336px・128次元</text>
+<rect x="267" y="484" width="71.7" height="9" fill="#2563eb"><title>fp16・336px・128次元 / 同時数 1: 0.1748</title></rect>
+<text x="342.7" y="492" font-size="10" fill="#374151">0.1748</text>
+<rect x="267" y="494" width="64.0" height="9" fill="#dc2626"><title>fp16・336px・128次元 / 同時数 4: 0.1562</title></rect>
+<text x="335.0" y="502" font-size="10" fill="#374151">0.1562</text>
+<text x="261" y="526.0" text-anchor="end" fill="#111">fp16・224px・768次元</text>
+<rect x="267" y="512" width="71.0" height="9" fill="#2563eb"><title>fp16・224px・768次元 / 同時数 1: 0.1732</title></rect>
+<text x="342.0" y="520" font-size="10" fill="#374151">0.1732</text>
+<rect x="267" y="522" width="64.0" height="9" fill="#dc2626"><title>fp16・224px・768次元 / 同時数 4: 0.156</title></rect>
+<text x="335.0" y="530" font-size="10" fill="#374151">0.156</text>
+<text x="261" y="554.0" text-anchor="end" fill="#111">fp16・224px・256次元</text>
+<rect x="267" y="540" width="71.0" height="9" fill="#2563eb"><title>fp16・224px・256次元 / 同時数 1: 0.1731</title></rect>
+<text x="342.0" y="548" font-size="10" fill="#374151">0.1731</text>
+<rect x="267" y="550" width="63.5" height="9" fill="#dc2626"><title>fp16・224px・256次元 / 同時数 4: 0.1548</title></rect>
+<text x="334.5" y="558" font-size="10" fill="#374151">0.1548</text>
+<text x="261" y="582.0" text-anchor="end" fill="#111">fp16・224px・128次元</text>
+<rect x="267" y="568" width="71.0" height="9" fill="#2563eb"><title>fp16・224px・128次元 / 同時数 1: 0.1731</title></rect>
+<text x="342.0" y="576" font-size="10" fill="#374151">0.1731</text>
+<rect x="267" y="578" width="63.6" height="9" fill="#dc2626"><title>fp16・224px・128次元 / 同時数 4: 0.1552</title></rect>
+<text x="334.6" y="586" font-size="10" fill="#374151">0.1552</text>
+<text x="261" y="610.0" text-anchor="end" fill="#111">fp32・448px・768次元</text>
+<rect x="267" y="596" width="231.3" height="9" fill="#2563eb"><title>fp32・448px・768次元 / 同時数 1: 0.5641</title></rect>
+<text x="502.3" y="604" font-size="10" fill="#374151">0.5641</text>
+<rect x="267" y="606" width="223.6" height="9" fill="#dc2626"><title>fp32・448px・768次元 / 同時数 4: 0.5453</title></rect>
+<text x="494.6" y="614" font-size="10" fill="#374151">0.5453</text>
+<text x="261" y="638.0" text-anchor="end" fill="#111">fp32・448px・256次元</text>
+<rect x="267" y="624" width="231.3" height="9" fill="#2563eb"><title>fp32・448px・256次元 / 同時数 1: 0.5642</title></rect>
+<text x="502.3" y="632" font-size="10" fill="#374151">0.5642</text>
+<rect x="267" y="634" width="223.9" height="9" fill="#dc2626"><title>fp32・448px・256次元 / 同時数 4: 0.546</title></rect>
+<text x="494.9" y="642" font-size="10" fill="#374151">0.546</text>
+<text x="261" y="666.0" text-anchor="end" fill="#111">fp32・448px・128次元</text>
+<rect x="267" y="652" width="231.6" height="9" fill="#2563eb"><title>fp32・448px・128次元 / 同時数 1: 0.5649</title></rect>
+<text x="502.6" y="660" font-size="10" fill="#374151">0.5649</text>
+<rect x="267" y="662" width="224.2" height="9" fill="#dc2626"><title>fp32・448px・128次元 / 同時数 4: 0.5468</title></rect>
+<text x="495.2" y="670" font-size="10" fill="#374151">0.5468</text>
+<text x="261" y="694.0" text-anchor="end" fill="#111">fp32・336px・768次元</text>
+<rect x="267" y="680" width="231.3" height="9" fill="#2563eb"><title>fp32・336px・768次元 / 同時数 1: 0.5641</title></rect>
+<text x="502.3" y="688" font-size="10" fill="#374151">0.5641</text>
+<rect x="267" y="690" width="223.9" height="9" fill="#dc2626"><title>fp32・336px・768次元 / 同時数 4: 0.546</title></rect>
+<text x="494.9" y="698" font-size="10" fill="#374151">0.546</text>
+<text x="261" y="722.0" text-anchor="end" fill="#111">fp32・336px・256次元</text>
+<rect x="267" y="708" width="231.4" height="9" fill="#2563eb"><title>fp32・336px・256次元 / 同時数 1: 0.5645</title></rect>
+<text x="502.4" y="716" font-size="10" fill="#374151">0.5645</text>
+<rect x="267" y="718" width="223.9" height="9" fill="#dc2626"><title>fp32・336px・256次元 / 同時数 4: 0.5462</title></rect>
+<text x="494.9" y="726" font-size="10" fill="#374151">0.5462</text>
+<text x="261" y="750.0" text-anchor="end" fill="#111">fp32・336px・128次元</text>
+<rect x="267" y="736" width="231.2" height="9" fill="#2563eb"><title>fp32・336px・128次元 / 同時数 1: 0.564</title></rect>
+<text x="502.2" y="744" font-size="10" fill="#374151">0.564</text>
+<rect x="267" y="746" width="223.9" height="9" fill="#dc2626"><title>fp32・336px・128次元 / 同時数 4: 0.546</title></rect>
+<text x="494.9" y="754" font-size="10" fill="#374151">0.546</text>
+<text x="261" y="778.0" text-anchor="end" fill="#111">fp32・224px・768次元</text>
+<rect x="267" y="764" width="231.2" height="9" fill="#2563eb"><title>fp32・224px・768次元 / 同時数 1: 0.564</title></rect>
+<text x="502.2" y="772" font-size="10" fill="#374151">0.564</text>
+<rect x="267" y="774" width="224.1" height="9" fill="#dc2626"><title>fp32・224px・768次元 / 同時数 4: 0.5466</title></rect>
+<text x="495.1" y="782" font-size="10" fill="#374151">0.5466</text>
+<text x="261" y="806.0" text-anchor="end" fill="#111">fp32・224px・256次元</text>
+<rect x="267" y="792" width="231.4" height="9" fill="#2563eb"><title>fp32・224px・256次元 / 同時数 1: 0.5643</title></rect>
+<text x="502.4" y="800" font-size="10" fill="#374151">0.5643</text>
+<rect x="267" y="802" width="223.9" height="9" fill="#dc2626"><title>fp32・224px・256次元 / 同時数 4: 0.5462</title></rect>
+<text x="494.9" y="810" font-size="10" fill="#374151">0.5462</text>
+<text x="261" y="834.0" text-anchor="end" fill="#111">fp32・224px・128次元</text>
+<rect x="267" y="820" width="231.3" height="9" fill="#2563eb"><title>fp32・224px・128次元 / 同時数 1: 0.5642</title></rect>
+<text x="502.3" y="828" font-size="10" fill="#374151">0.5642</text>
+<rect x="267" y="830" width="223.6" height="9" fill="#dc2626"><title>fp32・224px・128次元 / 同時数 4: 0.5454</title></rect>
+<text x="494.6" y="838" font-size="10" fill="#374151">0.5454</text>
+<rect x="717" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="735" y="48" fill="#111">同時数 1</text>
+<rect x="717" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="735" y="66" fill="#111">同時数 4</text>
+</svg>
