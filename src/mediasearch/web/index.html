@@ -32,7 +32,8 @@
   .hit .nothumb { width:100%; aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; background:var(--line); color:var(--mute); font-size:12px; }
   .hit .meta { padding:6px 8px; font-size:12px; }
   .hit .acts { display:flex; gap:4px; flex-wrap:wrap; margin-top:4px; }
-  .hit .acts button, .hit .acts a { font-size:11px; padding:2px 6px; }
+  .hit .acts button, .hit .acts a.btn { font-size:11px; padding:2px 6px; cursor:pointer; }
+  a.btn { color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:4px; text-decoration:none; }
   .score { font-weight:700; color:var(--acc); }
   .mute { color:var(--mute); }
   table { border-collapse:collapse; width:100%; font-size:13px; }
@@ -299,8 +300,10 @@ function renderHits(res) {
       ${esc(it.source_name)} ${first.kind === "image" ? "(静止画)" : fmt(it.start_ms) + "–" + fmt(it.end_ms)}<br>
       <span class="mute">${esc(it.group_id || "")} ${esc(it.location || "")} ${esc(first.abs_time || "")} ${first.kind ? "["+esc(first.kind)+"]" : ""}</span>
       ${first.duplicates ? `<br><span class="mute">ほぼ同じ場面 ほか ${first.duplicates} 件</span>` : ""}
-      <div class="acts"><button type="button" data-sim="${it.window_ids[0]}">似た場面</button><button type="button" data-sim="${it.window_ids[0]}" data-other="1">別の録画で似た場面</button></div></div></div>`;
+      <div class="acts"><button type="button" data-sim="${it.window_ids[0]}">似た場面</button><button type="button" data-sim="${it.window_ids[0]}" data-other="1">別の録画で似た場面</button>
+      ${first.media_url && first.kind !== "image" ? `<a class="btn" data-clip href="/api/sources/${it.source_id}/clip?start_ms=${it.start_ms}&end_ms=${it.end_ms}" download>切り出して保存</a>` : ""}</div></div></div>`;
   }).join("");
+  document.querySelectorAll("#hits [data-clip]").forEach((a) => a.onclick = (ev) => ev.stopPropagation());
   document.querySelectorAll("#hits [data-sim]").forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation(); searchSimilar(+b.dataset.sim, b.dataset.other === "1");
   });

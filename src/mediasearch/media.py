@@ -416,6 +416,29 @@ class AudioTrack:
         self._data = None
 
 
+def cut_clip(path: str | Path, start_ms: int, end_ms: int, out_path: Path, kind: str, accurate: bool = False) -> None:
+    """元のファイルの start_ms〜end_ms を切り出して out_path に書きます(動画は MP4、音声は M4A)。
+
+    動画は既定で再エンコードせずに切ります(速く、画質が変わらない)。このとき開始位置は、直前のキーフレームまで
+    さかのぼります(指定より少し前から始まる)。accurate=True では指定の位置ちょうどで切るために H.264 で
+    エンコードし直します(時間がかかる)。音声は、元の形式によらず AAC にエンコードします(WAV などをそのまま
+    M4A に入れられないため)。字幕・データのストリームは含めません。
+    """
+    start = f"{start_ms / 1000:.3f}"
+    duration = f"{(end_ms - start_ms) / 1000:.3f}"
+    cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-ss", start, "-i", str(path), "-t", duration, "-sn", "-dn"]
+    if kind == "audio":
+        cmd += ["-vn", "-c:a", "aac", "-b:a", "128k"]
+    elif accurate:
+        cmd += ["-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac"]
+    else:
+        cmd += ["-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-avoid_negative_ts", "make_zero"]
+    cmd += ["-movflags", "+faststart", str(out_path)]
+    _run(cmd, timeout=max(120, (end_ms - start_ms) // 1000 * 4))
+    if not out_path.is_file() or out_path.stat().st_size == 0:
+        raise MediaError("切り出した結果が空でした(指定の範囲が、ファイルの長さを超えている可能性)")
+
+
 def make_thumbnail(path: str | Path, at_ms: int, out_path: Path, width: int = 320) -> None:
     """サムネイル(JPEG)を作ります。"""
     out_path.parent.mkdir(parents=True, exist_ok=True)

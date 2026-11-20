@@ -18,10 +18,10 @@ from typing import Any
 
 import numpy as np
 
-from . import __version__, disk, thumbs
+from . import __version__, disk, media, thumbs
 from .config import PRESETS, Settings
 from .embedders import Embedder
-from .ingest_files import FileIntake
+from .ingest_files import MEDIA_KINDS, FileIntake, is_within
 from .pipeline import Ingestor
 from .retention import RetentionWorker
 from .store import Store
@@ -33,6 +33,8 @@ log = logging.getLogger(__name__)
 KIND_CHOICES = ("auto", "all", "frames", "tav", "audio", "image")
 # 同じベクトルの空間に入る窓の種類(似た場面の検索の kind=auto で使う)。画像だけを入力にした frames と image は同じ空間
 SAME_SPACE_KINDS = {"frames": ["frames", "image"], "image": ["frames", "image"], "tav": ["tav"], "audio": ["audio"]}
+# 同時に行える切り出しの数(ffmpeg のエンコードは CPU を多く使い、取り込みの復号と取り合うため)
+CLIP_SLOTS = threading.BoundedSemaphore(2)
 # 重複の除去・取り込み元の除外をするときに、多めに探す倍率と上限(除いた後も top_k 件を返せるように)
 DEDUPE_FETCH_FACTOR = 5
 MAX_FETCH = 1000
@@ -411,6 +413,59 @@ class Service:
         checks["disk"] = {"ok": d["ok"], **{k: v for k, v in d.items() if k != "ok"}}
         ok = all(c["ok"] for c in checks.values())
         return ok, {"status": "ready" if ok else "not_ready", "checks": checks}
+
+    def servable_source(self, source_id: int) -> dict:
+        """元のファイルを返してよい取り込み元(配信と切り出しで共通の条件)。だめなら NotFound。
+
+        返すのは、受付時の検証を通った映像・音声・画像で、失敗・期限切れでなく、保存する設定で取り込み、
+        許可したフォルダ(INGEST_ROOTS)の中に実在するものだけ(設計書の「メディア配信の範囲」)。
+        """
+        s = self.ctx.settings
+        src = self.ctx.store.get_source(source_id)
+        if (
+            src is None
+            or src["kind"] not in MEDIA_KINDS
+            or src["status"] in ("failed", "expired")
+            or not media_stored(src)  # 保存しない設定で取り込んだものは返さない(情報だけを返す)
+            or not src["path"]
+            or not is_within(src["path"], s.ingest_roots)  # 以前の版で登録された、許可外のパスも返さない
+            or not Path(src["path"]).is_file()
+        ):
+            raise NotFound("ファイルが見つかりません")
+        return src
+
+    def clip(self, source_id: int, start_ms: int, end_ms: int, accurate: bool = False) -> tuple[Path, str, str]:
+        """取り込み元の一部を切り出した一時ファイルを作り、(パス, ファイル名, Content-Type) を返します。
+
+        一時ファイルは DATA_DIR/tmp/clips に作ります。呼び出し側が、返し終えたら削除します。
+        """
+        s = self.ctx.settings
+        if s.clip_max_sec <= 0:
+            raise NotFound("切り出しは無効です(CLIP_MAX_SEC=0)")
+        if start_ms < 0 or end_ms <= start_ms:
+            raise InvalidInput("start_ms と end_ms は 0 以上で、end_ms を start_ms より大きくしてください")
+        if end_ms - start_ms > s.clip_max_sec * 1000:
+            raise InvalidInput(f"切り出せる長さは {s.clip_max_sec} 秒までです(CLIP_MAX_SEC)")
+        src = self.servable_source(source_id)
+        if src["kind"] == "image":
+            raise InvalidInput("静止画は切り出せません")
+        if not CLIP_SLOTS.acquire(blocking=False):
+            raise Overloaded("切り出しが混み合っています。しばらくしてから再度お試しください")
+        try:
+            out_dir = s.data_dir / "tmp" / "clips"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ext, media_type = (".m4a", "audio/mp4") if src["kind"] == "audio" else (".mp4", "video/mp4")
+            out = out_dir / f"{os.getpid()}_{threading.get_ident()}_{time.monotonic_ns()}{ext}"
+            try:
+                media.cut_clip(src["path"], start_ms, end_ms, out, src["kind"], accurate=accurate)
+            except Exception:
+                out.unlink(missing_ok=True)
+                raise
+        finally:
+            CLIP_SLOTS.release()
+        stem = Path(src.get("name") or f"source{source_id}").stem
+        name = f"{stem}_{media.format_time(start_ms)}-{media.format_time(end_ms)}{ext}".replace(":", "")
+        return out, name, media_type
 
     def thumbnail(self, window_id: int) -> Path:
         """窓のサムネイル(JPEG)のパス。取り込み時に作っていなければ(以前の版で取り込んだものなど)、ここで作ります。"""

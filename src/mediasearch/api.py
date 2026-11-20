@@ -22,12 +22,13 @@ import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from . import disk, media
 from .alerts import new_secret, public_alert, validate_webhook
 from .backup import BackupError
-from .ingest_files import MEDIA_KINDS, is_within, media_kind_of
+from .ingest_files import MEDIA_KINDS, media_kind_of
 from .live import LiveHub, Subscriber
 from .media import MediaError
 from .metrics import app_metrics
@@ -65,7 +66,7 @@ from .schemas import (
     WatchScanResponse,
     errors,
 )
-from .service import Context, Service, media_stored, parse_opt_ts, parse_ts
+from .service import Context, Service, parse_opt_ts, parse_ts
 
 log = logging.getLogger(__name__)
 
@@ -995,19 +996,47 @@ def build_api_router(ctx: Context) -> APIRouter:
     )
     def get_media(source_id: int) -> FileResponse:
         """元の動画・音声・画像を返します。Range リクエストに対応するため、動画は `#t=秒` で頭出し再生できます。"""
-        src = ctx.store.get_source(source_id)
-        # 配信するのは、受付時の検証を通ったものだけ(取り込みに失敗したものは返さない)
-        if (
-            src is None
-            or src["kind"] not in MEDIA_KINDS
-            or src["status"] in ("failed", "expired")
-            or not media_stored(src)  # 保存しない設定で取り込んだものは返さない(情報だけを返す)
-            or not src["path"]
-            or not is_within(src["path"], s.ingest_roots)  # 以前の版で登録された、許可外のパスも返さない
-            or not Path(src["path"]).is_file()
-        ):
-            raise HTTPException(404, "ファイルが見つかりません")
+        # 配信するのは、受付時の検証を通ったものだけ(取り込みに失敗したもの・保存しない設定のものは返さない)
+        src = svc.servable_source(source_id)
         return FileResponse(src["path"])
+
+    @router.get(
+        "/sources/{source_id}/clip",
+        tags=["配信"],
+        summary="取り込み元の一部を切り出す(MP4 / M4A)",
+        response_class=FileResponse,
+        responses={
+            200: {
+                "description": "切り出したファイル(動画は MP4、音声は M4A。ダウンロードとして返す)",
+                "content": {
+                    "video/mp4": {"schema": {"type": "string", "format": "binary"}},
+                    "audio/mp4": {"schema": {"type": "string", "format": "binary"}},
+                },
+            },
+            **errors(400, 401, 404, 503),
+        },
+    )
+    def get_clip(
+        source_id: int,
+        start_ms: int = Query(..., ge=0, description="開始位置(先頭からのミリ秒。検索結果の start_ms)"),
+        end_ms: int = Query(..., gt=0, description="切り出しの終了位置(ミリ秒。検索結果の end_ms)"),
+        accurate: bool = Query(
+            False,
+            description=(
+                "true: 指定の位置ちょうどで切る(H.264 でエンコードし直すため時間がかかる)。"
+                "false: エンコードし直さずに切る(速い。開始は直前のキーフレームまでさかのぼる)"
+            ),
+        ),
+    ) -> FileResponse:
+        """検索で見つかった区間を、ファイルとして書き出します(証拠の保存や共有のため)。
+
+        長さは `CLIP_MAX_SEC`(既定 600 秒)まで。同時に処理できるのは 2 件までで、超えると 503 を返します。
+        静止画と、保存しない設定(`store_media=false`)で取り込んだものは切り出せません。
+        """
+        out, name, media_type = svc.clip(source_id, start_ms, end_ms, accurate)
+        return FileResponse(
+            out, media_type=media_type, filename=name, background=BackgroundTask(out.unlink, missing_ok=True)
+        )
 
     @router.get(
         "/thumb/{window_id}",
