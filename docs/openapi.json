@@ -5624,6 +5624,18 @@
             "title": "Queue Size",
             "description": "取り込みを待っているジョブの数"
           },
+          "running_jobs": {
+            "type": "integer",
+            "title": "Running Jobs",
+            "description": "取り込み中のジョブの数",
+            "default": 0
+          },
+          "ingest_workers": {
+            "type": "integer",
+            "title": "Ingest Workers",
+            "description": "同時に取り込むファイルの数の上限(INGEST_WORKERS)",
+            "default": 1
+          },
           "vector_db": {
             "anyOf": [
               {

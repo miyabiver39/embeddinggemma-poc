@@ -557,6 +557,8 @@ class Service:
                 "model_id": ctx.store.get_meta("model_id"),
                 "dims": ctx.store.get_meta("dims"),
                 "queue_size": ctx.ingestor.queue_size,
+                "running_jobs": ctx.ingestor.running,
+                "ingest_workers": ctx.ingestor.workers,
             },
             "watch": ctx.watcher.status,
             "streams": self._stream_summary(),

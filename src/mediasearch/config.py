@@ -89,6 +89,7 @@ class Settings:
     torch_cache_dir: Path  # PyTorch(Inductor / Triton 等)のコンパイルキャッシュ保存先(既定 DATA_DIR/cache/torch)
     warmup_on_start: bool  # 起動時(/readyz が Ready になる直前)にダミー入力でウォームアップ推論を行う
     ingest_prefetch: int  # 動画取り込みの Producer-Consumer キューの上限(有界にしてメモリ肥大化を防ぐ)
+    ingest_workers: int  # 同時に取り込むファイルの数(復号・前処理を並べる。推論は PriorityGate で 1 回ずつ)
     ffmpeg_hwaccel: str  # 動画の復号に使う GPU(auto / none / cuda / vaapi / qsv)
     ffmpeg_hwaccel_device: str  # GPU 復号のデバイス(vaapi なら /dev/dri/renderD128 など。空なら自動)
     ffmpeg_skip_frames: str  # 復号を省く範囲(none / noref / keyframes。media.DECODE_SKIP)
@@ -205,6 +206,7 @@ class Settings:
             torch_compile=torch_compile,
             warmup_on_start=_env_bool("WARMUP_ON_START", True),
             ingest_prefetch=min(max(_env_int("INGEST_PREFETCH", 2), 1), 16),
+            ingest_workers=min(max(_env_int("INGEST_WORKERS", 1), 1), 8),
             ffmpeg_hwaccel=_env("FFMPEG_HWACCEL", "auto"),
             ffmpeg_hwaccel_device=_env("FFMPEG_HWACCEL_DEVICE", ""),
             ffmpeg_skip_frames=skip_frames,

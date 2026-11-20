@@ -363,17 +363,27 @@ RETRY_BASE_SEC = 30  # 再試行までの間隔(1 回目 30 秒、以降 2 倍�
 
 
 class Ingestor:
-    """取り込みジョブを、バックグラウンドのスレッドで1つずつ処理します。"""
+    """取り込みジョブを、バックグラウンドのスレッドで処理します。
+
+    スレッドの数は INGEST_WORKERS(既定 1)です。2 以上にすると、複数のファイルの復号・前処理・保存を同時に進めます。
+    推論は Embedder の PriorityGate を通るため、GPU には今までどおり 1 回ずつ流れ、検索の優先も変わりません。
+    速い GPU では、1 本の ffmpeg の復号と Python の前処理が追いつかず GPU が待つため、ファイルを並べて埋めます。
+    同じ取り込み元のジョブ(取り込み直しなど)は、窓の削除と追加が混ざらないよう、同時には動かしません。
+    """
 
     def __init__(self, settings: Settings, store: Store, embedder: Embedder) -> None:
         self._settings = settings
         self._store = store
         self._embedder = embedder
         self._queue: queue.Queue[int | None] = queue.Queue()
-        self._thread: threading.Thread | None = None
+        self._workers = max(int(getattr(settings, "ingest_workers", 1) or 1), 1)
+        self._threads: list[threading.Thread] = []
         self._stopping = threading.Event()
-        self._current: int | None = None  # 実行中のジョブ
+        self._local = threading.local()  # スレッドごとの実行中のジョブ(取り消しの判定に使う)
+        self._running: set[int] = set()  # 実行中のジョブ
         self._cancel: set[int] = set()  # 取り消しを求められた実行中のジョブ
+        self._busy_sources: set[int] = set()  # 実行中のジョブの取り込み元
+        self._busy_cond = threading.Condition()
 
     # ------------------------------------------------------------------ 起動・停止
     def start(self) -> None:
@@ -392,23 +402,31 @@ class Ingestor:
                 log.warning("ベクトルが失われた取り込み元を取り込み直します: %s", source["name"])
                 self._store.update_source(source_id, status="queued", error=None)
                 self.submit(source_id)
-        self._thread = threading.Thread(target=self._loop, name="ingestor", daemon=True)
-        self._thread.start()
+        for i in range(self._workers):
+            name = "ingestor" if self._workers == 1 else f"ingestor-{i + 1}"
+            th = threading.Thread(target=self._loop, name=name, daemon=True)
+            th.start()
+            self._threads.append(th)
 
     def stop(self) -> None:
         # 取り込み中のジョブは、窓の区切りで止めて queued に戻す(次の起動で最初からやり直す)。
         # 推論の途中の窓は、終わるまで待つ(待たずに終了すると、推論中のスレッドが残ったまま Python が終了する)
         self._stopping.set()
-        self._queue.put(None)
-        if self._thread:
-            self._thread.join(timeout=45)
-            if self._thread.is_alive():
-                log.warning("取り込みの推論が 45 秒以内に終わりませんでした")
+        for _ in self._threads:  # スレッドごとに 1 つずつ、終わりの印を受け取る
+            self._queue.put(None)
+        with self._busy_cond:  # 同じ取り込み元の空きを待っているスレッドを起こす
+            self._busy_cond.notify_all()
+        deadline = time.monotonic() + 45
+        for th in self._threads:
+            th.join(timeout=max(deadline - time.monotonic(), 0.1))
+        if any(th.is_alive() for th in self._threads):
+            log.warning("取り込みの推論が 45 秒以内に終わりませんでした")
 
     def _check_stop(self) -> None:
         if self._stopping.is_set():
             raise _Interrupted()
-        if self._current is not None and self._current in self._cancel:
+        current = getattr(self._local, "job", None)
+        if current is not None and current in self._cancel:
             raise _Cancelled()
 
     def cancel(self, job_id: int) -> dict | None:
@@ -453,6 +471,44 @@ class Ingestor:
     def queue_size(self) -> int:
         return self._queue.qsize()
 
+    @property
+    def workers(self) -> int:
+        return self._workers
+
+    @property
+    def running(self) -> int:
+        """実行中のジョブの数。"""
+        return len(self._running)
+
+    @contextmanager
+    def _claim_sources(self, source_ids: list[int]):
+        """取り込み元を、このスレッドだけが処理している状態にします(同じ取り込み元のジョブを同時に動かさない)。
+
+        ほかのスレッドが同じ取り込み元を処理していれば、終わるまで待ちます。
+        停止を求められたら _Interrupted を送出します。
+        """
+        ids = set(source_ids)
+        with self._busy_cond:
+            while ids & self._busy_sources:
+                if self._stopping.is_set():
+                    raise _Interrupted()
+                self._busy_cond.wait(timeout=1.0)
+            self._busy_sources |= ids
+        try:
+            yield
+        finally:
+            with self._busy_cond:
+                self._busy_sources -= ids
+                self._busy_cond.notify_all()
+
+    def _source_ids(self, job_ids: list[int]) -> list[int]:
+        ids = []
+        for job_id in job_ids:
+            job = self._store.get_job(job_id)
+            if job is not None:
+                ids.append(job["source_id"])
+        return ids
+
     # ------------------------------------------------------------------ ジョブの実行
     IMAGE_BATCH = 16  # 画像はまとめて推論する(1 枚ずつより速い)
 
@@ -473,14 +529,20 @@ class Ingestor:
                         rest.append(None)
                         break
                     (batch if self._is_image_job(nxt) else rest).append(nxt)
-            if len(batch) > 1:
-                self._run_image_batch(batch)
-            else:
-                self._run_job(job_id)
-            for other in rest:
-                if other is None:
-                    return
-                self._run_job(other)
+            try:
+                if len(batch) > 1:
+                    with self._claim_sources(self._source_ids(batch)):
+                        self._run_image_batch(batch)
+                else:
+                    with self._claim_sources(self._source_ids([job_id])):
+                        self._run_job(job_id)
+                for other in rest:
+                    if other is None:
+                        return
+                    with self._claim_sources(self._source_ids([other])):
+                        self._run_job(other)
+            except _Interrupted:  # 停止中に、同じ取り込み元の空きを待っていた(ジョブは queued のまま残る)
+                return
 
     def _is_image_job(self, job_id: int) -> bool:
         job = self._store.get_job(job_id)
@@ -538,7 +600,8 @@ class Ingestor:
         source = self._begin(job_id)
         if source is None:
             return
-        self._current = job_id
+        self._local.job = job_id
+        self._running.add(job_id)
         try:
             check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
             info = self._embedder.info()
@@ -566,7 +629,8 @@ class Ingestor:
             self._handle_error(job_id, source, exc)
             return
         finally:
-            self._current = None
+            self._local.job = None
+            self._running.discard(job_id)
             self._cancel.discard(job_id)
         self._finish(job_id, source, timings)
 
@@ -888,6 +952,14 @@ class Ingestor:
                 items.append((job_id, source))
         if not items:
             return
+        ids = {job_id for job_id, _ in items}
+        self._running |= ids
+        try:
+            self._run_image_items(items)
+        finally:
+            self._running -= ids
+
+    def _run_image_items(self, items: list[tuple[int, dict]]) -> None:
         try:
             check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
             info = self._embedder.info()
