@@ -189,6 +189,9 @@ class SearchHit(_Open):
     thumb_url: str | None = Field(
         description="サムネイル(JPEG)の URL。音声の窓と、保存しない設定(store_media=false)で取り込んだものは null"
     )
+    duplicates: int | None = Field(
+        None, description="dedupe を指定したとき、この窓にまとめた、ほぼ同じ場面の窓の数(指定しないときは返さない)"
+    )
 
 
 class SearchInterval(_Open):
@@ -201,6 +204,16 @@ class SearchInterval(_Open):
     group_id: str | None = None
     location: str | None = None
     source_name: str | None = None
+
+
+class QueryWindow(_Open):
+    id: int
+    source_id: int
+    start_ms: int
+    end_ms: int
+    kind: WindowKind
+    group_id: str | None = None
+    abs_time: str
 
 
 class SearchResponse(BaseModel):
@@ -216,6 +229,13 @@ class SearchResponse(BaseModel):
             "検索の時点で最後に追加されていた窓の ID。次の検索の after_window_id に渡すと、その後に増えた窓だけを探せる"
         )
     )
+    query_window: QueryWindow | None = Field(None, description="似た場面の検索で元にした窓(ほかの検索では返さない)")
+
+
+_DEDUPE_DESCRIPTION = (
+    "ほぼ同じ場面の窓を 1 件にまとめる。結果どうしのコサイン類似度がこの値以上なら同じ場面とみなす(例 0.95。"
+    "省略時はまとめない)。動きの無い場面が長く続く録画で、同じ場面ばかりが並ぶのを防ぐ"
+)
 
 
 class TextSearchRequest(BaseModel):
@@ -228,6 +248,7 @@ class TextSearchRequest(BaseModel):
     to_ts: str | None = Field(None, description="この日時以前(UNIX 秒か ISO 8601)")
     kind: SearchKind = Field("auto", description="探す窓の種類")
     merge: bool = Field(True, description="隣り合う窓を区間にまとめた intervals も返す")
+    dedupe: float | None = Field(None, gt=0, le=1, description=_DEDUPE_DESCRIPTION)
     after_window_id: int | None = Field(
         None,
         description=(
@@ -242,6 +263,28 @@ class TextSearchRequest(BaseModel):
                 {"query": "赤い車が通り過ぎる", "top_k": 10, "min_score": 0.3, "from_ts": "2026-01-01T00:00:00"}
             ]
         }
+    )
+
+
+class SimilarSearchRequest(BaseModel):
+    window_id: int = Field(description="元にする窓の ID(検索結果の window_id)")
+    exclude_same_source: bool = Field(
+        False, description="元の窓と同じ取り込み元(同じ録画)の窓を結果から外す(別の録画・別のカメラだけを探す)"
+    )
+    top_k: int | None = Field(None, ge=1, le=1000, description="返す件数(省略時は TOP_K)")
+    min_score: float = Field(0.0, description="これより低いスコアは返さない")
+    group_id: str | None = Field(None, description="グループ ID で絞り込む")
+    location: str | None = Field(None, description="場所で絞り込む")
+    from_ts: str | None = Field(None, description="この日時以降(UNIX 秒か ISO 8601)")
+    to_ts: str | None = Field(None, description="この日時以前(UNIX 秒か ISO 8601)")
+    kind: SearchKind = Field(
+        "auto", description="探す窓の種類(auto は元の窓と同じベクトルの空間の種類。映像の窓と静止画は同じ空間)"
+    )
+    merge: bool = Field(True, description="隣り合う窓を区間にまとめた intervals も返す")
+    dedupe: float | None = Field(None, gt=0, le=1, description=_DEDUPE_DESCRIPTION)
+
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"window_id": 123, "top_k": 10, "exclude_same_source": True, "dedupe": 0.95}]}
     )
 
 
