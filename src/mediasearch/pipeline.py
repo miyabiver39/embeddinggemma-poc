@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import media, thumbs
+from . import documents, media, thumbs
 from .config import PRESETS, Settings
 from .disk import InsufficientStorage
 from .disk import check as check_disk
@@ -44,6 +44,9 @@ AUDIO_TOKENS_PER_SEC = 25
 LABEL_TOKENS = 8
 
 
+INGEST_KINDS = ("video", "audio", "image", "document")  # キューで処理できる取り込み元の種類
+
+
 @dataclass(frozen=True)
 class IngestParams:
     """取り込みの設定。取り込み元ごとに DB へ記録します(あとで再取り込みできるように)。"""
@@ -59,6 +62,9 @@ class IngestParams:
     # 以前の版の取り込み元には無い項目のため、既定は偽(取り込み直しても、以前と同じ窓になる)
     skip_static: bool = False
     static_threshold: float = 4.0
+    # 文書の塊の大きさ(文字数)と重なり。文書だけで使う(documents.chunk_pages)
+    doc_chunk_chars: int = 800
+    doc_overlap_chars: int = 100
 
     @classmethod
     def from_settings(cls, s: Settings, preset: str | None = None, **overrides) -> IngestParams:
@@ -71,6 +77,8 @@ class IngestParams:
             "store_media": s.store_media,
             "skip_static": s.skip_static,
             "static_threshold": s.static_threshold,
+            "doc_chunk_chars": s.doc_chunk_chars,
+            "doc_overlap_chars": s.doc_overlap_chars,
         }
         if preset:
             if preset not in PRESETS:
@@ -92,6 +100,10 @@ class IngestParams:
             raise ValueError("chunk_sec は 1〜300 にしてください")
         if not 0.5 <= self.static_threshold <= 64:
             raise ValueError("static_threshold は 0.5〜64 にしてください")
+        if not 100 <= self.doc_chunk_chars <= 4000:
+            raise ValueError("doc_chunk_chars は 100〜4000 にしてください")
+        if not 0 <= self.doc_overlap_chars <= self.doc_chunk_chars // 2:
+            raise ValueError("doc_overlap_chars は 0〜doc_chunk_chars の半分にしてください")
         tokens = self.frames_per_window * (IMAGE_TOKENS + 2 * LABEL_TOKENS)
         if self.include_audio:
             tokens += self.window_sec * AUDIO_TOKENS_PER_SEC
@@ -398,7 +410,7 @@ class Ingestor:
             source = self._store.get_source(source_id)
             if source is None or source_id in running:
                 continue
-            if source["path"] and source["kind"] in ("video", "audio", "image") and Path(source["path"]).is_file():
+            if source["path"] and source["kind"] in INGEST_KINDS and Path(source["path"]).is_file():
                 log.warning("ベクトルが失われた取り込み元を取り込み直します: %s", source["name"])
                 self._store.update_source(source_id, status="queued", error=None)
                 self.submit(source_id)
@@ -612,6 +624,8 @@ class Ingestor:
                 timings = self._index_audio(job_id, source)
             elif source["kind"] == "image":
                 timings = self._index_images([(job_id, source)])
+            elif source["kind"] == "document":
+                timings = self._index_document(job_id, source)
             else:
                 raise ValueError(f"キューで処理できない種類です: {source['kind']}")
         except _Interrupted:
@@ -939,6 +953,58 @@ class Ingestor:
             finally:
                 audio.close()
         return timer.result(windows, info.duration_ms)
+
+    # 文書の塊を 1 回の推論にまとめる件数。推論の途中には検索が割り込めないため、まとめるほど取り込みは速いが、
+    # 取り込み中の検索が待たされる。RTX 3060・800 字の塊で、16 件: 1 塊 15.6 ms・検索 p50 235 ms、
+    # 4 件: 17.3 ms・67 ms、1 件: 29.5 ms・28 ms(2026-11-20 実測)。取り込みの遅れが 1 割で済む 4 にする
+    DOC_EMBED_BATCH = 4
+
+    def _index_document(self, job_id: int, source: dict) -> dict:
+        """文書を塊ごとにベクトルにします(窓の種類は document。時刻の幅は 0 で、ページを window_texts に記録)。
+
+        塊は document のプロンプトで埋め込みます(検索文は query のプロンプト)。推論は取り込みの優先度で、
+        DOC_EMBED_BATCH 件ずつ行い、合間に検索が割り込めるようにします。
+        """
+        timer = StageTimer()
+        params = IngestParams(**source["params"])
+        path = Path(source["path"])
+        with timer.stage("extract"):
+            extracted = documents.extract(path)
+        chunks = documents.chunk_pages(extracted.pages, params.doc_chunk_chars, params.doc_overlap_chars)
+        if not chunks:
+            raise documents.DocumentError(f"文書から文字を取り出せません: {source['name']}")
+        self._store.update_source(source["id"], duration_ms=0)
+        self._store.delete_windows(source["id"])
+        self._store.update_job(job_id, total=len(chunks), progress=0)
+        keep_text = params.store_media
+        done = 0
+        for i in range(0, len(chunks), self.DOC_EMBED_BATCH):
+            self._check_stop()
+            check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
+            part = chunks[i : i + self.DOC_EMBED_BATCH]
+            with timer.stage("embed"):
+                vecs = self._embedder.embed_texts([c.text for c in part], kind="document")
+            with timer.stage("store"):
+                for c, vec in zip(part, vecs, strict=True):
+                    self._store.add_window(
+                        source_id=source["id"],
+                        start_ms=0,
+                        end_ms=0,
+                        kind="document",
+                        group_id=source["group_id"],
+                        abs_ts=source["start_ts"],
+                        vec=vec,
+                        page=c.page,
+                        text=c.text if keep_text else None,
+                    )
+            done += len(part)
+            self._store.update_job(job_id, progress=done)
+        timer.extra.update(
+            pages=extracted.total_pages,
+            chars=sum(len(p.text) for p in extracted.pages),
+            truncated=extracted.truncated,
+        )
+        return timer.result(len(chunks), 0)
 
     def _run_image_batch(self, job_ids: list[int]) -> None:
         """続けて登録された複数の画像を、1 回の推論でまとめてベクトルにします。

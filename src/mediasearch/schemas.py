@@ -10,10 +10,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-WindowKind = Literal["frames", "tav", "audio", "image"]
-SearchKind = Literal["auto", "all", "frames", "tav", "audio", "image"]
-SourceKind = Literal["video", "audio", "image", "frames", "stream"]
-IngestKind = Literal["auto", "video", "audio", "image"]
+WindowKind = Literal["frames", "tav", "audio", "image", "document"]
+SearchKind = Literal["auto", "all", "frames", "tav", "audio", "image", "document"]
+SourceKind = Literal["video", "audio", "image", "document", "frames", "stream"]
+IngestKind = Literal["auto", "video", "audio", "image", "document"]
 Status = Literal["queued", "running", "done", "failed", "cancelled", "expired"]
 
 
@@ -112,8 +112,10 @@ class Accepted(BaseModel):
     job_id: int | None = Field(description="取り込みジョブの ID(重複のときは null)")
     duplicate: bool = Field(description="取り込み済みのファイルだった(新しいジョブは作っていない)")
     start_ts: str = Field(description="録画開始(撮影)の日時。ISO 8601")
-    start_ts_from: Literal["request", "filename", "exif", "now", "existing"] = Field(
-        description="start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 受付時刻 / 取り込み済みの値)"
+    start_ts_from: Literal["request", "filename", "exif", "mtime", "now", "existing"] = Field(
+        description=(
+            "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 文書の更新日時 / 受付時刻 / 取り込み済みの値)"
+        )
     )
 
     model_config = ConfigDict(
@@ -193,6 +195,12 @@ class SearchHit(_Open):
     )
     duplicates: int | None = Field(
         None, description="dedupe を指定したとき、この窓にまとめた、ほぼ同じ場面の窓の数(指定しないときは返さない)"
+    )
+    page: int | None = Field(
+        None, description="文書の塊のページ(1 始まり。ページの分からない形式は 0)。文書でない窓は返さない"
+    )
+    text: str | None = Field(
+        None, description="文書の塊の本文。文書でない窓と、保存しない設定(store_media=false)の文書は返さない"
     )
 
 

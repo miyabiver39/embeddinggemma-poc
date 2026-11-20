@@ -28,7 +28,7 @@ from starlette.concurrency import run_in_threadpool
 from . import disk, media
 from .alerts import new_secret, public_alert, validate_webhook
 from .backup import BackupError
-from .ingest_files import MEDIA_KINDS, media_kind_of
+from .ingest_files import INGEST_KINDS, media_kind_of
 from .live import LiveHub, Subscriber
 from .media import MediaError
 from .metrics import app_metrics
@@ -150,6 +150,16 @@ class IngestDirRequest(_WindowOptions):
     force: bool = Field(False, description="取り込み済みでも、もう一度取り込む")
 
     model_config = ConfigDict(json_schema_extra={"examples": [{"dir": "/recordings", "group_from_dir": True}]})
+
+
+# 文書を配信するときの Content-Type(ダウンロードとして返すため、表示のための値ではない)
+DOC_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".txt": "text/plain; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+    ".markdown": "text/markdown; charset=utf-8",
+}
 
 
 def _filters_form(kind_description: str):
@@ -343,6 +353,28 @@ def build_api_router(ctx: Context) -> APIRouter:
         return {"queued": len(items), "items": items, "errors": errs}
 
     @router.post(
+        "/ingest/document",
+        tags=["取り込み"],
+        summary="文書(PDF・Word・テキスト)をアップロードして取り込む",
+        response_model=Accepted,
+        responses=errors(400, 401, 409, 413, 422),
+    )
+    def ingest_document(
+        file: UploadFile = File(..., description="文書ファイル(.pdf / .docx / .txt / .md)"),
+        group_id: str | None = Form(None, description="任意のグループ ID"),
+        location: str | None = Form(None, description="任意の場所の名前"),
+        start_ts: str | None = Form(None, description="文書の日時(省略時はファイル名の日時、なければ受付時刻)"),
+        store_media: str | None = Form(None, description=_STORE_MEDIA_FORM + "。偽なら塊の本文も保存しない"),
+    ) -> dict:
+        """文書から文字を取り出し、約 DOC_CHUNK_CHARS 字の塊ごとにベクトルにします(窓の種類は document)。
+
+        塊はページをまたぎません。検索結果には、ページ(`page`)と塊の本文(`text`)が付きます。
+        画像だけの PDF(スキャンしたもの)は、文字を取り出せないため取り込めません(文字認識には対応していません)。
+        """
+        params = _params(None, None, None, None, None, store_media=_opt_bool(store_media))
+        return _accept_upload(file, "document", start_ts, group_id=group_id, location=location, params=params)
+
+    @router.post(
         "/ingest/path",
         tags=["取り込み"],
         summary="コンテナ内のファイルを取り込む",
@@ -362,7 +394,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             raise HTTPException(400, f"ファイルが見つかりません: {body.path}(コンテナ内のパスで指定してください)")
         kind = media_kind_of(path) if body.kind == "auto" else body.kind
         if kind is None:
-            raise MediaError(f"映像・音声・画像として扱えない拡張子です: {path.name}")
+            raise MediaError(f"映像・音声・画像・文書として扱えない拡張子です: {path.name}")
         params = _params(
             body.preset,
             body.window_sec,
@@ -865,7 +897,7 @@ def build_api_router(ctx: Context) -> APIRouter:
     def reindex_source(source_id: int) -> dict:
         """同じ設定で取り込み直します(古い窓は削除されます)。"""
         src = ctx.store.get_source(source_id)
-        if src is None or src["kind"] not in MEDIA_KINDS:
+        if src is None or src["kind"] not in INGEST_KINDS:
             raise HTTPException(404, "再取り込みできる取り込み元が見つかりません")
         if not src["path"]:
             raise HTTPException(404, "元のファイルを保存していないため、取り込み直せません(store_media=false)")
@@ -995,9 +1027,21 @@ def build_api_router(ctx: Context) -> APIRouter:
         },
     )
     def get_media(source_id: int) -> FileResponse:
-        """元の動画・音声・画像を返します。Range リクエストに対応するため、動画は `#t=秒` で頭出し再生できます。"""
+        """元の動画・音声・画像・文書を返します。Range リクエストに対応するため、動画は `#t=秒` で頭出し再生できます。
+
+        文書は、ブラウザで開かずダウンロードとして返します(`Content-Disposition: attachment`)。
+        """
         # 配信するのは、受付時の検証を通ったものだけ(取り込みに失敗したもの・保存しない設定のものは返さない)
         src = svc.servable_source(source_id)
+        if src["kind"] == "document":
+            # 文書はブラウザで開かず、ダウンロードとして返す(HTML などとして解釈され、スクリプトが動くのを防ぐ)
+            ext = Path(src["path"]).suffix.lower()
+            return FileResponse(
+                src["path"],
+                media_type=DOC_MEDIA_TYPES.get(ext, "application/octet-stream"),
+                filename=src["name"] or Path(src["path"]).name,
+                content_disposition_type="attachment",
+            )
         return FileResponse(src["path"])
 
     @router.get(

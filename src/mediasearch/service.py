@@ -21,7 +21,7 @@ import numpy as np
 from . import __version__, disk, media, thumbs
 from .config import PRESETS, Settings
 from .embedders import Embedder
-from .ingest_files import MEDIA_KINDS, FileIntake, is_within
+from .ingest_files import INGEST_KINDS, FileIntake, is_within
 from .pipeline import Ingestor
 from .retention import RetentionWorker
 from .store import Store
@@ -30,9 +30,15 @@ from .watcher import FolderWatcher
 
 log = logging.getLogger(__name__)
 
-KIND_CHOICES = ("auto", "all", "frames", "tav", "audio", "image")
+KIND_CHOICES = ("auto", "all", "frames", "tav", "audio", "image", "document")
 # 同じベクトルの空間に入る窓の種類(似た場面の検索の kind=auto で使う)。画像だけを入力にした frames と image は同じ空間
-SAME_SPACE_KINDS = {"frames": ["frames", "image"], "image": ["frames", "image"], "tav": ["tav"], "audio": ["audio"]}
+SAME_SPACE_KINDS = {
+    "frames": ["frames", "image"],
+    "image": ["frames", "image"],
+    "tav": ["tav"],
+    "audio": ["audio"],
+    "document": ["document"],
+}
 # 同時に行える切り出しの数(ffmpeg のエンコードは CPU を多く使い、取り込みの復号と取り合うため)
 CLIP_SLOTS = threading.BoundedSemaphore(2)
 # 重複の除去・取り込み元の除外をするときに、多めに探す倍率と上限(除いた後も top_k 件を返せるように)
@@ -156,6 +162,8 @@ def merge_intervals(results: list[dict], gap_ms: int = 500) -> list[dict]:
     """同じ取り込み元で、隣り合う・重なる窓を1つの区間にまとめます(再生位置の目安にする)。"""
     by_source: dict[int, list[dict]] = {}
     for r in results:
+        if r.get("kind") == "document":  # 文書の塊には時刻の幅が無い(ページで示す)
+            continue
         by_source.setdefault(r["source_id"], []).append(r)
     merged: list[dict] = []
     for source_id, items in by_source.items():
@@ -329,7 +337,16 @@ class Service:
             h["abs_time"] = fmt_ts(h["abs_ts"])
             stored = media_stored(src)
             h["media_url"] = f"/api/media/{h['source_id']}" if stored and src.get("path") else None
-            h["thumb_url"] = f"/api/thumb/{h['window_id']}" if stored and src.get("kind") != "audio" else None
+            h["thumb_url"] = (
+                f"/api/thumb/{h['window_id']}" if stored and src.get("kind") not in ("audio", "document") else None
+            )
+        docs = [h["window_id"] for h in hits if h.get("kind") == "document"]
+        if docs:
+            texts = self.ctx.store.get_window_texts(docs)
+            for h in hits:
+                if h["window_id"] in texts:
+                    h["page"] = texts[h["window_id"]]["page"]
+                    h["text"] = texts[h["window_id"]]["text"]
         return hits
 
     def text_vector(self, query: str) -> np.ndarray:
@@ -417,14 +434,14 @@ class Service:
     def servable_source(self, source_id: int) -> dict:
         """元のファイルを返してよい取り込み元(配信と切り出しで共通の条件)。だめなら NotFound。
 
-        返すのは、受付時の検証を通った映像・音声・画像で、失敗・期限切れでなく、保存する設定で取り込み、
+        返すのは、受付時の検証を通った映像・音声・画像・文書で、失敗・期限切れでなく、保存する設定で取り込み、
         許可したフォルダ(INGEST_ROOTS)の中に実在するものだけ(設計書の「メディア配信の範囲」)。
         """
         s = self.ctx.settings
         src = self.ctx.store.get_source(source_id)
         if (
             src is None
-            or src["kind"] not in MEDIA_KINDS
+            or src["kind"] not in INGEST_KINDS
             or src["status"] in ("failed", "expired")
             or not media_stored(src)  # 保存しない設定で取り込んだものは返さない(情報だけを返す)
             or not src["path"]
@@ -447,8 +464,8 @@ class Service:
         if end_ms - start_ms > s.clip_max_sec * 1000:
             raise InvalidInput(f"切り出せる長さは {s.clip_max_sec} 秒までです(CLIP_MAX_SEC)")
         src = self.servable_source(source_id)
-        if src["kind"] == "image":
-            raise InvalidInput("静止画は切り出せません")
+        if src["kind"] in ("image", "document"):
+            raise InvalidInput("静止画と文書は切り出せません")
         if not CLIP_SLOTS.acquire(blocking=False):
             raise Overloaded("切り出しが混み合っています。しばらくしてから再度お試しください")
         try:
