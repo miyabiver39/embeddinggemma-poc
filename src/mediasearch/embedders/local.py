@@ -24,7 +24,6 @@ import subprocess
 import sys
 import time
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
 from functools import lru_cache
@@ -273,7 +272,6 @@ class LocalEmbedder(Embedder):
         self._model.to(self._target_device)
         self._model.eval()
         self._processor_lock = Lock() if rx9060xt else nullcontext()
-        self._query_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rocm-search") if rx9060xt else None
         self._query_cache = lru_cache(maxsize=256)(self._encode_query) if rx9060xt else None
         self._use_pin_memory = bool(self._target_device.type == "cuda" and torch.cuda.is_available())
         self._modalities = list(getattr(self._model, "modalities", []) or [])
@@ -447,21 +445,16 @@ class LocalEmbedder(Embedder):
 
     def _forward_prepared(self, prepared: _PreparedBatch, high: bool) -> np.ndarray:
         """前処理済みのテンソルに対してモデル本体の forward のみを PriorityGate 内で実行します。"""
-        with self._gate.acquire(high=high):
-            if high and self._query_worker is not None:
-                # 呼び出し元にかかわらず、検索の GPU 実行と結果の転送に同じスレッドを使う。
-                arr = self._query_worker.submit(self._forward_on_device, prepared.features).result()
-            else:
-                arr = self._forward_on_device(prepared.features)
+        with self._gate.acquire(high=high), self._torch.inference_mode():
+            features = move_features(
+                prepared.features, self._target_device, non_blocking=self._use_pin_memory
+            )
+            out = self._model(features)["sentence_embedding"]
+            arr = self._to_numpy(out)
         arr = arr.reshape(prepared.count, -1)
         if prepared.restore_idx is not None:
             arr = arr[prepared.restore_idx]
         return finalize(arr, self._dims)
-
-    def _forward_on_device(self, features: dict[str, Any]) -> np.ndarray:
-        with self._torch.inference_mode():
-            features = move_features(features, self._target_device, non_blocking=self._use_pin_memory)
-            return self._to_numpy(self._model(features)["sentence_embedding"])
 
     # ------------------------------------------------------------------ 公開 API
     def info(self) -> EmbedderInfo:
@@ -582,7 +575,5 @@ class LocalEmbedder(Embedder):
             self._parts_batcher.close()
         if self._text_batcher is not None:
             self._text_batcher.close()
-        if self._query_worker is not None:
-            self._query_worker.shutdown()
         if self._query_cache is not None:
             self._query_cache.cache_clear()
