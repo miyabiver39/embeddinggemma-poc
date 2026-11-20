@@ -89,6 +89,11 @@ curl -F files=@photo1.jpg -F files=@photo2.png -F group_id=album-1 http://localh
 # 動画をアップロード
 curl -F file=@clip.mp4 -F group_id=group-a http://localhost:8000/api/ingest/video
 
+# 文書(PDF・Word・テキスト)をアップロード。検索は kind=document で行い、結果に page と text が付く
+curl -F file=@manual.pdf -F group_id=docs http://localhost:8000/api/ingest/document
+curl -H 'Content-Type: application/json' -d '{"query": "消火器の点検の頻度", "kind": "document"}' \
+  http://localhost:8000/api/search/text
+
 # コンテナ内のファイル(録画フォルダを /recordings にマウントしている場合)
 curl -H 'Content-Type: application/json' -d '{"path": "/recordings/group-a/20260101_090000.mp4"}' \
   http://localhost:8000/api/ingest/path

@@ -198,6 +198,8 @@ You can also send your own pre-processed frames to `/api/ingest/frames`.
 | `INCLUDE_AUDIO` | `false` | Include the video's audio in the same vector |
 | `SKIP_STATIC` | `false` | Do not embed windows whose video has not changed from the previous window; extend the previous window instead (video-only windows). Reduces the number of windows and the ingestion time for cameras with little motion ([docs/design.md](docs/design.md)) |
 | `STATIC_THRESHOLD` | `4.0` | For `SKIP_STATIC`, the largest per-block brightness difference (0-255) still treated as "no change". Smaller values skip less |
+| `DOC_CHUNK_CHARS` | `800` | Approximate number of characters per document vector (100-4000). Chunks never span pages |
+| `DOC_OVERLAP_CHARS` | `100` | Number of characters from the end of a chunk repeated at the start of the next one (0 to half of `DOC_CHUNK_CHARS`) |
 | `AUDIO_CHUNK_SEC` | `10` | Chunk length for audio files (seconds) |
 | `IMAGE_MAX_SIDE` | `448` | Long side images are resized to (px) |
 | `FFMPEG_HWACCEL` | `auto` | GPU used to decode video (`auto` / `cuda` / `vaapi` / `qsv` / `none`). Falls back to the CPU if unavailable (`docs/gpu.md`) |
@@ -250,6 +252,7 @@ Ingestion presets (`preset`): `object` (2-second windows, 2 frames, no audio; fo
 - "Video only (frames)", "video + audio (tav)", "audio only (audio)" and "still image (image)" are stored as separate kinds (`kind`) and selected at search time. With `auto`, text and image searches look at tav or frames (depending on `INCLUDE_AUDIO`) and image; audio searches look at `audio`.
 - **There is a mode that does not keep videos or images.** When ingesting with `STORE_MEDIA=false` (or `store_media=false` per ingestion), only vectors and information (source name, time, group ID, etc.) are kept; uploaded files are deleted after ingestion and no thumbnails are created. `media_url` / `thumb_url` in search results become `null`. Files ingested by path belong to the user, so they are not deleted, only excluded from serving. Since the original file is gone, re-ingestion (reindex) is not possible.
 - **Images alone can be registered.** When frames cannot be extracted from video, or when only photos are handled, each image is ingested as one item (`/api/ingest/image`, path, folder and watched folder ingestion are all supported). The capture time is taken from the specified value, the date in the file name, then the EXIF capture time, in that order.
+- **Documents (PDF, Word, text) can be registered.** `.pdf` / `.docx` / `.txt` / `.md` files are split into chunks of about 800 characters, one vector per chunk (`/api/ingest/document`, path, folder and watched folder ingestion are all supported). Search them with `kind=document` (or `all` to mix them with video); results include the page (`page`) and the chunk text (`text`). Shift_JIS text files are supported. Image-only PDFs (scans) cannot be ingested because no text can be extracted. Documents are not subject to the retention period (`RETENTION_DAYS`).
 - **A retention period can be set.** With streams and watched folders, windows keep increasing (one 2-second-window stream produces about 43,000 windows and about 140 MB of vectors per day). With `RETENTION_DAYS`, old windows are deleted every 10 minutes, keeping memory and disk usage within bounds. Files whose windows are all gone get the status `expired`; the original files are not deleted.
 - **Vectors are stored in an embedded vector DB (USearch).** Settings, sources and window information are stored in SQLite (`mediasearch.db`), and vectors in `vectors.usearch`. Both are single files in `DATA_DIR`; no separate server is needed. As the count grows it switches to approximate search (HNSW), so search time stays nearly constant. Memory is proportional to the vector size (about 320 MB for 100,000 windows at 768 dimensions).
 
@@ -258,7 +261,7 @@ Ingestion presets (`preset`): `object` (2-second windows, 2 frames, no audio; fo
 | | |
 |---|---|
 | `GET /api/info` | Status, version, defaults, presets, index counts, watched folder status |
-| `POST /api/ingest/video` / `audio` / `image` | Ingest uploaded files (several images can be sent at once) |
+| `POST /api/ingest/video` / `audio` / `image` / `document` | Ingest uploaded files (several images can be sent at once; documents are PDF, Word or text) |
 | `POST /api/ingest/path` | Ingest a path inside the container |
 | `POST /api/ingest/dir` | Ingest a folder inside the container in bulk |
 | `POST /api/watch/scan` | Scan the watched folders now |

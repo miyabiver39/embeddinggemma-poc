@@ -150,6 +150,10 @@ class Settings:
     skip_static: bool = False  # 真なら、前の窓と映像が変わらない窓を推論せず、前の窓を延ばす(映像のみの窓だけ)
     static_threshold: float = 4.0  # 区画ごとの輝度の差(0〜255 の平均)がこれ未満なら「変化なし」とみなす
 
+    # --- 文書(PDF・Word・テキスト。documents.py) ---
+    doc_chunk_chars: int = 800  # 1 つのベクトルにする文字数の目安
+    doc_overlap_chars: int = 100  # 前の塊の終わりを、次の塊の頭に重ねる文字数
+
     @classmethod
     def from_env(cls) -> Settings:
         role = _env("ROLE", "all")
@@ -247,4 +251,6 @@ class Settings:
             clip_max_sec=max(_env_int("CLIP_MAX_SEC", 600), 0),
             skip_static=_env_bool("SKIP_STATIC", False),
             static_threshold=_env_float("STATIC_THRESHOLD", 4.0),
+            doc_chunk_chars=_env_int("DOC_CHUNK_CHARS", 800),
+            doc_overlap_chars=_env_int("DOC_OVERLAP_CHARS", 100),
         )

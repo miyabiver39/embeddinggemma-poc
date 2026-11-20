@@ -196,6 +196,8 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `INCLUDE_AUDIO` | `false` | 動画の音声も同じベクトルに含める |
 | `SKIP_STATIC` | `false` | 前の窓と映像が変わらない窓を推論せず、前の窓を延ばす(映像のみの窓だけ。動きの少ない監視カメラで、窓の数と取り込みの時間が減る。[docs/design.md](docs/design.md)) |
 | `STATIC_THRESHOLD` | `4.0` | `SKIP_STATIC` で「変化なし」とみなす、区画ごとの明るさの差の上限(0〜255。小さいほど省略しにくい) |
+| `DOC_CHUNK_CHARS` | `800` | 文書を 1 つのベクトルにする文字数の目安(100〜4000)。塊はページをまたがない |
+| `DOC_OVERLAP_CHARS` | `100` | 前の塊の終わりを、次の塊の頭に重ねる文字数(0〜`DOC_CHUNK_CHARS` の半分) |
 | `AUDIO_CHUNK_SEC` | `10` | 音声ファイルの分割長(秒) |
 | `IMAGE_MAX_SIDE` | `448` | 画像を縮小する長辺(px) |
 | `FFMPEG_HWACCEL` | `auto` | 動画の復号に使う GPU(`auto` / `cuda` / `vaapi` / `qsv` / `none`)。使えない場合は CPU に切り替える(`docs/gpu.md`) |
@@ -248,6 +250,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 - 「映像のみ(frames)」「映像+音声(tav)」「音声のみ(audio)」「静止画(image)」は種類(`kind`)を分けて保存し、検索時に選びます。`auto` は、文字・画像で検索したときは `INCLUDE_AUDIO` の設定に合わせて tav か frames と、image を探します。音声で検索したときの `auto` は `audio` を探します。
 - **動画・画像を保存しないモードがあります。** `STORE_MEDIA=false`(または取り込みの `store_media=false`)で取り込むと、ベクトルと情報(取り込み元の名前・時刻・グループ ID など)だけを残し、アップロードされたファイルは取り込み後に削除し、サムネイルも作りません。検索結果の `media_url` / `thumb_url` は `null` になります。パス指定で取り込んだファイルは利用者のものなので削除せず、配信の対象から外すだけです。元のファイルが無いため、取り込み直し(reindex)はできません。
 - **画像だけでも登録できます。** 動画から切り出せない場合や写真だけを扱う場合は、画像 1 枚を 1 件として取り込みます(`/api/ingest/image`、パス指定、フォルダ一括、監視フォルダのいずれも対応)。撮影日時は指定値、ファイル名の日時、EXIF の撮影日時の順に採用します。
+- **文書(PDF・Word・テキスト)も登録できます。** `.pdf` / `.docx` / `.txt` / `.md` を、約 800 字の塊ごとに 1 ベクトルにします(`/api/ingest/document`、パス指定、フォルダ一括、監視フォルダのいずれも対応)。検索は `kind=document`(映像と混ぜるときは `all`)で行い、結果にページ(`page`)と本文(`text`)が付きます。Shift_JIS のテキストも読めます。画像だけの PDF(スキャンしたもの)は文字を取り出せないため取り込めません。文書は保存期間(`RETENTION_DAYS`)の対象外です。
 - **保存期間を設定できます。** ストリームや監視フォルダでは窓が増え続けます(2 秒窓のストリーム 1 本で 1 日約 4.3 万窓・ベクトル約 140MB)。`RETENTION_DAYS` を設定すると、古い窓を 10 分ごとに削除し、メモリとディスクの使用量を一定の範囲に保ちます。窓が無くなったファイルは状態が `expired` になり、元のファイルは削除しません。
 - **ベクトルは組み込み型のベクトル DB(USearch)に保存します。** 設定・取り込み元・窓の情報は SQLite(`mediasearch.db`)、ベクトルは `vectors.usearch` に保存します。どちらも `DATA_DIR` の中の 1 ファイルで、別のサーバーは不要です。件数が増えると近似検索(HNSW)に切り替えるため、検索時間はほぼ一定です。メモリはベクトルの大きさに比例します(768 次元・10 万窓で約 320MB)。
 
@@ -256,7 +259,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | | |
 |---|---|
 | `GET /api/info` | 状態・版・既定値・プリセット・索引の件数・監視フォルダの状態 |
-| `POST /api/ingest/video` / `audio` / `image` | ファイルのアップロード取り込み(画像は複数枚をまとめて送れる) |
+| `POST /api/ingest/video` / `audio` / `image` / `document` | ファイルのアップロード取り込み(画像は複数枚をまとめて送れる。文書は PDF・Word・テキスト) |
 | `POST /api/ingest/path` | コンテナ内パスの取り込み |
 | `POST /api/ingest/dir` | コンテナ内フォルダの一括取り込み |
 | `POST /api/watch/scan` | 監視フォルダを今すぐ走査 |

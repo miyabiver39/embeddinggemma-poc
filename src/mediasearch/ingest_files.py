@@ -21,7 +21,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from . import media
+from . import documents, media
+from .documents import DOC_EXTS
 from .media import MediaError
 from .pipeline import Ingestor, IngestParams
 from .store import Store
@@ -35,6 +36,7 @@ VIDEO_EXTS = frozenset(
 AUDIO_EXTS = frozenset({".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".oga", ".opus", ".wma"})
 IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"})
 MEDIA_KINDS = ("video", "audio", "image")
+INGEST_KINDS = (*MEDIA_KINDS, "document")  # 取り込める種類(文書は documents.py で読む)
 
 # ファイル名に含まれる日時。例: 20260101_090000 / 2026-01-01T09-00-00 / group-a-20260101-090000.mp4
 _TS_PATTERN = re.compile(
@@ -53,8 +55,10 @@ def is_within(path: str | Path, roots: tuple[Path, ...]) -> bool:
 
 
 def media_kind_of(path: str | Path) -> str | None:
-    """拡張子から、映像(video)・音声(audio)・画像(image)のどれかを判定します。どれでもなければ None。"""
+    """拡張子から、映像(video)・音声(audio)・画像(image)・文書(document)のどれかを判定します。どれでもなければ None。"""
     ext = Path(path).suffix.lower()
+    if ext in DOC_EXTS:
+        return "document"
     if ext in VIDEO_EXTS:
         return "video"
     if ext in AUDIO_EXTS:
@@ -87,7 +91,7 @@ class Accepted:
     job_id: int | None
     duplicate: bool
     start_ts: float
-    start_ts_from: str  # request(指定) / filename(ファイル名) / now(受付時刻)
+    start_ts_from: str  # request(指定) / filename(ファイル名) / exif / mtime(文書の更新日時) / now(受付時刻)
 
     def to_dict(self) -> dict:
         return {
@@ -126,9 +130,16 @@ class FileIntake:
         expected = media_kind_of(path)
         if expected is None:
             raise MediaError(
-                f"映像・音声・画像として扱えない拡張子です: {path.name}"
-                f"(対応: {', '.join(sorted(VIDEO_EXTS | AUDIO_EXTS | IMAGE_EXTS))})"
+                f"映像・音声・画像・文書として扱えない拡張子です: {path.name}"
+                f"(対応: {', '.join(sorted(VIDEO_EXTS | AUDIO_EXTS | IMAGE_EXTS | DOC_EXTS))})"
             )
+        if kind == "document" or expected == "document":
+            if expected != "document" or kind != "document":
+                raise MediaError(
+                    f"文書は kind=document、それ以外は video / audio / image で取り込んでください: {path.name}"
+                )
+            documents.check(path)
+            return
         if kind == "image" or expected == "image":
             if expected != "image" or kind != "image":
                 raise MediaError(f"画像は kind=image、それ以外は video / audio で取り込んでください: {path.name}")
@@ -172,6 +183,8 @@ class FileIntake:
             ts, ts_from = guessed, "filename"
         elif kind == "image" and (taken := media.image_taken_at(path)) is not None:
             ts, ts_from = taken, "exif"
+        elif kind == "document":  # 文書は、受け付けた時刻より、ファイルの更新日時のほうが内容の日付に近い
+            ts, ts_from = path.stat().st_mtime, "mtime"
         else:
             ts, ts_from = time.time(), "now"
 

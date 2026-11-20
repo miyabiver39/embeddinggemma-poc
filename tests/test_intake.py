@@ -37,7 +37,7 @@ def test_media_kind_of():
 
 
 def test_path_rejects_non_media(client, tmp_path):
-    secret = tmp_path / "secret.txt"
+    secret = tmp_path / "secret.cfg"  # .txt は文書として取り込めるため、対象外の拡張子で確かめる
     secret.write_text("password")
     r = client.post("/api/ingest/path", json={"path": str(secret)})
     assert r.status_code == 422, r.text
@@ -108,7 +108,7 @@ def test_ingest_dir_with_group_from_dir(client, tmp_path):
     make_video(root / "group-a" / "20260101_090000.mp4", "red", seconds=2)
     make_video(root / "group-b" / "20260101_091000.mp4", "green", seconds=2)
     make_video(root / ".tmp" / "20260101_092000.mp4", "blue", seconds=2)  # 隠しフォルダは対象外
-    (root / "group-a" / "notes.txt").write_text("memo")  # 拡張子が対象外
+    (root / "group-a" / "notes.ini").write_text("memo")  # 拡張子が対象外
 
     r = client.post("/api/ingest/dir", json={"dir": str(root), "group_from_dir": True})
     assert r.status_code == 200, r.text

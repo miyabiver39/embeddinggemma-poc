@@ -721,6 +721,97 @@
         ]
       }
     },
+    "/api/ingest/document": {
+      "post": {
+        "tags": [
+          "取り込み"
+        ],
+        "summary": "文書(PDF・Word・テキスト)をアップロードして取り込む",
+        "description": "文書から文字を取り出し、約 DOC_CHUNK_CHARS 字の塊ごとにベクトルにします(窓の種類は document)。\n\n塊はページをまたぎません。検索結果には、ページ(`page`)と塊の本文(`text`)が付きます。\n画像だけの PDF(スキャンしたもの)は、文字を取り出せないため取り込めません(文字認識には対応していません)。",
+        "operationId": "ingest_document_api_ingest_document_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_document_api_ingest_document_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "映像・音声・画像として扱えないファイル、または入力の検証エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
     "/api/ingest/path": {
       "post": {
         "tags": [
@@ -1519,7 +1610,8 @@
                 "frames",
                 "tav",
                 "audio",
-                "image"
+                "image",
+                "document"
               ],
               "type": "string",
               "description": "探す窓の種類",
@@ -2648,6 +2740,7 @@
                     "video",
                     "audio",
                     "image",
+                    "document",
                     "frames",
                     "stream"
                   ],
@@ -3550,7 +3643,7 @@
           "配信"
         ],
         "summary": "元ファイル(Range 対応)",
-        "description": "元の動画・音声・画像を返します。Range リクエストに対応するため、動画は `#t=秒` で頭出し再生できます。",
+        "description": "元の動画・音声・画像・文書を返します。Range リクエストに対応するため、動画は `#t=秒` で頭出し再生できます。\n\n文書は、ブラウザで開かずダウンロードとして返します(`Content-Disposition: attachment`)。",
         "operationId": "get_media_api_media__source_id__get",
         "parameters": [
           {
@@ -3951,11 +4044,12 @@
               "request",
               "filename",
               "exif",
+              "mtime",
               "now",
               "existing"
             ],
             "title": "Start Ts From",
-            "description": "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 受付時刻 / 取り込み済みの値)"
+            "description": "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 文書の更新日時 / 受付時刻 / 取り込み済みの値)"
           }
         },
         "type": "object",
@@ -4089,7 +4183,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "探す窓の種類",
@@ -4334,7 +4429,8 @@
                   "frames",
                   "tav",
                   "audio",
-                  "image"
+                  "image",
+                  "document"
                 ]
               },
               {
@@ -4561,6 +4657,69 @@
           "file"
         ],
         "title": "Body_ingest_audio_api_ingest_audio_post"
+      },
+      "Body_ingest_document_api_ingest_document_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "文書ファイル(.pdf / .docx / .txt / .md)"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "任意のグループ ID"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "任意の場所の名前"
+          },
+          "start_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ts",
+            "description": "文書の日時(省略時はファイル名の日時、なければ受付時刻)"
+          },
+          "store_media": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Media",
+            "description": "false にすると、ファイルを取り込み後に削除し、サムネイルも作らない(検索結果は情報だけ)。省略時は STORE_MEDIA。偽なら塊の本文も保存しない"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_ingest_document_api_ingest_document_post"
       },
       "Body_ingest_frames_api_ingest_frames_post": {
         "properties": {
@@ -4936,7 +5095,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "探す窓の種類(auto は音声のみの窓)",
@@ -5073,7 +5233,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "探す窓の種類(auto は映像の窓と静止画)",
@@ -5289,11 +5450,12 @@
               "request",
               "filename",
               "exif",
+              "mtime",
               "now",
               "existing"
             ],
             "title": "Start Ts From",
-            "description": "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 受付時刻 / 取り込み済みの値)"
+            "description": "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 文書の更新日時 / 受付時刻 / 取り込み済みの値)"
           },
           "path": {
             "type": "string",
@@ -5467,7 +5629,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind"
           }
@@ -5840,7 +6003,8 @@
               "auto",
               "video",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "対象にする種類(auto は拡張子で判定し、映像・音声・画像のすべて)",
@@ -6016,7 +6180,8 @@
               "auto",
               "video",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "取り込む種類(auto は拡張子で判定)",
@@ -6373,7 +6538,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind"
           },
@@ -6451,7 +6617,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind"
           },
@@ -6538,6 +6705,30 @@
             ],
             "title": "Duplicates",
             "description": "dedupe を指定したとき、この窓にまとめた、ほぼ同じ場面の窓の数(指定しないときは返さない)"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page",
+            "description": "文書の塊のページ(1 始まり。ページの分からない形式は 0)。文書でない窓は返さない"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "文書の塊の本文。文書でない窓と、保存しない設定(store_media=false)の文書は返さない"
           }
         },
         "additionalProperties": true,
@@ -6788,7 +6979,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "探す窓の種類(auto は元の窓と同じベクトルの空間の種類。映像の窓と静止画は同じ空間)",
@@ -6841,6 +7033,7 @@
               "video",
               "audio",
               "image",
+              "document",
               "frames",
               "stream"
             ],
@@ -7563,7 +7756,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "探す窓の種類",

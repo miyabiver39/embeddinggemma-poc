@@ -22,6 +22,7 @@
 | Pillow | 画像処理 | MIT-CMU |
 | HTTPX | compute との通信 | BSD-3-Clause |
 | USearch(`usearch`)と NumKong(`numkong`) | ベクトル DB(近傍検索) | Apache-2.0 |
+| pypdf | 文書(PDF)の文字の取り出し | BSD-3-Clause |
 | MCP Python SDK(`mcp`)と依存パッケージ(httpx2、sse-starlette など) | MCP サーバー | MIT(依存パッケージは BSD-3-Clause / MIT など) |
 
 ## モデルを同梱するイメージ(cpu / cuda / rocm / intel)
