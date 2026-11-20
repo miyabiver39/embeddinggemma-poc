@@ -80,6 +80,8 @@ class IndexStatus(_Open):
     model_id: str | None = Field(None, description="DB を作ったときのモデル(未作成なら null)")
     dims: str | None = None
     queue_size: int = Field(description="取り込みを待っているジョブの数")
+    running_jobs: int = Field(0, description="取り込み中のジョブの数")
+    ingest_workers: int = Field(1, description="同時に取り込むファイルの数の上限(INGEST_WORKERS)")
     vector_db: dict[str, Any] | None = Field(
         None, description="ベクトル DB の状態(engine: 方式、vectors: 件数、file_bytes: ファイルの大きさ)"
     )

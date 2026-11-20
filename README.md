@@ -208,6 +208,7 @@ You can also send your own pre-processed frames to `/api/ingest/frames`.
 | `TORCH_CACHE_DIR` | `DATA_DIR/cache/torch` | Persistent directory for PyTorch (`TORCHINDUCTOR_CACHE_DIR` / `TRITON_CACHE_DIR`) compilation caches (explicit per-variable overrides take precedence) |
 | `WARMUP_ON_START` | `true` | Runs one dummy warmup inference (text, image, audio) right before `/readyz` becomes ready (skipped for `remote`, or when already warmed up by `TORCH_COMPILE`) |
 | `INGEST_PREFETCH` | `2` | Bounded queue capacity (1-16) for the video ingestion producer-consumer pipeline. Overlaps frame decoding and preprocessing for window N+1 with inference of window N while applying backpressure to bound memory usage |
+| `INGEST_WORKERS` | `1` | Number of files ingested at the same time (1-8). Decoding, preprocessing and saving run in parallel; inference still goes to the GPU one call at a time through the priority gate, so search priority and vectors are unchanged. Useful on fast GPUs where a single ffmpeg decoder cannot keep the GPU busy. Memory use grows roughly with this number |
 | `IMAGE_MAX_TOKENS` | `0` | Token limit per image (0 = model default) |
 | `TOP_K` | `10` | Default number of search results |
 | `DATA_DIR` | `/data` | Where the DB, thumbnails and uploaded videos are stored |
