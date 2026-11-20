@@ -22,8 +22,9 @@ import statistics
 from pathlib import Path
 
 TOTAL_SEC = 480
-BASELINE = ("float32", 448, 768)
-DEFAULT = ("bfloat16", 448, 768)
+DEFAULT_TOKENS = 280  # 画像 1 枚あたりの上限トークン(モデルの既定)
+BASELINE = ("float32", 448, 768, DEFAULT_TOKENS)
+DEFAULT = ("bfloat16", 448, 768, DEFAULT_TOKENS)
 COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#4b5563"]
 
 
@@ -34,8 +35,9 @@ def load(folder: Path) -> tuple[list[dict], dict, dict]:
     machine = json.loads(mfile.read_text(encoding="utf-8")) if mfile.exists() else {}
     vectors = {}
     for f in sorted((folder / "quality").glob("*.json")) if (folder / "quality").exists() else []:
-        dtype, side, dims = f.stem.split("-")
-        vectors[(dtype, int(side), int(dims))] = json.loads(f.read_text(encoding="utf-8"))
+        dtype, side, dims, *rest = f.stem.split("-")  # 上限トークンが既定でなければ末尾に -t<数>
+        tokens = int(rest[0][1:]) if rest else DEFAULT_TOKENS
+        vectors[(dtype, int(side), int(dims), tokens)] = json.loads(f.read_text(encoding="utf-8"))
     return recs, machine, vectors
 
 
@@ -45,7 +47,12 @@ def _median(vals: list) -> float | None:
 
 
 def prec_of(r: dict) -> tuple:
-    return (r["dtype"], r["image_max_side"], r["dims"])
+    # 上限トークンの記録が無い行は、実験 3 を足す前の記録(既定の 280 で測った)
+    return (r["dtype"], r["image_max_side"], r["dims"], r.get("image_max_tokens") or DEFAULT_TOKENS)
+
+
+def _pkey(c: dict) -> tuple:
+    return (c["dtype"], c["image_max_side"], c["dims"], c["image_max_tokens"])
 
 
 def summarize(recs: list[dict], vectors: dict) -> dict:
@@ -63,9 +70,10 @@ def summarize(recs: list[dict], vectors: dict) -> dict:
     cells = []
     for key in sorted(set(groups) | set(failures)):
         rs = groups.get(key, [])
-        exp, dtype, side, dims, k, w, win = key
+        exp, dtype, side, dims, tokens, k, w, win = key
         cells.append({
-            "experiment": exp, "dtype": dtype, "image_max_side": side, "dims": dims, "k": k, "w": w, "win": win,
+            "experiment": exp, "dtype": dtype, "image_max_side": side, "dims": dims, "image_max_tokens": tokens,
+            "k": k, "w": w, "win": win,
             "n": len(rs), "failed": len(failures.get(key, [])),
             "completion_sec": _median([r["completion_sec"] for r in rs]),
             "completion_min": min((r["completion_sec"] for r in rs), default=None),
@@ -78,20 +86,22 @@ def summarize(recs: list[dict], vectors: dict) -> dict:
             "gpu_mem_max_mb": max((r["gpu_mem_max_mb"] for r in rs if r.get("gpu_mem_max_mb") is not None),
                                   default=None),
             "cpu_util": _median([r.get("cpu_util") for r in rs]),
+            "mem_max_mb": max((r["mem_max_mb"] for r in rs if r.get("mem_max_mb") is not None), default=None),
+            "mem_total_max_mb": max((r["mem_total_max_mb"] for r in rs if r.get("mem_total_max_mb") is not None),
+                                    default=None),
             "error": (failures.get(key) or [None])[0],
         })  # fmt: skip
     # 同時数の効果: 同じ k・窓で、w=1 との差(%)。負なら短くなった
-    by = {(c["experiment"], c["dtype"], c["image_max_side"], c["dims"], c["k"], c["w"], c["win"]): c for c in cells}
+    by = {(c["experiment"], *_pkey(c), c["k"], c["w"], c["win"]): c for c in cells}
     for c in cells:
-        base = by.get((c["experiment"], c["dtype"], c["image_max_side"], c["dims"], c["k"], 1, c["win"]))
-        one = by.get((c["experiment"], c["dtype"], c["image_max_side"], c["dims"], 1, 1, c["win"]))
+        base = by.get((c["experiment"], *_pkey(c), c["k"], 1, c["win"]))
+        one = by.get((c["experiment"], *_pkey(c), 1, 1, c["win"]))
         c["vs_w1_pct"] = _pct(c["completion_sec"], base and base["completion_sec"])
         c["vs_k1_pct"] = _pct(c["completion_sec"], one and one["completion_sec"])
     precision = {}
     for r in recs:
         if r["experiment"] in ("search", "quality"):
-            p = precision.setdefault(prec_of(r), {"dtype": r["dtype"], "image_max_side": r["image_max_side"],
-                                                  "dims": r["dims"]})  # fmt: skip
+            p = precision.setdefault(prec_of(r), _pdict(prec_of(r)))
             if r["experiment"] == "search" and r.get("ok"):
                 p.update({"qps": r["qps"], "search_p50_ms": r["latency_ms"]["p50"],
                           "search_p95_ms": r["latency_ms"]["p95"]})  # fmt: skip
@@ -102,7 +112,7 @@ def summarize(recs: list[dict], vectors: dict) -> dict:
     for prec, vecs in vectors.items():
         if base_vecs is None:
             break
-        p = precision.setdefault(prec, {"dtype": prec[0], "image_max_side": prec[1], "dims": prec[2]})
+        p = precision.setdefault(prec, _pdict(prec))
         sims = [_cos(_trunc(b, prec[2]), v)
                 for kind in ("images", "texts") for b, v in zip(base_vecs[kind], vecs[kind], strict=True)]  # fmt: skip
         sims = [s for s in sims if not math.isnan(s)]
@@ -110,15 +120,20 @@ def summarize(recs: list[dict], vectors: dict) -> dict:
         p["cos_min"] = round(min(sims), 5) if sims else None
     for c in cells:
         if c["experiment"] == "precision":
-            p = precision.setdefault((c["dtype"], c["image_max_side"], c["dims"]), {})
+            p = precision.setdefault(_pkey(c), _pdict(_pkey(c)))
             p[f"sec_per_window_w{c['w']}"] = c["sec_per_window"]
             p[f"completion_w{c['w']}"] = c["completion_sec"]
     return {"cells": cells, "precision": sorted(precision.values(), key=_prec_sort)}
 
 
+def _pdict(prec: tuple) -> dict:
+    return dict(zip(("dtype", "image_max_side", "dims", "image_max_tokens"), prec, strict=True))
+
+
 def _prec_sort(p: dict) -> tuple:
     return (["bfloat16", "float16", "float32"].index(p.get("dtype", "bfloat16")) if p.get("dtype") in
-            ("bfloat16", "float16", "float32") else 9, -(p.get("image_max_side") or 0), -(p.get("dims") or 0))  # fmt: skip
+            ("bfloat16", "float16", "float32") else 9, -(p.get("image_max_tokens") or 0),
+            -(p.get("image_max_side") or 0), -(p.get("dims") or 0))  # fmt: skip
 
 
 def _pct(x, base) -> float | None:
@@ -297,15 +312,16 @@ def scatter(title: str, xlabel: str, ylabel: str, points: list[tuple]) -> str:
 # ---------------------------------------------------------------------- 機種ごとのグラフ
 def _cell(cells, exp, prec, k, w, win, field="completion_sec"):
     for c in cells:
-        if (c["experiment"], c["dtype"], c["image_max_side"], c["dims"], c["k"], c["w"], c["win"]) == (
-            exp, *prec, k, w, win):  # fmt: skip
+        if (c["experiment"], *_pkey(c), c["k"], c["w"], c["win"]) == (exp, *prec, k, w, win):
             return c.get(field)
     return None
 
 
 def _plabel(p) -> str:
     short = {"bfloat16": "bf16", "float16": "fp16", "float32": "fp32"}
-    return f"{short.get(p['dtype'], p['dtype'])}・{p['image_max_side']}px・{p['dims']}次元"
+    tokens = p.get("image_max_tokens") or DEFAULT_TOKENS
+    extra = "" if tokens == DEFAULT_TOKENS else f"・上限 {tokens} トークン"
+    return f"{short.get(p['dtype'], p['dtype'])}・{p['image_max_side']}px・{p['dims']}次元{extra}"
 
 
 def machine_charts(summary: dict, name: str) -> dict[str, tuple[str, str]]:
@@ -354,6 +370,11 @@ def machine_charts(summary: dict, name: str) -> dict[str, tuple[str, str]]:
             f"GPU メモリ(最大)と同時数({kmax} 本)",
             line_chart(f"{name}: GPU メモリの最大({kmax} 本の取り込み)", "同時数 INGEST_WORKERS", "GPU メモリ(MB)", ws,
                        {f"窓 {win} 秒": [_cell(cells, "concurrency", DEFAULT, kmax, w, win, "gpu_mem_max_mb")
+                                         for w in ws] for win in wins}))  # fmt: skip
+        charts["c8_host_mem.svg"] = (
+            f"サーバーのメモリ(最大)と同時数({kmax} 本)",
+            line_chart(f"{name}: サーバーのメモリの最大({kmax} 本の取り込み)", "同時数 INGEST_WORKERS", "メモリ(MB)", ws,
+                       {f"窓 {win} 秒": [_cell(cells, "concurrency", DEFAULT, kmax, w, win, "mem_max_mb")
                                          for w in ws] for win in wins}))  # fmt: skip
     prec = summary["precision"]
     if any(p.get("sec_per_window_w1") is not None for p in prec):
@@ -416,10 +437,10 @@ def compare_charts(named: list[tuple[str, dict]]) -> dict[str, tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------- 書き出し
-CELL_COLS = ["experiment", "dtype", "image_max_side", "dims", "k", "w", "win", "n", "failed", "completion_sec",
+CELL_COLS = ["experiment", "dtype", "image_max_side", "dims", "image_max_tokens", "k", "w", "win", "n", "failed", "completion_sec",
              "completion_min", "completion_max", "vs_w1_pct", "vs_k1_pct", "windows", "sec_per_window",
-             "realtime_factor", "infer_util", "gpu_util", "gpu_mem_max_mb", "cpu_util", "error"]  # fmt: skip
-PREC_COLS = ["dtype", "image_max_side", "dims", "completion_w1", "sec_per_window_w1", "completion_w4",
+             "realtime_factor", "infer_util", "gpu_util", "gpu_mem_max_mb", "cpu_util", "mem_max_mb", "mem_total_max_mb", "error"]  # fmt: skip
+PREC_COLS = ["dtype", "image_max_side", "dims", "image_max_tokens", "completion_w1", "sec_per_window_w1", "completion_w4",
              "sec_per_window_w4", "qps", "search_p50_ms", "search_p95_ms", "cos_mean", "cos_min", "top1_acc", "margin",
              "nan", "quality_error"]  # fmt: skip
 

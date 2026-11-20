@@ -126,6 +126,14 @@ def test_matrix_plan_covers_every_cell():
     assert len(prec) == 27 * 2 and prec[0]["precision"] == matrix.BASELINE_PRECISION
     assert sum(cont["quality"] for cont in prec) == 27 and sum(cont["search"] for cont in prec) == 27
 
+    # 実験 3(画像の上限トークン): 既定の精度で 140・70 を足す。記録の無い古い行は既定の 280 として照合する
+    tok = matrix.plan(False, {"tokens"}, 3)
+    assert [c["precision"] for c in tok][0] == matrix.BASELINE_PRECISION
+    assert {c["precision"][3] for c in tok} == {280, 140, 70} and len(tok) == 3 * 2
+    old = {"experiment": "precision", "dtype": "bfloat16", "image_max_side": 448, "dims": 768, "k": 8, "w": 1,
+           "win": 2, "rep": 1}  # fmt: skip
+    assert matrix.cond_key(old) == matrix.cond_key({**old, "image_max_tokens": 280})
+
 
 def test_matrix_report_summarizes_and_draws(tmp_path):
     """results.jsonl から中央値・1 本ずつとの差・基準との cos を計算し、グラフと report.html を書き出す。"""

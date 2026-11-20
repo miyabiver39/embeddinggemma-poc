@@ -1,7 +1,7 @@
 """共通ベンチマーク(同時取り込み × 分割 × 窓 × 精度)を、決まった手順で実行します。
 
 決まり(条件・手順・記録の形式)は bench/MATRIX.md にあります。この文書と、このスクリプトで、機種をまたいで同じ計測をします。
-条件ごとにコンテナを起動し直し(DTYPE / IMAGE_MAX_SIDE / DIMS / INGEST_WORKERS)、取り込み・検索・品質を測って、
+条件ごとにコンテナを起動し直し(DTYPE / IMAGE_MAX_SIDE / DIMS / IMAGE_MAX_TOKENS / INGEST_WORKERS)、取り込み・検索・品質を測って、
 results.jsonl に 1 回ずつ追記します。途中で止まっても --resume で続きから再開できます。
 Python の標準ライブラリと docker の CLI だけで動きます。
 
@@ -36,8 +36,12 @@ from sampler import ApiError, Client, Sampler  # noqa: E402
 from bench import DEFAULT_QUERIES  # noqa: E402
 
 TOTAL_SEC = 480  # 素材の合計の長さ(make_samples.py --split-set)
-DEFAULT_PRECISION = ("bfloat16", 448, 768)
-BASELINE_PRECISION = ("float32", 448, 768)  # 品質の基準
+DEFAULT_TOKENS = 280  # 画像 1 枚あたりの上限トークン(モデルの既定。16:9 の映像は 264 トークンになる)
+DEFAULT_PRECISION = ("bfloat16", 448, 768, DEFAULT_TOKENS)
+BASELINE_PRECISION = ("float32", 448, 768, DEFAULT_TOKENS)  # 品質の基準
+# 実験 3: 画像の上限トークン。モデルが受け付ける値は 70 / 140 / 280 / 560 / 1120 で、下げる側の 2 つを測る。
+# IMAGE_MAX_SIDE は推論の前の縮小だけで、プロセッサが上限トークンに合わせて大きさをそろえ直すため、推論の量は変わらない
+TOKEN_LIMITS = (140, 70)
 MODEL_REVISION = "914f7f89142e33e77833254d9c9b90c3cef7303b"  # イメージ(docker/Dockerfile)と同じモデルの版
 
 
@@ -53,14 +57,19 @@ def plan(quick: bool, experiments: set[str], reps: int) -> list[dict]:
         precisions = [DEFAULT_PRECISION]
     else:
         ks, ws, wins = (1, 2, 4, 8), (1, 2, 4, 8), (1, 2, 4, 6)
-        precisions = [(d, s, m) for d in ("bfloat16", "float16", "float32") for s in (448, 336, 224)
+        precisions = [(d, s, m, DEFAULT_TOKENS) for d in ("bfloat16", "float16", "float32") for s in (448, 336, 224)
                       for m in (768, 256, 128)]  # fmt: skip
     if "concurrency" in experiments:
         for w in ws:
             cells = [{"experiment": "concurrency", "k": k, "w": w, "win": win} for win in wins for k in ks if k >= w]
             containers.append({"precision": DEFAULT_PRECISION, "w": w, "cells": cells, "reps": reps,
                                "search": False, "quality": False})  # fmt: skip
-    if "precision" in experiments:
+    if "tokens" in experiments and not quick:
+        # 実験 2 と同じ測り方で、上限トークンだけを下げる(精度は既定の bfloat16・448・768)
+        precisions += [(*DEFAULT_PRECISION[:3], t) for t in TOKEN_LIMITS]
+    if "precision" in experiments or "tokens" in experiments:
+        if "precision" not in experiments:  # 実験 3 だけのときも、品質の基準は測る
+            precisions = [BASELINE_PRECISION, *(p for p in precisions if p[3] != DEFAULT_TOKENS)]
         # 基準(float32・448・768)を先に測り、品質の比較に使う
         order = sorted(precisions, key=lambda p: p != BASELINE_PRECISION)
         pk = max(ks)
@@ -73,8 +82,10 @@ def plan(quick: bool, experiments: set[str], reps: int) -> list[dict]:
 
 
 def cond_key(rec: dict) -> tuple:
-    return (rec["experiment"], rec["dtype"], rec["image_max_side"], rec["dims"], rec.get("k"), rec.get("w"),
-            rec.get("win"), rec.get("rep"))  # fmt: skip
+    # 上限トークンの記録が無い行は、実験 3 を足す前の記録(既定の 280 で測った)
+    return (rec["experiment"], rec["dtype"], rec["image_max_side"], rec["dims"],
+            rec.get("image_max_tokens") or DEFAULT_TOKENS, rec.get("k"), rec.get("w"), rec.get("win"),
+            rec.get("rep"))  # fmt: skip
 
 
 # ---------------------------------------------------------------------- サーバーの起動
@@ -154,6 +165,24 @@ class Server:
             return f"サーバーが終了しました(OOMKilled・終了コード: {oom})"
         return f"サーバーが終了しました(終了コード: {self.proc.returncode if self.proc else '?'})"
 
+    def check_after_failure(self, client: Client, wait: float = 60.0) -> str | None:
+        """計測が失敗したときに、サーバーが止まったかを確かめます。止まっていれば理由を返します。
+
+        メモリ不足で強制終了された直後は、Docker がコンテナの終了に気付くまで時間がかかることがあります
+        (スワップが埋まっていると数十秒)。その間に次の計測へ進むと、失敗が続けて記録されるため、
+        /healthz が応答するか、終了が確定するまで待ちます。どちらでもなければ、止まったものとして扱います。
+        """
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < wait:
+            if why := self.died():
+                return why
+            try:
+                client.get("/healthz")
+                return None
+            except (ApiError, OSError):
+                time.sleep(2)
+        return self.died() or f"サーバーが {wait:.0f} 秒応答しません"
+
     def _running(self) -> bool:
         if self.args.launcher == "docker":
             state = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", self.name],
@@ -162,10 +191,12 @@ class Server:
         return self.proc is not None and self.proc.poll() is None
 
     def start(self, prec: tuple, w: int) -> Client:
-        dtype, side, dims = prec
+        dtype, side, dims, tokens = prec
         self.stop()
         data, cache = self._dirs(dims)
         env = {"DTYPE": dtype, "IMAGE_MAX_SIDE": side, "DIMS": dims, "INGEST_WORKERS": w, "LOG_LEVEL": "WARNING"}
+        if tokens != DEFAULT_TOKENS:  # 既定のときは渡さない(実験 1・2 と同じ起動にする)
+            env["IMAGE_MAX_TOKENS"] = tokens
         if self.args.launcher == "docker":
             self._launch_docker(env, data, cache)
         else:
@@ -243,6 +274,9 @@ def ingest_once(c: Client, paths: list[str], win: int, video_sec: float = TOTAL_
         "gpu_mem_max_mb": metric("gpu_mem_mb", "max"),
         "cpu_util": metric("cpu_pct"),
         "mem_max_mb": metric("mem_anon_mb", "max") or metric("rss_mb", "max"),  # コンテナ全体(取れなければ本体)
+        # ページキャッシュとページロックのメモリ(GPU へ渡す前の固定のメモリ。shmem)も含む使用量。
+        # mem_max_mb には固定のメモリが入らないため、マシン全体のメモリが足りるかはこちらで見る
+        "mem_total_max_mb": metric("mem_mb", "max"),
         "cpu_by_thread": summary.get("cpu_by_thread"),
         "jobs": [{k: j.get(k) for k in ("id", "status", "created_at", "started_at", "finished_at", "timings")}
                  for j in jobs],  # fmt: skip
@@ -388,7 +422,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--media", required=True, help="make_samples.py --split-set で作ったフォルダ")
     ap.add_argument("--out", required=True, help="結果の保存先(results.jsonl などを置く)")
     ap.add_argument("--data-root", help="コンテナの /data と compile のキャッシュを置く場所(既定 <out>/server)")
-    ap.add_argument("--experiments", default="concurrency,precision", help="concurrency / precision(カンマ区切り)")
+    ap.add_argument("--experiments", default="concurrency,precision,tokens",
+                    help="concurrency / precision / tokens(カンマ区切り)")
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--search-sec", type=float, default=15)
     ap.add_argument("--quick", action="store_true", help="動作の確認用(k=1,2・w=1,2・窓 2 秒・1 回)")
@@ -450,15 +485,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         for n, cont in enumerate(containers, 1):
-            dtype, side, dims = cont["precision"]
-            base = {"dtype": dtype, "image_max_side": side, "dims": dims}
+            dtype, side, dims, tokens = cont["precision"]
+            base = {"dtype": dtype, "image_max_side": side, "dims": dims, "image_max_tokens": tokens}
             todo = [(cell, rep) for rep in range(1, cont["reps"] + 1) for cell in cont["cells"]
                     if cond_key({**base, **cell, "rep": rep}) not in done]  # fmt: skip
             need_search = cont["search"] and cond_key({**base, "experiment": "search", "w": cont["w"]}) not in done
             need_quality = cont["quality"] and cond_key({**base, "experiment": "quality"}) not in done
             if not todo and not need_search and not need_quality:
                 continue
-            print(f"[{n}/{len(containers)}] {dtype}・{side}・{dims}次元・INGEST_WORKERS={cont['w']}"
+            print(f"[{n}/{len(containers)}] {dtype}・{side}・{dims}次元・上限 {tokens} トークン・INGEST_WORKERS={cont['w']}"
                   f"(計測 {len(todo)} 回)")  # fmt: skip
             try:
                 c = server.start(cont["precision"], cont["w"])
@@ -473,10 +508,11 @@ def main(argv: list[str] | None = None) -> int:
                 except ApiError as exc:
                     rec, vecs = {"ok": False, "error": str(exc)}, None
                 if vecs:
-                    (qdir / f"{dtype}-{side}-{dims}.json").write_text(json.dumps(vecs), encoding="utf-8")
+                    (qdir / (f"{dtype}-{side}-{dims}" + ("" if tokens == DEFAULT_TOKENS else f"-t{tokens}") + ".json")).write_text(json.dumps(vecs), encoding="utf-8")
                 write({**base, "experiment": "quality", **rec})
                 print(f"  品質: 1 位の正解率 {rec.get('top1_acc')}、NaN {rec.get('nan')}")
             leftover: list[int] = []
+            dead: str | None = None
             for win in sorted({cell["win"] for cell, _ in todo}):
                 # ウォームアップ(窓の枚数ごとに compile などの準備が入るため。記録するが集計には使わない)
                 try:
@@ -486,6 +522,9 @@ def main(argv: list[str] | None = None) -> int:
                            "rep": 0, **r})  # fmt: skip
                 except ApiError as exc:
                     print(f"  ウォームアップに失敗しました: {exc}")
+                    if dead := server.check_after_failure(c):
+                        print(f"  {dead}。この条件の残りを飛ばします:\n" + server.logs(10))
+                        break
                 for cell, rep in [(cl, rp) for cl, rp in todo if cl["win"] == win]:
                     delete_sources(c, leftover)
                     try:
@@ -493,19 +532,21 @@ def main(argv: list[str] | None = None) -> int:
                     except ApiError as exc:
                         r = {"ok": False, "error": str(exc), "_source_ids": []}
                     leftover = r.get("_source_ids") or []
-                    if not r["ok"] and (why := server.died()):
-                        r["error"] = f"{why}: {r.get('error')}"
+                    dead = None if r["ok"] else server.check_after_failure(c)
+                    if dead:
+                        r["error"] = f"{dead}: {r.get('error')}"
                     write({**base, **cell, "rep": rep, **r})
                     print(f"  k={cell['k']} w={cell['w']} 窓 {win} 秒 #{rep}: "
                           f"{r.get('completion_sec')} 秒(窓 {r.get('windows')}、推論の稼働率 {r.get('infer_util')}%、"
                           f"メモリ最大 {r.get('mem_max_mb')} MB)"
                           + ("" if r["ok"] else f" 失敗: {r.get('error')}"))  # fmt: skip
-                    if server.died():  # 残りの計測は、次の起動の後に --resume でやり直す
-                        print("  サーバーが終了したため、この条件の残りを飛ばします:\n" + server.logs(10))
+                    if dead:  # 残りの計測は、次の起動の後に --resume でやり直す
+                        print("  サーバーが止まったため、この条件の残りを飛ばします:\n" + server.logs(10))
                         break
-                if server.died():
+                if dead:
                     break
-            if server.died():
+            if dead:
+                server.stop()
                 continue
             if need_search:
                 if not leftover:  # 検索の対象が無ければ、8 本を取り込んでから測る
