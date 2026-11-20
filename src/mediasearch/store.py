@@ -500,6 +500,22 @@ class Store:
             self.last_window_id = max(self.last_window_id, window_id)
             return window_id
 
+    def extend_window(self, window_id: int, end_ms: int) -> None:
+        """窓の終わりを延ばします(変化の無い区間を省略したとき、前の窓が後ろの区間も表すようにする)。"""
+        with self._lock:
+            self._db.execute("UPDATE windows SET end_ms=? WHERE id=? AND end_ms < ?", (end_ms, window_id, end_ms))
+            self._db.commit()
+            if self._cache is None:
+                return
+            for i, row in enumerate(self._pending):  # 検索用のメタデータに未反映の窓
+                if row[0] == window_id:
+                    self._pending[i] = (*row[:3], max(row[3], end_ms), *row[4:])
+                    return
+            ids = self._cache["ids"]
+            i = int(np.searchsorted(ids, window_id))
+            if i < len(ids) and ids[i] == window_id:
+                self._cache["end_ms"][i] = max(int(self._cache["end_ms"][i]), end_ms)
+
     def _window_ids(self, source_id: int) -> list[int]:
         rows = self._db.execute("SELECT id FROM windows WHERE source_id=?", (source_id,)).fetchall()
         return [r["id"] for r in rows]

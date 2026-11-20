@@ -145,6 +145,10 @@ class Settings:
     # --- 切り出し(GET /api/sources/{id}/clip) ---
     clip_max_sec: int = 600  # 1 回に切り出せる長さの上限(秒)。0 なら切り出しを無効にする
 
+    # --- 変化の無い区間の省略(pipeline.is_static_window) ---
+    skip_static: bool = False  # 真なら、前の窓と映像が変わらない窓を推論せず、前の窓を延ばす(映像のみの窓だけ)
+    static_threshold: float = 4.0  # 区画ごとの輝度の差(0〜255 の平均)がこれ未満なら「変化なし」とみなす
+
     @classmethod
     def from_env(cls) -> Settings:
         role = _env("ROLE", "all")
@@ -239,4 +243,6 @@ class Settings:
             allowed_origins=tuple(o.strip().rstrip("/") for o in _env("ALLOWED_ORIGINS", "").split(",") if o.strip()),
             allowed_hosts=tuple(h.strip().lower() for h in _env("ALLOWED_HOSTS", "*").split(",") if h.strip()),
             clip_max_sec=max(_env_int("CLIP_MAX_SEC", 600), 0),
+            skip_static=_env_bool("SKIP_STATIC", False),
+            static_threshold=_env_float("STATIC_THRESHOLD", 4.0),
         )

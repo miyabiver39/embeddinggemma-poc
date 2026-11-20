@@ -196,6 +196,8 @@ You can also send your own pre-processed frames to `/api/ingest/frames`.
 | `FRAMES_PER_WINDOW` | `2` | Frames per window |
 | `OVERLAP_SEC` | `0` | Overlap between windows (seconds) |
 | `INCLUDE_AUDIO` | `false` | Include the video's audio in the same vector |
+| `SKIP_STATIC` | `false` | Do not embed windows whose video has not changed from the previous window; extend the previous window instead (video-only windows). Reduces the number of windows and the ingestion time for cameras with little motion ([docs/design.md](docs/design.md)) |
+| `STATIC_THRESHOLD` | `4.0` | For `SKIP_STATIC`, the largest per-block brightness difference (0-255) still treated as "no change". Smaller values skip less |
 | `AUDIO_CHUNK_SEC` | `10` | Chunk length for audio files (seconds) |
 | `IMAGE_MAX_SIDE` | `448` | Long side images are resized to (px) |
 | `FFMPEG_HWACCEL` | `auto` | GPU used to decode video (`auto` / `cuda` / `vaapi` / `qsv` / `none`). Falls back to the CPU if unavailable (`docs/gpu.md`) |

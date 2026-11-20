@@ -194,6 +194,8 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `FRAMES_PER_WINDOW` | `2` | 窓あたりのフレーム数 |
 | `OVERLAP_SEC` | `0` | 窓の重なり(秒) |
 | `INCLUDE_AUDIO` | `false` | 動画の音声も同じベクトルに含める |
+| `SKIP_STATIC` | `false` | 前の窓と映像が変わらない窓を推論せず、前の窓を延ばす(映像のみの窓だけ。動きの少ない監視カメラで、窓の数と取り込みの時間が減る。[docs/design.md](docs/design.md)) |
+| `STATIC_THRESHOLD` | `4.0` | `SKIP_STATIC` で「変化なし」とみなす、区画ごとの明るさの差の上限(0〜255。小さいほど省略しにくい) |
 | `AUDIO_CHUNK_SEC` | `10` | 音声ファイルの分割長(秒) |
 | `IMAGE_MAX_SIDE` | `448` | 画像を縮小する長辺(px) |
 | `FFMPEG_HWACCEL` | `auto` | 動画の復号に使う GPU(`auto` / `cuda` / `vaapi` / `qsv` / `none`)。使えない場合は CPU に切り替える(`docs/gpu.md`) |

@@ -55,6 +55,10 @@ class IngestParams:
     chunk_sec: int = 10  # 音声だけを取り込むときの区切り(秒)
     # 偽なら、元のファイル(アップロードしたもの)とサムネイルを残さない。検索結果は時刻などの情報だけになる
     store_media: bool = True
+    # 真なら、前に推論した窓と映像が変わらない窓を推論せず、前の窓の終わりを延ばす(映像のみの窓だけ。is_static_window)。
+    # 以前の版の取り込み元には無い項目のため、既定は偽(取り込み直しても、以前と同じ窓になる)
+    skip_static: bool = False
+    static_threshold: float = 4.0
 
     @classmethod
     def from_settings(cls, s: Settings, preset: str | None = None, **overrides) -> IngestParams:
@@ -65,6 +69,8 @@ class IngestParams:
             "include_audio": s.include_audio,
             "chunk_sec": s.audio_chunk_sec,
             "store_media": s.store_media,
+            "skip_static": s.skip_static,
+            "static_threshold": s.static_threshold,
         }
         if preset:
             if preset not in PRESETS:
@@ -84,6 +90,8 @@ class IngestParams:
             raise ValueError("overlap_sec は 0 以上 window_sec 未満にしてください")
         if not 1 <= self.chunk_sec <= 300:
             raise ValueError("chunk_sec は 1〜300 にしてください")
+        if not 0.5 <= self.static_threshold <= 64:
+            raise ValueError("static_threshold は 0.5〜64 にしてください")
         tokens = self.frames_per_window * (IMAGE_TOKENS + 2 * LABEL_TOKENS)
         if self.include_audio:
             tokens += self.window_sec * AUDIO_TOKENS_PER_SEC
@@ -212,6 +220,50 @@ def build_window_parts(
             parts += [TextPart(label), AudioPart(audio)]
         parts += [TextPart(label), ImagePart(frame)]
     return parts
+
+
+# 変化の無い区間の省略で使う、縮小した画像の大きさ(横 64 × 縦 36)と、判定の区画(横 16 × 縦 9。1 区画 4×4)
+SIGNATURE_W, SIGNATURE_H = 64, 36
+BLOCKS_W, BLOCKS_H = 16, 9
+# 1 つの窓を延ばせる長さの上限(ms)。検索結果の区間が長くなりすぎないようにし、ゆっくりした変化(日の傾きなど)も
+# この間隔で推論し直す
+MAX_STATIC_SPAN_MS = 300_000
+
+
+def frame_signature(image: np.ndarray) -> np.ndarray:
+    """フレームを、変化の判定に使う 36×64 の輝度(float32)に縮めます(面積の平均。追加の依存は使わない)。"""
+    gray = image.astype(np.float32).mean(axis=2) if image.ndim == 3 else image.astype(np.float32)
+    h, w = gray.shape
+    bh, bw = max(h // SIGNATURE_H, 1), max(w // SIGNATURE_W, 1)
+    gray = gray[: bh * SIGNATURE_H, : bw * SIGNATURE_W]
+    if gray.shape != (bh * SIGNATURE_H, bw * SIGNATURE_W):  # 36×64 より小さい画像(テスト用など)
+        from PIL import Image
+
+        return np.asarray(
+            Image.fromarray(image).convert("L").resize((SIGNATURE_W, SIGNATURE_H), Image.BILINEAR), dtype=np.float32
+        )
+    return gray.reshape(SIGNATURE_H, bh, SIGNATURE_W, bw).mean(axis=(1, 3))
+
+
+def block_change(a: np.ndarray, b: np.ndarray) -> float:
+    """2 つの縮小画像の差を、16×9 の区画ごとの平均の差の最大値で返します(0〜255)。
+
+    画面全体の平均ではなく区画ごとの最大を使うのは、遠くを歩く人のような小さな動きを、全体の平均で
+    薄めずに捉えるためです(1 区画は元の画面の 1/144。448×252 の画像で約 28×28 ピクセル)。
+    """
+    diff = np.abs(a - b).reshape(BLOCKS_H, SIGNATURE_H // BLOCKS_H, BLOCKS_W, SIGNATURE_W // BLOCKS_W)
+    return float(diff.mean(axis=(1, 3)).max())
+
+
+def is_static_window(signatures: list[np.ndarray], reference: list[np.ndarray] | None, threshold: float) -> bool:
+    """窓の全てのフレームが、前に推論した窓の対応するフレームと、どの区画でも threshold 未満の差しかないか。
+
+    前の窓(reference)とだけ比べ、省略した窓どうしでは比べません。少しずつ変わる場面(日の傾き・ゆっくり
+    動く物)で、差が積み重なっても気づけるようにするためです。フレームの数が違う窓(動画の末尾)は省略しません。
+    """
+    if not reference or len(signatures) != len(reference):
+        return False
+    return all(block_change(a, b) < threshold for a, b in zip(signatures, reference, strict=True))
 
 
 def save_thumbnail(image: np.ndarray, dest: Path) -> None:
@@ -572,6 +624,8 @@ class Ingestor:
         # 先に次の回を推論に出してから前の回を保存するため、推論中の回は最大 2 つ
         embed_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ingest-embed")
         inflight: tuple[list[dict], Future] | None = None
+        # 変化の無い区間の省略は、映像のみの窓だけで行う(音声つきの窓は、映像が止まっていても音が変わり得るため)
+        skip_static = params.skip_static and not use_audio
         with tempfile.TemporaryDirectory(prefix="mediasearch-") as tmp:
             audio = media.AudioTrack(path, tmp) if use_audio else None
             work_q: queue.Queue = queue.Queue(maxsize=prefetch)
@@ -585,6 +639,8 @@ class Ingestor:
                 last_index = -1
                 ready: list[dict] = []  # フレームが揃い、推論を待っている窓(batch 件たまったらまとめて推論する)
                 batch_audio_sec = 0.0
+                ref_win: dict | None = None  # 変化の判定の基準(最後に推論に回した窓)と、その縮小画像
+                ref_sigs: list[np.ndarray] | None = None
                 try:
                     while pending < len(plans) and not stop.is_set():
                         item = next(it, None)
@@ -595,14 +651,34 @@ class Ingestor:
                         while pending < len(plans) and (item is None or max(need[pending]) <= last_index):
                             if stop.is_set():
                                 return
-                            win, audio_sec = self._prepare_window(plans[pending], need[pending], frames, audio)
-                            ready.append(win)
+                            plan = plans[pending]
+                            win, audio_sec = self._prepare_window(plan, need[pending], frames, audio)
                             batch_audio_sec += audio_sec
+                            skipped = False
+                            if skip_static:
+                                sigs = [frame_signature(p.image) for p in win["parts"] if isinstance(p, ImagePart)]
+                                if (
+                                    ref_win is not None
+                                    and plan.end_ms - ref_win["plan"].start_ms <= MAX_STATIC_SPAN_MS
+                                    and is_static_window(sigs, ref_sigs, params.static_threshold)
+                                ):
+                                    # 推論せず、基準の窓の終わりを延ばす。基準の窓がまだ手元にあれば直接、
+                                    # 既に推論に回していれば、取り込みのスレッドに延長を頼む(保存の前後どちらでも反映)
+                                    skipped = True
+                                    if any(w is ref_win for w in ready):
+                                        ref_win["end_ms"] = plan.end_ms
+                                        ref_win["skipped"] = ref_win.get("skipped", 0) + 1
+                                    elif not _put_bounded(work_q, ("extend", ref_win, plan.end_ms), stop):
+                                        return
+                                else:
+                                    ref_win, ref_sigs = win, sigs
+                            if not skipped:
+                                ready.append(win)
                             pending += 1
                             keep = min(need[pending]) if pending < len(plans) else last_index + 1
                             for k in [k for k in frames if k < keep]:
                                 del frames[k]
-                            if len(ready) >= batch or pending == len(plans):
+                            if ready and (len(ready) >= batch or pending == len(plans)):
                                 t_prep = time.perf_counter()
                                 prepared = self._embedder.prepare_parts_batch([w["parts"] for w in ready])
                                 prep_sec = time.perf_counter() - t_prep
@@ -630,6 +706,7 @@ class Ingestor:
             producer = threading.Thread(target=produce, name="decode", daemon=True)
             producer.start()
             stored = 0
+            skipped_static = 0
             try:
                 while True:
                     self._check_stop()
@@ -640,6 +717,16 @@ class Ingestor:
                         break
                     if isinstance(packet, BaseException):
                         raise packet
+                    if packet[0] == "extend":  # 変化の無い窓を省略し、基準の窓を延ばす
+                        _, ref, end_ms = packet
+                        if "window_id" in ref:  # 保存済み
+                            self._store.extend_window(ref["window_id"], end_ms)
+                        else:  # 推論中・保存前(保存のときに反映する)
+                            ref["end_ms"] = end_ms
+                        skipped_static += 1
+                        stored += 1
+                        self._store.update_job(job_id, progress=stored)
+                        continue
                     ready, prepared, audio_sec, prep_sec = packet
                     if audio_sec > 0:
                         timer.add("audio", audio_sec)
@@ -652,6 +739,7 @@ class Ingestor:
                         prev_ready, prev_fut = inflight
                         inflight = submitted
                         stored += self._save_windows(source, prev_ready, prev_fut.result(), timer)
+                        skipped_static += sum(w.get("skipped", 0) for w in prev_ready)
                         self._store.update_job(job_id, progress=stored)
                     else:
                         inflight = submitted
@@ -659,6 +747,7 @@ class Ingestor:
                     prev_ready, prev_fut = inflight
                     inflight = None
                     stored += self._save_windows(source, prev_ready, prev_fut.result(), timer)
+                    skipped_static += sum(w.get("skipped", 0) for w in prev_ready)
                     self._store.update_job(job_id, progress=stored)
             finally:
                 stop.set()
@@ -677,6 +766,8 @@ class Ingestor:
             decoder=reader.decoder, skip_frames=reader.skip_used, decode_step_ms=step, decoded_frames=reader.frames,
             embed_batch=batch, prefetch=prefetch, select_stride=select_stride,
         )  # fmt: skip
+        if skip_static:
+            timer.extra["skipped_static"] = skipped_static
         return timer.result(len(plans), info.duration_ms)
 
     def _prepare_window(
@@ -715,25 +806,31 @@ class Ingestor:
             return self._embedder.embed_parts_many([w["parts"] for w in ready], high=False)
 
     def _save_windows(self, source: dict, ready: list[dict], vecs: list[np.ndarray], timer: StageTimer) -> int:
-        """推論した窓を保存し、保存した件数を返します(DB への書き込みは、取り込みのスレッドだけで行う)。"""
+        """推論した窓を保存し、処理した窓の数を返します(DB への書き込みは、取り込みのスレッドだけで行う)。
+
+        変化が無いため省略した窓(推論に回す前に、この窓へまとめたもの)も、処理した数に含めます。
+        """
+        skipped = 0
         for w, vec in zip(ready, vecs, strict=True):
             plan = w["plan"]
             kind = "tav" if any(isinstance(p, AudioPart) for p in w["parts"]) else "frames"
+            skipped += w.get("skipped", 0)
             with timer.stage("store"):
                 window_id = self._store.add_window(
                     source_id=source["id"],
                     start_ms=plan.start_ms,
-                    end_ms=plan.end_ms,
+                    end_ms=w.get("end_ms", plan.end_ms),
                     kind=kind,
                     group_id=source["group_id"],
                     abs_ts=source["start_ts"] + plan.start_ms / 1000,
                     vec=vec,
                 )
+            w["window_id"] = window_id  # 後から延長の依頼が来たときに使う
             if source["params"].get("store_media", True):
                 with timer.stage("thumb"):
                     # 復号済みのフレームから作る(表示のたびに ffmpeg を起動しなくて済む)
                     save_thumbnail(w["thumb"], self._thumb_path(window_id))
-        return len(ready)
+        return len(ready) + skipped
 
     def _index_audio(self, job_id: int, source: dict) -> dict:
         timer = StageTimer()
