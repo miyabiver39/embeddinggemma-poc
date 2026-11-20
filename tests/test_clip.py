@@ -41,7 +41,8 @@ def test_clip_video_copy_and_accurate(client, settings, tmp_path):
     assert "attachment" in r.headers["content-disposition"] and ".mp4" in r.headers["content-disposition"]
     out = tmp_path / "copy.mp4"
     out.write_bytes(r.content)
-    assert 1.5 <= _duration(out) <= 4.5  # 再エンコードしない切り出しは、直前のキーフレームから始まる
+    # 合成の動画はキーフレームが先頭だけ。編集リストが無いと 4 秒になる(音声の端数で少し長くなることはある)
+    assert 1.5 <= _duration(out) < 3.0
 
     r = client.get(f"/api/sources/{sid}/clip", params={"start_ms": 2000, "end_ms": 4000, "accurate": True})
     assert r.status_code == 200, r.text

@@ -1024,7 +1024,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             False,
             description=(
                 "true: 指定の位置ちょうどで切る(H.264 でエンコードし直すため時間がかかる)。"
-                "false: エンコードし直さずに切る(速い。開始は直前のキーフレームまでさかのぼる)"
+                "false: エンコードし直さずに切る(速い。MP4 の編集リストで指定の位置から再生される)"
             ),
         ),
     ) -> FileResponse:

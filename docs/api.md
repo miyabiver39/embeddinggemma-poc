@@ -190,7 +190,7 @@ curl -OJ 'http://localhost:8000/api/sources/12/clip?start_ms=4000&end_ms=8000'
 curl -OJ 'http://localhost:8000/api/sources/12/clip?start_ms=4000&end_ms=8000&accurate=true'
 ```
 
-- 既定(`accurate=false`)はエンコードし直さずに切るため速く、画質も変わりません。開始は直前のキーフレームまでさかのぼります。
+- 既定(`accurate=false`)はエンコードし直さずに切るため速く、画質も変わりません。MP4 の編集リストで、指定の位置から再生されます(編集リストに対応しない再生ソフトでは、直前のキーフレームから始まります)。
 - 長さは `CLIP_MAX_SEC`(既定 600 秒)まで。同時に処理するのは 2 件までで、超えると 503 です。
 - 静止画と、保存しない設定(`store_media=false`)で取り込んだものは切り出せません(VMS と連携する場合は、VMS の書き出しを使います)。
 
