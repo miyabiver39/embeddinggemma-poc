@@ -144,6 +144,16 @@ class Server:
             log.flush()
             self.proc = subprocess.Popen(cmd, env=full, stdout=log, stderr=subprocess.STDOUT)
 
+    def died(self) -> str | None:
+        """サーバーが終了していれば、その理由(メモリ不足で止められたか)を返します。"""
+        if self._running():
+            return None
+        if self.args.launcher == "docker":
+            oom = subprocess.run(["docker", "inspect", "-f", "{{.State.OOMKilled}} {{.State.ExitCode}}", self.name],
+                                 capture_output=True, text=True).stdout.strip()  # fmt: skip
+            return f"サーバーが終了しました(OOMKilled・終了コード: {oom})"
+        return f"サーバーが終了しました(終了コード: {self.proc.returncode if self.proc else '?'})"
+
     def _running(self) -> bool:
         if self.args.launcher == "docker":
             state = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", self.name],
@@ -232,6 +242,7 @@ def ingest_once(c: Client, paths: list[str], win: int, video_sec: float = TOTAL_
         "gpu_util": metric("gpu_util_pct"),
         "gpu_mem_max_mb": metric("gpu_mem_mb", "max"),
         "cpu_util": metric("cpu_pct"),
+        "mem_max_mb": metric("mem_anon_mb", "max") or metric("rss_mb", "max"),  # コンテナ全体(取れなければ本体)
         "cpu_by_thread": summary.get("cpu_by_thread"),
         "jobs": [{k: j.get(k) for k in ("id", "status", "created_at", "started_at", "finished_at", "timings")}
                  for j in jobs],  # fmt: skip
@@ -482,10 +493,20 @@ def main(argv: list[str] | None = None) -> int:
                     except ApiError as exc:
                         r = {"ok": False, "error": str(exc), "_source_ids": []}
                     leftover = r.get("_source_ids") or []
+                    if not r["ok"] and (why := server.died()):
+                        r["error"] = f"{why}: {r.get('error')}"
                     write({**base, **cell, "rep": rep, **r})
                     print(f"  k={cell['k']} w={cell['w']} 窓 {win} 秒 #{rep}: "
-                          f"{r.get('completion_sec')} 秒(窓 {r.get('windows')}、推論の稼働率 {r.get('infer_util')}%)"
+                          f"{r.get('completion_sec')} 秒(窓 {r.get('windows')}、推論の稼働率 {r.get('infer_util')}%、"
+                          f"メモリ最大 {r.get('mem_max_mb')} MB)"
                           + ("" if r["ok"] else f" 失敗: {r.get('error')}"))  # fmt: skip
+                    if server.died():  # 残りの計測は、次の起動の後に --resume でやり直す
+                        print("  サーバーが終了したため、この条件の残りを飛ばします:\n" + server.logs(10))
+                        break
+                if server.died():
+                    break
+            if server.died():
+                continue
             if need_search:
                 if not leftover:  # 検索の対象が無ければ、8 本を取り込んでから測る
                     r = ingest_once(c, files_for(media, 8, server.media_root), 2)

@@ -5,6 +5,7 @@ Python の標準ライブラリだけで動きます(サーバーと別のマシ
 
 from __future__ import annotations
 
+import http.client
 import json
 import mimetypes
 import threading
@@ -39,6 +40,8 @@ class Client:
             raise ApiError(f"{method} {path} が失敗しました({exc.code}): {detail}") from exc
         except urllib.error.URLError as exc:
             raise ApiError(f"{self.url} に接続できません: {exc.reason}") from exc
+        except (http.client.HTTPException, ConnectionError, TimeoutError) as exc:  # サーバーが途中で終了した場合など
+            raise ApiError(f"{self.url} との接続が切れました: {exc!r}") from exc
 
     def get(self, path: str) -> dict:
         return self.request("GET", path)

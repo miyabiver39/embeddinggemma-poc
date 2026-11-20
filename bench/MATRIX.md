@@ -116,6 +116,7 @@ python bench/make_samples.py ./bench-media --split-set
 5. **途中で止まったら、続きから再開する**(`--resume`)。最初からやり直す必要はありません。条件を変えて再開してはいけません。
 6. **数値は推測で書かない。** 取れなかった値(例: WSL2 の AMD では GPU の使用率が取れない)は空のままにし、理由を `notes` に書きます。
 7. 計測の途中で、計測に使うマシンの操作(ほかの重い処理)をしないでください。
+8. **メモリに注意する。** サーバーは、同時数と窓の枚数が大きいほどメモリを使います(RTX 3060 では、同時数 2・窓 6 秒で約 7GB。そのうち約 4GB は GPU への転送用の固定メモリ)。ほかのサービスが動くマシンでは、`--docker-args` に `--memory <上限> --memory-swap <上限>` を付け、メモリが足りないときにサーバーだけが止まるようにしてください。上限に達して止まった条件は、失敗として記録され、次の条件へ進みます。上限を付けたことは `notes` に書きます。
 
 ## 7. 記録するもの
 
@@ -130,7 +131,7 @@ python bench/make_samples.py ./bench-media --split-set
 | `windows` | 作られた窓の合計数 |
 | `sec_per_window` / `realtime_factor` | 完了時間 ÷ 窓の数 / 480 ÷ 完了時間 |
 | `jobs` | ジョブごとの `timings`(decode / embed / store などの内訳)と、`created_at`・`started_at`・`finished_at` |
-| `infer_util` / `gpu_util` / `gpu_mem_max_mb` / `cpu_util` | 計測中の資源の使用状況(`/api/metrics` から。取れないものは null) |
+| `infer_util` / `gpu_util` / `gpu_mem_max_mb` / `cpu_util` / `mem_max_mb` | 計測中の資源の使用状況(`/api/metrics` から。`mem_max_mb` はコンテナ全体のメモリの最大。取れないものは null) |
 | `qps` / `latency_ms`(検索) | 件数/秒、p50 / p95 / p99 |
 | `cos_mean` / `cos_min` / `nan` / `top1_acc` / `margin`(品質) | 基準との cos 類似度、NaN の有無、文章から画像を探した 1 位の正解率、正解と 2 位の点数の差 |
 | `ok` / `error` | 成功したか、失敗の内容 |
