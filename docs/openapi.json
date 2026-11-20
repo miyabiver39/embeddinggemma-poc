@@ -1136,6 +1136,107 @@
         ]
       }
     },
+    "/api/search/similar": {
+      "post": {
+        "tags": [
+          "検索"
+        ],
+        "summary": "検索結果の場面に似た場面を探す",
+        "description": "取り込み済みの窓(検索結果の `window_id`)に似た場面を探します。\n\n保存済みのベクトルをそのまま使うため、推論は行いません。元の窓は結果に含めません。\n`exclude_same_source=true` で、同じ録画の別の時刻を外し、別の録画・別のカメラだけを探せます。",
+        "operationId": "search_similar_api_search_similar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimilarSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "推論側(compute)に接続できない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
     "/api/search/image": {
       "post": {
         "tags": [
@@ -4729,6 +4830,18 @@
             ],
             "title": "After Window Id",
             "description": "この ID より後に追加された窓だけを探す"
+          },
+          "dedupe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe",
+            "description": "ほぼ同じ場面をまとめるしきい値(例 0.95)"
           }
         },
         "type": "object",
@@ -4854,6 +4967,18 @@
             ],
             "title": "After Window Id",
             "description": "この ID より後に追加された窓だけを探す"
+          },
+          "dedupe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe",
+            "description": "ほぼ同じ場面をまとめるしきい値(例 0.95)"
           }
         },
         "type": "object",
@@ -6077,6 +6202,62 @@
         ],
         "title": "KindStats"
       },
+      "QueryWindow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "source_id": {
+            "type": "integer",
+            "title": "Source Id"
+          },
+          "start_ms": {
+            "type": "integer",
+            "title": "Start Ms"
+          },
+          "end_ms": {
+            "type": "integer",
+            "title": "End Ms"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "frames",
+              "tav",
+              "audio",
+              "image"
+            ],
+            "title": "Kind"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "abs_time": {
+            "type": "string",
+            "title": "Abs Time"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "source_id",
+          "start_ms",
+          "end_ms",
+          "kind",
+          "abs_time"
+        ],
+        "title": "QueryWindow"
+      },
       "Reindexed": {
         "properties": {
           "source_id": {
@@ -6198,6 +6379,18 @@
             ],
             "title": "Thumb Url",
             "description": "サムネイル(JPEG)の URL。音声の窓と、保存しない設定(store_media=false)で取り込んだものは null"
+          },
+          "duplicates": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicates",
+            "description": "dedupe を指定したとき、この窓にまとめた、ほぼ同じ場面の窓の数(指定しないときは返さない)"
           }
         },
         "additionalProperties": true,
@@ -6336,6 +6529,17 @@
             "type": "integer",
             "title": "Last Window Id",
             "description": "検索の時点で最後に追加されていた窓の ID。次の検索の after_window_id に渡すと、その後に増えた窓だけを探せる"
+          },
+          "query_window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueryWindow"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "似た場面の検索で元にした窓(ほかの検索では返さない)"
           }
         },
         "type": "object",
@@ -6347,6 +6551,136 @@
           "last_window_id"
         ],
         "title": "SearchResponse"
+      },
+      "SimilarSearchRequest": {
+        "properties": {
+          "window_id": {
+            "type": "integer",
+            "title": "Window Id",
+            "description": "元にする窓の ID(検索結果の window_id)"
+          },
+          "exclude_same_source": {
+            "type": "boolean",
+            "title": "Exclude Same Source",
+            "description": "元の窓と同じ取り込み元(同じ録画)の窓を結果から外す(別の録画・別のカメラだけを探す)",
+            "default": false
+          },
+          "top_k": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top K",
+            "description": "返す件数(省略時は TOP_K)"
+          },
+          "min_score": {
+            "type": "number",
+            "title": "Min Score",
+            "description": "これより低いスコアは返さない",
+            "default": 0.0
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "グループ ID で絞り込む"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "場所で絞り込む"
+          },
+          "from_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Ts",
+            "description": "この日時以降(UNIX 秒か ISO 8601)"
+          },
+          "to_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Ts",
+            "description": "この日時以前(UNIX 秒か ISO 8601)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "all",
+              "frames",
+              "tav",
+              "audio",
+              "image"
+            ],
+            "title": "Kind",
+            "description": "探す窓の種類(auto は元の窓と同じベクトルの空間の種類。映像の窓と静止画は同じ空間)",
+            "default": "auto"
+          },
+          "merge": {
+            "type": "boolean",
+            "title": "Merge",
+            "description": "隣り合う窓を区間にまとめた intervals も返す",
+            "default": true
+          },
+          "dedupe": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe",
+            "description": "ほぼ同じ場面の窓を 1 件にまとめる。結果どうしのコサイン類似度がこの値以上なら同じ場面とみなす(例 0.95。省略時はまとめない)。動きの無い場面が長く続く録画で、同じ場面ばかりが並ぶのを防ぐ"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window_id"
+        ],
+        "title": "SimilarSearchRequest",
+        "examples": [
+          {
+            "dedupe": 0.95,
+            "exclude_same_source": true,
+            "top_k": 10,
+            "window_id": 123
+          }
+        ]
       },
       "Source": {
         "properties": {
@@ -7093,6 +7427,20 @@
             "title": "Merge",
             "description": "隣り合う窓を区間にまとめた intervals も返す",
             "default": true
+          },
+          "dedupe": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe",
+            "description": "ほぼ同じ場面の窓を 1 件にまとめる。結果どうしのコサイン類似度がこの値以上なら同じ場面とみなす(例 0.95。省略時はまとめない)。動きの無い場面が長く続く録画で、同じ場面ばかりが並ぶのを防ぐ"
           },
           "after_window_id": {
             "anyOf": [

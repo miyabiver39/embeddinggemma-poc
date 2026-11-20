@@ -52,6 +52,7 @@ from .schemas import (
     Reindexed,
     SearchKind,
     SearchResponse,
+    SimilarSearchRequest,
     Source,
     SourceKind,
     SourceList,
@@ -163,11 +164,16 @@ def _filters_form(kind_description: str):
         kind: SearchKind = Form("auto", description=kind_description),
         merge: str | None = Form(None, description="隣り合う窓を区間にまとめた intervals も返す(既定 true)"),
         after_window_id: str | None = Form(None, description="この ID より後に追加された窓だけを探す"),
+        dedupe: str | None = Form(None, description="ほぼ同じ場面をまとめるしきい値(例 0.95)"),
     ) -> dict:
         try:
             score = float(min_score) if min_score else 0.0
         except ValueError as exc:
             raise HTTPException(400, f"min_score は数値で指定してください: {min_score!r}") from exc
+        try:
+            dedupe_value = float(dedupe) if dedupe else None
+        except ValueError as exc:
+            raise HTTPException(400, f"dedupe は数値で指定してください: {dedupe!r}") from exc
         return {
             "top_k": _opt_int(top_k, "top_k"),
             "min_score": score,
@@ -178,6 +184,7 @@ def _filters_form(kind_description: str):
             "kind": kind,
             "merge": _opt_bool(merge) is not False,
             "after_window_id": _opt_int(after_window_id, "after_window_id"),
+            "dedupe": dedupe_value,
         }
 
     return dependency
@@ -478,6 +485,23 @@ def build_api_router(ctx: Context) -> APIRouter:
         """文章に近い場面(窓)を、スコアの高い順に返します。`kind=auto` は映像の窓と静止画を探します。"""
         f = body.model_dump()
         return svc.search_text(f.pop("query"), **f)
+
+    @router.post(
+        "/search/similar",
+        tags=["検索"],
+        summary="検索結果の場面に似た場面を探す",
+        response_model=SearchResponse,
+        responses=errors(400, 401, 404, 409, 503),
+    )
+    def search_similar(body: SimilarSearchRequest) -> dict:
+        """取り込み済みの窓(検索結果の `window_id`)に似た場面を探します。
+
+        保存済みのベクトルをそのまま使うため、推論は行いません。元の窓は結果に含めません。
+        `exclude_same_source=true` で、同じ録画の別の時刻を外し、別の録画・別のカメラだけを探せます。
+        """
+        f = body.model_dump()
+        window_id = f.pop("window_id")
+        return svc.search_similar(window_id, **f)
 
     @router.post(
         "/search/image",

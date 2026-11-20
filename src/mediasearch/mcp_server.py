@@ -56,6 +56,8 @@ def _trim_hit(h: dict) -> dict:
             "group_id", "location", "media_url", "thumb_url")
     out = {k: h.get(k) for k in keys}
     out["score"] = round(float(out["score"]), 4)
+    if "duplicates" in h:  # 重複の除去(dedupe)を指定したときだけ
+        out["duplicates"] = h["duplicates"]
     return out
 
 
@@ -128,6 +130,7 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         to_time: str | None = None,
         kind: str = "auto",
         after_window_id: int | None = None,
+        dedupe: float | None = None,
     ) -> dict[str, Any]:
         """文章で、録画映像・音声・画像の該当する場面を探します。
 
@@ -142,11 +145,46 @@ def build_mcp_server(ctx: Context) -> MCPServer:
             kind: 探す種類(auto / all / frames / tav / audio / image)。auto は映像の窓と静止画
             after_window_id: この ID より後に追加された窓だけを探す。取り込み中に、前回の結果の last_window_id を渡して
                 新しく増えた場面だけを確認するのに使う
+            dedupe: ほぼ同じ場面を 1 件にまとめるしきい値(結果どうしのコサイン類似度。例 0.95)。省略時はまとめない
         """
         top_k = max(1, min(int(top_k), 100))
         f = _filters(top_k, min_score, group_id, location, from_time, to_time, kind)
-        res = _guard(svc.search_text, query, **f, after_window_id=after_window_id)
+        res = _guard(svc.search_text, query, **f, after_window_id=after_window_id, dedupe=dedupe)
         return _trim_search(res)
+
+    @server.tool(annotations=_READ_ONLY)
+    def search_similar(
+        window_id: int,
+        exclude_same_source: bool = False,
+        top_k: int = 10,
+        min_score: float = 0.0,
+        group_id: str | None = None,
+        location: str | None = None,
+        from_time: str | None = None,
+        to_time: str | None = None,
+        kind: str = "auto",
+        dedupe: float | None = None,
+    ) -> dict[str, Any]:
+        """検索結果の場面(window_id)に似た場面を探します。保存済みのベクトルを使うため、推論はしません。
+
+        Args:
+            window_id: 元にする窓の ID(search_text などの結果の window_id)
+            exclude_same_source: 元の窓と同じ取り込み元(同じ録画)を外し、別の録画・別のカメラだけを探す
+            top_k: 返す件数(1〜100)
+            min_score: これより低いスコアは返さない
+            group_id: グループ ID で絞り込む
+            location: 場所で絞り込む
+            from_time: この日時以降(ISO 8601)
+            to_time: この日時以前(ISO 8601)
+            kind: 探す種類(auto は元の窓と同じベクトルの空間の種類)
+            dedupe: ほぼ同じ場面を 1 件にまとめるしきい値(例 0.95)。省略時はまとめない
+        """
+        top_k = max(1, min(int(top_k), 100))
+        f = _filters(top_k, min_score, group_id, location, from_time, to_time, kind)
+        res = _guard(svc.search_similar, window_id, exclude_same_source=exclude_same_source, **f, dedupe=dedupe)
+        out = _trim_search(res)
+        out["query_window"] = res.get("query_window")
+        return out
 
     @server.tool(annotations=_READ_ONLY)
     def search_image(

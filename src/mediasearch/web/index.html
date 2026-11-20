@@ -31,6 +31,8 @@
   .hit img { width:100%; aspect-ratio:16/9; object-fit:cover; background:#000; display:block; }
   .hit .nothumb { width:100%; aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; background:var(--line); color:var(--mute); font-size:12px; }
   .hit .meta { padding:6px 8px; font-size:12px; }
+  .hit .acts { display:flex; gap:4px; flex-wrap:wrap; margin-top:4px; }
+  .hit .acts button, .hit .acts a { font-size:11px; padding:2px 6px; }
   .score { font-weight:700; color:var(--acc); }
   .mute { color:var(--mute); }
   table { border-collapse:collapse; width:100%; font-size:13px; }
@@ -79,6 +81,7 @@
     <label>開始日時<input id="f-from" type="datetime-local"></label>
     <label>終了日時<input id="f-to" type="datetime-local"></label>
     <label>連続区間をまとめる<select id="f-merge"><option value="true">する</option><option value="false">しない</option></select></label>
+    <label>ほぼ同じ場面をまとめる<select id="f-dedupe"><option value="">しない</option><option value="0.95">する(類似度 0.95 以上)</option><option value="0.9">強くまとめる(0.9 以上)</option></select></label>
     <label>新しい窓を通知(文章の検索のみ)<select id="f-live"><option value="false">しない</option><option value="true">する(取り込み中のリアルタイム検索)</option></select></label>
   </div>
   <div class="note">スコアはコサイン類似度です。テキスト→映像の一致は 0.3〜0.5 程度でも十分に意味があることがあります(最小スコアは実データを見て調整してください)。</div>
@@ -222,7 +225,19 @@ async function loadInfo() {
 function filters() {
   return { top_k: +$("f-topk").value || null, min_score: +$("f-min").value || 0, group_id: $("f-grp").value || null,
     location: $("f-loc").value || null, from_ts: tsOrEmpty("f-from") || null, to_ts: tsOrEmpty("f-to") || null,
-    kind: $("f-kind").value, merge: $("f-merge").value === "true" };
+    kind: $("f-kind").value, merge: $("f-merge").value === "true", dedupe: +$("f-dedupe").value || null };
+}
+async function searchSimilar(windowId, otherSources) {
+  $("s-msg").textContent = "似た場面を検索中…"; $("s-msg").className = "mute"; $("hits").innerHTML = ""; stopLive();
+  try {
+    const f = filters(); delete f.kind;  // 種類は元の窓に合わせる(auto)
+    const res = await api("/api/search/similar", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ window_id: windowId, exclude_same_source: !!otherSources, ...f }) });
+    renderHits(res);
+    const q = res.query_window;
+    $("s-msg").textContent = `窓 #${q.id}(${q.abs_time}${q.group_id ? "・" + q.group_id : ""})に似た場面` +
+      (otherSources ? "(別の録画のみ)" : "") + " — " + $("s-msg").textContent;
+  } catch (e) { $("s-msg").textContent = e.message; $("s-msg").className = "err"; }
 }
 function formFilters(fd) {
   const f = filters();
@@ -282,8 +297,13 @@ function renderHits(res) {
       ${thumb ? `<img loading="lazy" src="${esc(thumb)}" alt="">` : `<div class="nothumb">${first.kind === "audio" ? "音声" : "画像を保存していません"}</div>`}
       <div class="meta"><span class="score">${it.score.toFixed(3)}</span>
       ${esc(it.source_name)} ${first.kind === "image" ? "(静止画)" : fmt(it.start_ms) + "–" + fmt(it.end_ms)}<br>
-      <span class="mute">${esc(it.group_id || "")} ${esc(it.location || "")} ${esc(first.abs_time || "")} ${first.kind ? "["+esc(first.kind)+"]" : ""}</span></div></div>`;
+      <span class="mute">${esc(it.group_id || "")} ${esc(it.location || "")} ${esc(first.abs_time || "")} ${first.kind ? "["+esc(first.kind)+"]" : ""}</span>
+      ${first.duplicates ? `<br><span class="mute">ほぼ同じ場面 ほか ${first.duplicates} 件</span>` : ""}
+      <div class="acts"><button type="button" data-sim="${it.window_ids[0]}">似た場面</button><button type="button" data-sim="${it.window_ids[0]}" data-other="1">別の録画で似た場面</button></div></div></div>`;
   }).join("");
+  document.querySelectorAll("#hits [data-sim]").forEach((b) => b.onclick = (ev) => {
+    ev.stopPropagation(); searchSimilar(+b.dataset.sim, b.dataset.other === "1");
+  });
   document.querySelectorAll(".hit").forEach((el) => el.onclick = () => {
     const it = items[+el.dataset.i], url = (byWin[it.window_ids[0]] || {}).media_url;
     if (!url) return;

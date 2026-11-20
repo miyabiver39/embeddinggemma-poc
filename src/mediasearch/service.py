@@ -31,6 +31,11 @@ from .watcher import FolderWatcher
 log = logging.getLogger(__name__)
 
 KIND_CHOICES = ("auto", "all", "frames", "tav", "audio", "image")
+# 同じベクトルの空間に入る窓の種類(似た場面の検索の kind=auto で使う)。画像だけを入力にした frames と image は同じ空間
+SAME_SPACE_KINDS = {"frames": ["frames", "image"], "image": ["frames", "image"], "tav": ["tav"], "audio": ["audio"]}
+# 重複の除去・取り込み元の除外をするときに、多めに探す倍率と上限(除いた後も top_k 件を返せるように)
+DEDUPE_FETCH_FACTOR = 5
+MAX_FETCH = 1000
 
 
 def _public_error(what: str, exc: BaseException) -> str:
@@ -198,15 +203,36 @@ class Service:
             return ["tav" if self.ctx.settings.include_audio else "frames", "image"]
         return [kind]
 
-    def search(self, qvec: np.ndarray, f: dict, auto_kinds: list[str] | None = None, embed_ms: int = 0) -> dict:
-        """クエリのベクトルで窓を探し、表示や再生に必要な情報を付けて返します。"""
+    def search(
+        self,
+        qvec: np.ndarray,
+        f: dict,
+        auto_kinds: list[str] | None = None,
+        embed_ms: int = 0,
+        exclude_window_id: int | None = None,
+        exclude_source_id: int | None = None,
+    ) -> dict:
+        """クエリのベクトルで窓を探し、表示や再生に必要な情報を付けて返します。
+
+        exclude_window_id / exclude_source_id は、似た場面の検索で、元の窓(と同じ取り込み元)を結果から外すために使う。
+        """
         ctx, s = self.ctx, self.ctx.settings
         started = time.time()
         info = ctx.embedder.info()
         ctx.store.ensure_compat(info.model_id, info.dims)
+        top_k = f.get("top_k") or s.top_k_default
+        dedupe = f.get("dedupe")
+        if dedupe is not None and not 0.0 < float(dedupe) <= 1.0:
+            raise InvalidInput("dedupe は 0 より大きく 1 以下の値で指定してください(例 0.95)")
+        # 結果から外す窓がある場合は、外した後も top_k 件を返せるよう、多めに探す
+        fetch_k = top_k
+        if dedupe is not None or exclude_source_id is not None:
+            fetch_k = min(max(top_k * DEDUPE_FETCH_FACTOR, top_k + 1), MAX_FETCH)
+        elif exclude_window_id is not None:
+            fetch_k = top_k + 1
         hits = ctx.store.search(
             qvec,
-            top_k=f.get("top_k") or s.top_k_default,
+            top_k=fetch_k,
             kinds=self.resolve_kinds(f.get("kind") or "auto", auto_kinds),
             group_id=f.get("group_id") or None,
             location=f.get("location") or None,
@@ -215,6 +241,16 @@ class Service:
             min_score=f.get("min_score") or 0.0,
             after_id=f.get("after_window_id"),
         )
+        if exclude_window_id is not None or exclude_source_id is not None:
+            hits = [
+                h
+                for h in hits
+                if h["window_id"] != exclude_window_id
+                and (exclude_source_id is None or h["source_id"] != exclude_source_id)
+            ]
+        if dedupe is not None:
+            hits = self._dedupe(hits, float(dedupe), top_k)
+        hits = hits[:top_k]
         self.decorate_hits(hits)
         out = {
             "results": hits,
@@ -226,6 +262,60 @@ class Service:
         }
         if f.get("merge", True):
             out["intervals"] = merge_intervals(hits)
+        return out
+
+    def _dedupe(self, hits: list[dict], threshold: float, top_k: int) -> list[dict]:
+        """ほぼ同じ場面の窓を、スコアの高いもの 1 件にまとめます。
+
+        結果どうしのコサイン類似度が threshold 以上なら同じ場面とみなし、先に残した(スコアの高い)窓に、
+        まとめた件数(duplicates)を数えます。隣り合う窓は intervals でまとめるため、ここでは時刻に関係なく、
+        別の時刻・別のカメラに映った同じ場面(動きの無い場面が長く続く場合など)をまとめるのが目的です。
+        ベクトルは保存済みのものを読むため、推論はしません。
+        """
+        if not hits:
+            return hits
+        vecs = self.ctx.store.vectors.get(np.array([h["window_id"] for h in hits], dtype=np.uint64))
+        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+        vecs = vecs / np.where(norms == 0, 1.0, norms)
+        kept: list[int] = []
+        for i, h in enumerate(hits):
+            if kept:
+                sims = vecs[kept] @ vecs[i]
+                j = int(np.argmax(sims))
+                if sims[j] >= threshold:
+                    rep = hits[kept[j]]
+                    rep["duplicates"] = rep.get("duplicates", 0) + 1
+                    continue
+            h.setdefault("duplicates", 0)
+            kept.append(i)
+            if len(kept) >= top_k:
+                break
+        return [hits[i] for i in kept]
+
+    def search_similar(self, window_id: int, *, exclude_same_source: bool = False, **filters) -> dict:
+        """保存済みの窓のベクトルをそのままクエリにして、似た場面を探します(推論はしません)。
+
+        ベクトルの空間は窓の種類で異なるため(画像だけの窓と静止画は同じ空間、音声つきの窓 tav と音声 audio は
+        それぞれ別の空間。設計書の 3.)、kind=auto では元の窓と同じ空間の種類だけを探します。元の窓は結果から外します。
+        """
+        ctx = self.ctx
+        w = ctx.store.get_window(window_id)
+        if w is None:
+            raise NotFound(f"窓が見つかりません: {window_id}")
+        qvec = ctx.store.vectors.get(np.array([window_id], dtype=np.uint64))[0]
+        if not np.any(qvec):
+            raise NotFound(f"窓のベクトルが見つかりません: {window_id}")
+        auto = SAME_SPACE_KINDS.get(w["kind"], [w["kind"]])
+        with self._slot():
+            out = self.search(
+                qvec,
+                filters,
+                auto_kinds=auto,
+                exclude_window_id=window_id,
+                exclude_source_id=w["source_id"] if exclude_same_source else None,
+            )
+        out["query_window"] = {k: w[k] for k in ("id", "source_id", "start_ms", "end_ms", "kind", "group_id")}
+        out["query_window"]["abs_time"] = fmt_ts(w["abs_ts"])
         return out
 
     def decorate_hits(self, hits: list[dict]) -> list[dict]:

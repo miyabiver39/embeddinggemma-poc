@@ -150,6 +150,28 @@ curl -F file=@query.wav http://localhost:8000/api/search/audio
 - `results` は窓ごと、`intervals` は同じ取り込み元で隣り合う窓をまとめた区間です(再生位置の目安)。
 - `kind` を省略(`auto`)すると、文章・画像の検索は映像の窓と静止画を、音声の検索は音声の窓を探します。
 
+**似た場面を探す**(検索結果の `window_id` を元にする。保存済みのベクトルを使うため、推論しません):
+
+```bash
+# 同じ場面がほかの時刻・ほかのカメラに映っていないか(exclude_same_source で同じ録画を外す)
+curl -H 'Content-Type: application/json' \
+  -d '{"window_id": 101, "exclude_same_source": true, "top_k": 10}' \
+  http://localhost:8000/api/search/similar
+```
+
+- 元の窓は結果に含めません。応答の `query_window` に元の窓の情報が入ります。
+- `kind` を省略(`auto`)すると、元の窓と同じベクトルの空間の種類を探します(映像のみの窓と静止画は同じ空間、映像+音声の窓・音声の窓はそれぞれ別)。
+
+**ほぼ同じ場面をまとめる**(`dedupe`。文章・画像・音声・似た場面のどの検索でも指定できます):
+
+```bash
+curl -H 'Content-Type: application/json' -d '{"query": "人が立っている", "dedupe": 0.95}' http://localhost:8000/api/search/text
+```
+
+- 結果どうしのコサイン類似度が `dedupe` 以上の窓を、スコアの高いもの 1 件にまとめ、まとめた数を `duplicates` に入れます。
+- 隣り合う窓は `intervals` でまとまるため、`dedupe` は、別の時刻・別のカメラに映った同じ場面(動きの無い場面が長く続く場合など)をまとめるのに使います。
+- 値は 0.9〜0.97 程度から、実際の録画を見て調整してください。指定しない場合はまとめません。
+
 ### 4. 表示する
 
 ```bash
