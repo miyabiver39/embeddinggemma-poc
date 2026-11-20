@@ -95,6 +95,12 @@ _STORE_MEDIA_FORM = (
 )
 
 # ---------------------------------------------------------------------- リクエストの型
+_SKIP_STATIC_DESC = (
+    "true にすると、前に推論した窓と映像が変わらない窓を推論せず、前の窓の終わりを延ばす(映像のみの窓だけ。"
+    "省略時はサーバの SKIP_STATIC)"
+)
+
+
 class _WindowOptions(BaseModel):
     """取り込みの窓の設定(省略した項目は既定値。GET /api/info の defaults と presets を参照)。"""
 
@@ -103,6 +109,7 @@ class _WindowOptions(BaseModel):
     frames_per_window: int | None = Field(None, description="窓あたりのフレーム数")
     overlap_sec: int | None = Field(None, description="窓の重なり(秒)")
     include_audio: bool | None = Field(None, description="動画の音声も同じベクトルに含める")
+    skip_static: bool | None = Field(None, description=_SKIP_STATIC_DESC)
     store_media: bool | None = Field(
         None,
         description=(
@@ -221,6 +228,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         include_audio: bool | None,
         chunk_sec: int | None = None,
         store_media: bool | None = None,
+        skip_static: bool | None = None,
     ) -> IngestParams:
         try:
             return IngestParams.from_settings(
@@ -232,6 +240,7 @@ def build_api_router(ctx: Context) -> APIRouter:
                 include_audio=include_audio,
                 chunk_sec=chunk_sec,
                 store_media=store_media,
+                skip_static=skip_static,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -287,6 +296,7 @@ def build_api_router(ctx: Context) -> APIRouter:
         overlap_sec: str | None = Form(None, description="窓の重なり(秒)"),
         include_audio: str | None = Form(None, description="音声も同じベクトルに含める(true / false)"),
         store_media: str | None = Form(None, description=_STORE_MEDIA_FORM),
+        skip_static: str | None = Form(None, description=_SKIP_STATIC_DESC),
     ) -> dict:
         """動画を受け付け、バックグラウンドの取り込みジョブを作ります。
 
@@ -299,6 +309,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             _opt_int(overlap_sec, "overlap_sec"),
             _opt_bool(include_audio),
             store_media=_opt_bool(store_media),
+            skip_static=_opt_bool(skip_static),
         )
         return _accept_upload(file, "video", start_ts, group_id=group_id, location=location, params=params)
 
@@ -402,6 +413,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             body.overlap_sec,
             body.include_audio,
             store_media=body.store_media,
+            skip_static=body.skip_static,
         )
         return ctx.intake.accept(
             path,
@@ -432,6 +444,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             body.overlap_sec,
             body.include_audio,
             store_media=body.store_media,
+            skip_static=body.skip_static,
         )
         return ctx.intake.accept_dir(
             Path(body.dir),
@@ -769,6 +782,7 @@ def build_api_router(ctx: Context) -> APIRouter:
             body.overlap_sec,
             body.include_audio,
             store_media=body.store_media,
+            skip_static=body.skip_static,
         )
         return _streams().create(
             url=body.url,

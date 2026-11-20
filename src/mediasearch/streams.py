@@ -30,7 +30,16 @@ import numpy as np
 from . import disk, media, thumbs
 from .config import Settings
 from .embedders import SAMPLE_RATE, AudioPart, Embedder
-from .pipeline import IngestParams, build_window_parts, plan_windows, save_thumbnail, split_window_pcm
+from .pipeline import (
+    MAX_STATIC_SPAN_MS,
+    IngestParams,
+    build_window_parts,
+    frame_signature,
+    is_static_window,
+    plan_windows,
+    save_thumbnail,
+    split_window_pcm,
+)
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -119,6 +128,9 @@ class StreamWorker:
         self._proc: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
         self._hw_failed = False
+        # 変化の無い窓の省略(SKIP_STATIC)の基準: 最後に推論した窓。接続し直したときと、遅れて窓を捨てたときは消す
+        # (間の映像を見ていないため、延ばしてよいか分からない)
+        self._static_ref: dict | None = None
         self.state: dict = {
             "status": "stopped",  # connecting / running / retrying / stopped
             "error": None,
@@ -128,6 +140,7 @@ class StreamWorker:
             "windows": 0,
             "dropped_windows": 0,
             "skipped_low_disk": 0,  # 空き容量の不足で保存しなかった窓
+            "skipped_static": 0,  # 映像が変わらないため推論せず、前の窓を延ばした窓(SKIP_STATIC)
             "reconnects": 0,
             "lag_ms": 0,
             "decoder": None,
@@ -216,6 +229,7 @@ class StreamWorker:
         use_audio = p.include_audio and has_audio
         hw, _ = (None, None) if self._hw_failed else media.select_hwaccel(self._s.ffmpeg_hwaccel, "")
         self.state.update(has_audio=has_audio, decoder=hw or "cpu")
+        self._static_ref = None
 
         audio_r = audio_w = None
         if use_audio:
@@ -326,6 +340,7 @@ class StreamWorker:
                     dropped += 1
                 if dropped:
                     self.state["dropped_windows"] += dropped
+                    self._static_ref = None
                     prune()
                 self.state["lag_ms"] = max(0, latest * step - (n * stride + window_ms))
 
@@ -382,28 +397,65 @@ class StreamWorker:
             self.state["skipped_low_disk"] = self.state.get("skipped_low_disk", 0) + len(ready)
             self.state["error"] = str(exc)
             return
-        built = []
+        def rel(stream_ms: int) -> int:  # ストリームの時刻 → 取り込み元(登録時刻)からの経過
+            return int(round((wall0 + stream_ms / 1000 - source["start_ts"]) * 1000))
+
+        skip = self.params.skip_static
+        built: list[dict] = []
+        extend_stored: tuple[int, int] | None = None  # 保存済みの基準の窓を延ばす(窓の ID, ストリームの時刻)
         for start, picked, slices in ready:
             images = [f for f, _ in picked]
-            built.append((start, images, build_window_parts(images, [t for _, t in picked], slices)))
-        vecs = self._embedder.embed_parts_many([parts for _, _, parts in built], high=False)
-        for (start, images, parts), vec in zip(built, vecs, strict=True):
-            kind = "tav" if any(isinstance(p, AudioPart) for p in parts) else "frames"
-            abs_ts = wall0 + start / 1000
-            rel_ms = int(round((abs_ts - source["start_ts"]) * 1000))  # 取り込み元(登録時刻)からの経過
+            item = {
+                "start": start,
+                "end": start + window_ms,
+                "images": images,
+                "parts": build_window_parts(images, [t for _, t in picked], slices),
+            }
+            if skip and slices is None:  # 音声つきの窓は、映像が止まっていても音が変わり得るため省略しない
+                sigs = [frame_signature(im) for im in images]
+                ref = self._static_ref
+                if (
+                    ref is not None
+                    and item["end"] - ref["start"] <= MAX_STATIC_SPAN_MS
+                    and is_static_window(sigs, ref["sigs"], self.params.static_threshold)
+                ):
+                    if ref["item"] is not None:  # 基準の窓がこの回の推論を待っている
+                        ref["item"]["end"] = item["end"]
+                    else:
+                        extend_stored = (ref["window_id"], item["end"])
+                    self.state["skipped_static"] += 1
+                    continue
+                self._static_ref = {"start": start, "sigs": sigs, "item": item, "window_id": None}
+            elif skip:
+                self._static_ref = None
+            built.append(item)
+        if extend_stored is not None:
+            self._store.extend_window(extend_stored[0], rel(extend_stored[1]))
+            self._store.update_source(source["id"], duration_ms=rel(extend_stored[1]))
+        if not built:
+            return
+        vecs = self._embedder.embed_parts_many([b["parts"] for b in built], high=False)
+        for item, vec in zip(built, vecs, strict=True):
+            kind = "tav" if any(isinstance(p, AudioPart) for p in item["parts"]) else "frames"
+            abs_ts = wall0 + item["start"] / 1000
+            rel_ms, end_ms = rel(item["start"]), rel(item["end"])
             window_id = self._store.add_window(
                 source_id=source["id"],
                 start_ms=rel_ms,
-                end_ms=rel_ms + window_ms,
+                end_ms=end_ms,
                 kind=kind,
                 group_id=source["group_id"],
                 abs_ts=abs_ts,
                 vec=vec,
             )
+            ref = self._static_ref
+            if ref is not None and ref["item"] is item:  # 以降の省略では、保存済みの窓として延ばす
+                ref.update(item=None, window_id=window_id)
+            images = item["images"]
             if self.params.store_media:
                 save_thumbnail(images[len(images) // 2], thumbs.path_for(self._s.data_dir / "thumbs", window_id))
             self.state["windows"] += 1
-            self._store.update_source(source["id"], duration_ms=rel_ms + window_ms)
+            self._store.update_source(source["id"], duration_ms=end_ms)
 
 
 class StreamManager:

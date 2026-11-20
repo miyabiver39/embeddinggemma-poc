@@ -194,7 +194,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `FRAMES_PER_WINDOW` | `2` | 窓あたりのフレーム数 |
 | `OVERLAP_SEC` | `0` | 窓の重なり(秒) |
 | `INCLUDE_AUDIO` | `false` | 動画の音声も同じベクトルに含める |
-| `SKIP_STATIC` | `false` | 前の窓と映像が変わらない窓を推論せず、前の窓を延ばす(映像のみの窓だけ。動きの少ない監視カメラで、窓の数と取り込みの時間が減る。[docs/design.md](docs/design.md)) |
+| `SKIP_STATIC` | `false` | 前の窓と映像が変わらない窓を推論せず、前の窓を延ばす(映像のみの窓だけ。ファイルの取り込みと RTSP のストリームの両方。取り込み・登録ごとに `skip_static` で変えられる。動きの少ない監視カメラで、窓の数と推論の量が減る。[docs/design.md](docs/design.md)) |
 | `STATIC_THRESHOLD` | `4.0` | `SKIP_STATIC` で「変化なし」とみなす、区画ごとの明るさの差の上限(0〜255。小さいほど省略しにくい) |
 | `DOC_CHUNK_CHARS` | `800` | 文書を 1 つのベクトルにする文字数の目安(100〜4000)。塊はページをまたがない |
 | `DOC_OVERLAP_CHARS` | `100` | 前の塊の終わりを、次の塊の頭に重ねる文字数(0〜`DOC_CHUNK_CHARS` の半分) |
