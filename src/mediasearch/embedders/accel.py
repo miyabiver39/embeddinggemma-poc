@@ -41,16 +41,22 @@ def compiler_available() -> bool:
     return bool(cc and shutil.which(cc)) or shutil.which("gcc") is not None or shutil.which("cc") is not None
 
 
-def setup_compile_cache(data_dir: Path) -> Path | None:
-    """compile の結果の保存先を DATA_DIR/cache/torch にします(既に環境変数で指定されていれば、それを使う)。"""
-    root = Path(data_dir) / "cache" / "torch"
+def setup_compile_cache(data_dir: Path, cache_dir: Path | None = None) -> Path | None:
+    """compile の結果の保存先を DATA_DIR/cache/torch(または cache_dir)にします(環境変数指定を優先)。"""
+    root = Path(cache_dir) if cache_dir is not None else Path(data_dir) / "cache" / "torch"
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError as exc:  # 書けない場所なら、保存せずに続ける(毎回の起動で compile する)
         log.warning("compile の結果の保存先を作れませんでした(%s)。起動のたびに準備を行います", exc)
         return None
-    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(root / "inductor"))
-    os.environ.setdefault("TRITON_CACHE_DIR", str(root / "triton"))
+    inductor_dir = Path(os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(root / "inductor")))
+    os.environ.setdefault("TORCHINDUCTOR_FX_GRAPH_CACHE", "1")
+    triton_dir = Path(os.environ.setdefault("TRITON_CACHE_DIR", str(root / "triton")))
+    for path in (inductor_dir, triton_dir):
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            log.warning("PyTorch キャッシュフォルダを作成できません(%s): %s", path, exc)
     return root
 
 
@@ -91,11 +97,14 @@ def _layers(model) -> list:
 
 
 def compile_layers(model) -> None:
-    """画像側・文章側・音声側の各層を torch.compile します(実際の compile は最初の推論のとき)。
+    """画像側・文章側の各層を torch.compile します(実際の compile は最初の推論のとき)。
 
-    文章と音声の長さは毎回変わるため、文章側と音声側は長さを可変(dynamic)にして作り直しを防ぎます。
+    文章の長さは毎回変わるため、文章側は長さを可変(dynamic)にして作り直しを防ぎます。
     画像側は、まとめる件数や画像の大きさが変わったときだけ作り直します(大きさは動画ごとにほぼ一定)。
-    音声側は 10 秒の音声 1 件が 97 ms → 76 ms(float32 の結果との類似度は 0.99979 → 0.99982。RTX 3060 で実測)。
+
+    音声側は compile しません。compile すると速くなる(10 秒の音声 1 件が 97 ms → 76 ms)一方で、
+    合成のサイン波の音声で float32 の結果との類似度が下がり(0.9980 → 0.9951)、起動のたびに結果が変わりました
+    (同じ入力で 0.9932〜0.9951。RTX 3060 で実測、2026-11-20)。品質と再現性を優先します。
     """
     import torch
 
@@ -107,8 +116,6 @@ def compile_layers(model) -> None:
     for layer in model.vision_tower.encoder.layers:
         layer.compile()
     for layer in model.language_model.layers:
-        layer.compile(dynamic=True)
-    for layer in model.audio_tower.layers:
         layer.compile(dynamic=True)
 
 

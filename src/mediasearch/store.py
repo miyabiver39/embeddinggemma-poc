@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS meta (
 
 CREATE TABLE IF NOT EXISTS sources (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind TEXT NOT NULL,            -- video / audio / image / frames / stream
+  kind TEXT NOT NULL,            -- video / audio / image / document / frames / stream
   path TEXT,                     -- 映像・音声ファイルのパス(frames は NULL)
   name TEXT NOT NULL,
   group_id TEXT,
@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS windows (
   source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
   start_ms INTEGER NOT NULL,
   end_ms INTEGER NOT NULL,
-  kind TEXT NOT NULL,            -- frames(映像のみ) / tav(映像+音声) / audio(音声のみ) / image(静止画 1 枚)
+  -- frames(映像のみ) / tav(映像+音声) / audio(音声のみ) / image(静止画 1 枚) / document(文書の塊)
+  kind TEXT NOT NULL,
   group_id TEXT,
   abs_ts REAL NOT NULL           -- 窓の開始時刻(UNIX 秒) = source.start_ts + start_ms / 1000
 );
@@ -73,6 +74,16 @@ CREATE TABLE IF NOT EXISTS jobs (
 """
 
 # RTSP などのストリームの登録(streams.py)。url は認証情報を含むことがあるため、API では伏せて返す
+# 文書の塊の位置(ページ)と本文(版 9)。窓を削除すると一緒に消える。
+# 本文は検索結果に表示するために持つ。保存しない設定(store_media が偽)の文書では text を NULL にする
+TEXTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS window_texts (
+  window_id INTEGER PRIMARY KEY REFERENCES windows(id) ON DELETE CASCADE,
+  page INTEGER NOT NULL,         -- 1 始まり。ページの分からない形式(テキスト)は 0
+  text TEXT
+);
+"""
+
 STREAMS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS streams (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,10 +141,10 @@ CREATE INDEX IF NOT EXISTS idx_windows_abs_ts ON windows(abs_ts);
 CREATE INDEX IF NOT EXISTS idx_alert_events_status ON alert_events(status);
 """
 
-WINDOW_KINDS = ("frames", "tav", "audio", "image")
+WINDOW_KINDS = ("frames", "tav", "audio", "image", "document")
 
 # DB の形式の版。列の追加・改名をしたら上げ、_migrate() に移行の処理を足す
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9  # 版 9: window_texts(文書の塊)
 # 旧い版で使っていた列名 → 現在の列名(以前の版の DB をそのまま使い続けられるよう、起動時に改名する)
 _RENAMED_COLUMNS = {
     "sources": {"camera_id": "group_id"},
@@ -174,6 +185,7 @@ class Store:
         self._db.execute("PRAGMA foreign_keys=ON")
         self._db.executescript(SCHEMA)
         self._db.executescript(STREAMS_SCHEMA)
+        self._db.executescript(TEXTS_SCHEMA)
         self._db.executescript(ALERTS_SCHEMA)
         self._db.commit()
         self._migrate()
@@ -483,15 +495,22 @@ class Store:
         group_id: str | None,
         abs_ts: float,
         vec: np.ndarray,
+        page: int | None = None,
+        text: str | None = None,
     ) -> int:
+        """窓を追加します。page を渡すと、文書の塊の位置(と本文)も記録します。"""
         assert kind in WINDOW_KINDS, kind
         with self._lock:
             cur = self._db.execute(
                 "INSERT INTO windows(source_id, start_ms, end_ms, kind, group_id, abs_ts) VALUES(?,?,?,?,?,?)",
                 (source_id, start_ms, end_ms, kind, group_id, abs_ts),
             )
-            self._db.commit()
             window_id = int(cur.lastrowid)
+            if page is not None:
+                self._db.execute(
+                    "INSERT INTO window_texts(window_id, page, text) VALUES(?,?,?)", (window_id, page, text)
+                )
+            self._db.commit()
             self.vectors.add([window_id], vec)  # すぐに検索の対象になる(取り込み中でも探せる)
             if self._cache is not None:
                 row = self._db.execute("SELECT location FROM sources WHERE id=?", (source_id,)).fetchone()
@@ -499,6 +518,22 @@ class Store:
                 self._pending.append((window_id, source_id, start_ms, end_ms, kind, group_id, location, abs_ts))
             self.last_window_id = max(self.last_window_id, window_id)
             return window_id
+
+    def extend_window(self, window_id: int, end_ms: int) -> None:
+        """窓の終わりを延ばします(変化の無い区間を省略したとき、前の窓が後ろの区間も表すようにする)。"""
+        with self._lock:
+            self._db.execute("UPDATE windows SET end_ms=? WHERE id=? AND end_ms < ?", (end_ms, window_id, end_ms))
+            self._db.commit()
+            if self._cache is None:
+                return
+            for i, row in enumerate(self._pending):  # 検索用のメタデータに未反映の窓
+                if row[0] == window_id:
+                    self._pending[i] = (*row[:3], max(row[3], end_ms), *row[4:])
+                    return
+            ids = self._cache["ids"]
+            i = int(np.searchsorted(ids, window_id))
+            if i < len(ids) and ids[i] == window_id:
+                self._cache["end_ms"][i] = max(int(self._cache["end_ms"][i]), end_ms)
 
     def _window_ids(self, source_id: int) -> list[int]:
         rows = self._db.execute("SELECT id FROM windows WHERE source_id=?", (source_id,)).fetchall()
@@ -522,6 +557,22 @@ class Store:
                 (window_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def get_window_texts(self, window_ids) -> dict[int, dict]:
+        """文書の塊の位置と本文(窓 ID → {"page", "text"})。文書でない窓は含みません。"""
+        ids = [int(i) for i in window_ids]
+        if not ids:
+            return {}
+        out: dict[int, dict] = {}
+        with self._lock:
+            for i in range(0, len(ids), 500):  # SQLite の変数の数の上限に収める
+                part = ids[i : i + 500]
+                marks = ",".join("?" * len(part))
+                rows = self._db.execute(
+                    f"SELECT window_id, page, text FROM window_texts WHERE window_id IN ({marks})", part
+                ).fetchall()
+                out.update({r["window_id"]: {"page": r["page"], "text": r["text"]} for r in rows})
+        return out
 
     def counts(self) -> dict:
         with self._lock:
@@ -821,6 +872,7 @@ class Store:
         - cutoff: この時刻(UNIX 秒)より前の窓を削除する(RETENTION_DAYS。None なら全体の設定は無し)。
         - ストリームに retention_hours があれば、そのストリームはそちらに従う(0 なら削除しない)。
         - 取り込み中(queued / running)のファイルは対象外にする(途中の窓を消して、取り込みと食い違わないように)。
+        - 文書(kind=document)は対象外にする(時刻が文書の更新日時のため。消すときは取り込み元を削除する)。
         - 窓が無くなったファイルの取り込み元は、行を残して状態を expired にする。行ごと消すと、監視フォルダが
           同じファイルを新しいファイルとして取り込み直してしまうため。
         """
@@ -828,7 +880,11 @@ class Store:
         own = "SELECT source_id FROM streams WHERE retention_hours IS NOT NULL AND source_id IS NOT NULL"
         conds: list[tuple[str, tuple]] = []
         if cutoff is not None:
-            conds.append((f"abs_ts < ? AND source_id NOT IN ({own}) AND source_id NOT IN ({busy})", (cutoff,)))
+            # 文書は対象外にする。時刻はファイルの更新日時のため、古い文書が取り込んだ直後に消えてしまう
+            conds.append((
+                f"abs_ts < ? AND kind != 'document' AND source_id NOT IN ({own}) AND source_id NOT IN ({busy})",
+                (cutoff,),
+            ))
         with self._lock:
             for r in self._db.execute(
                 "SELECT source_id, retention_hours FROM streams WHERE retention_hours > 0 AND source_id IS NOT NULL"

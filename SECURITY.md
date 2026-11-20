@@ -15,7 +15,7 @@
 脆弱性を見つけた場合は、**公開の Issue には書かず**、GitHub の非公開の報告機能をご利用ください。
 
 1. リポジトリの「Security」タブを開きます。
-2. 「Report a vulnerability」から、内容を送信します。
+2. 「Report a vulnerability」から、内容を送信します(直接開く場合: <https://github.com/miyabiver39/embeddinggemma-poc/security/advisories/new>)。
 
 報告には、次の内容を含めていただけると確認が早くなります。
 

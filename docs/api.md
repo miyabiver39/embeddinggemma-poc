@@ -89,6 +89,11 @@ curl -F files=@photo1.jpg -F files=@photo2.png -F group_id=album-1 http://localh
 # 動画をアップロード
 curl -F file=@clip.mp4 -F group_id=group-a http://localhost:8000/api/ingest/video
 
+# 文書(PDF・Word・テキスト)をアップロード。検索は kind=document で行い、結果に page と text が付く
+curl -F file=@manual.pdf -F group_id=docs http://localhost:8000/api/ingest/document
+curl -H 'Content-Type: application/json' -d '{"query": "消火器の点検の頻度", "kind": "document"}' \
+  http://localhost:8000/api/search/text
+
 # コンテナ内のファイル(録画フォルダを /recordings にマウントしている場合)
 curl -H 'Content-Type: application/json' -d '{"path": "/recordings/group-a/20260101_090000.mp4"}' \
   http://localhost:8000/api/ingest/path
@@ -150,6 +155,28 @@ curl -F file=@query.wav http://localhost:8000/api/search/audio
 - `results` は窓ごと、`intervals` は同じ取り込み元で隣り合う窓をまとめた区間です(再生位置の目安)。
 - `kind` を省略(`auto`)すると、文章・画像の検索は映像の窓と静止画を、音声の検索は音声の窓を探します。
 
+**似た場面を探す**(検索結果の `window_id` を元にする。保存済みのベクトルを使うため、推論しません):
+
+```bash
+# 同じ場面がほかの時刻・ほかのカメラに映っていないか(exclude_same_source で同じ録画を外す)
+curl -H 'Content-Type: application/json' \
+  -d '{"window_id": 101, "exclude_same_source": true, "top_k": 10}' \
+  http://localhost:8000/api/search/similar
+```
+
+- 元の窓は結果に含めません。応答の `query_window` に元の窓の情報が入ります。
+- `kind` を省略(`auto`)すると、元の窓と同じベクトルの空間の種類を探します(映像のみの窓と静止画は同じ空間、映像+音声の窓・音声の窓はそれぞれ別)。
+
+**ほぼ同じ場面をまとめる**(`dedupe`。文章・画像・音声・似た場面のどの検索でも指定できます):
+
+```bash
+curl -H 'Content-Type: application/json' -d '{"query": "人が立っている", "dedupe": 0.95}' http://localhost:8000/api/search/text
+```
+
+- 結果どうしのコサイン類似度が `dedupe` 以上の窓を、スコアの高いもの 1 件にまとめ、まとめた数を `duplicates` に入れます。
+- 隣り合う窓は `intervals` でまとまるため、`dedupe` は、別の時刻・別のカメラに映った同じ場面(動きの無い場面が長く続く場合など)をまとめるのに使います。
+- 値は 0.9〜0.97 程度から、実際の録画を見て調整してください。指定しない場合はまとめません。
+
 ### 4. 表示する
 
 ```bash
@@ -158,6 +185,19 @@ curl -H 'Range: bytes=0-' -o clip.mp4 http://localhost:8000/api/media/12   # 元
 ```
 
 ブラウザの `<video>` では `"/api/media/12#t=4.0"` のように指定すると、該当の位置から再生できます。
+
+**見つかった区間を切り出す**(証拠の保存や共有のため。動画は MP4、音声は M4A):
+
+```bash
+# 検索結果の intervals の source_id・start_ms・end_ms を渡す
+curl -OJ 'http://localhost:8000/api/sources/12/clip?start_ms=4000&end_ms=8000'
+# 指定の位置ちょうどで切る(H.264 でエンコードし直すため時間がかかる)
+curl -OJ 'http://localhost:8000/api/sources/12/clip?start_ms=4000&end_ms=8000&accurate=true'
+```
+
+- 既定(`accurate=false`)はエンコードし直さずに切るため速く、画質も変わりません。MP4 の編集リストで、指定の位置から再生されます(編集リストに対応しない再生ソフトでは、直前のキーフレームから始まります)。
+- 長さは `CLIP_MAX_SEC`(既定 600 秒)まで。同時に処理するのは 2 件までで、超えると 503 です。
+- 静止画と、保存しない設定(`store_media=false`)で取り込んだものは切り出せません(VMS と連携する場合は、VMS の書き出しを使います)。
 
 `media_url` / `thumb_url` が `null` の場合は表示できません(音声の窓のサムネイル、または保存しない設定 `store_media=false` で取り込んだもの)。
 保存しない設定では、検索結果は取り込み元の名前・時刻・スコアなどの情報だけになります。

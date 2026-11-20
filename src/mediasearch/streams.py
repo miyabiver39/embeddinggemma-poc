@@ -221,10 +221,12 @@ class StreamWorker:
         if use_audio:
             audio_r, audio_w = os.pipe()
         cmd = self._command(url, width, height, step, audio_w, hw)
+        size = width * height * 3
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            bufsize=max(size, 65536),
             pass_fds=(audio_w,) if audio_w is not None else (),
         )
         self._proc = proc
@@ -234,16 +236,16 @@ class StreamWorker:
         frames: queue.Queue = queue.Queue()
         audio_buf = bytearray()
         audio_lock = threading.Lock()
-        size = width * height * 3
 
         def read_video() -> None:
             k = 0
+            assert proc.stdout is not None
             while True:
-                buf = proc.stdout.read(size)
-                if len(buf) < size:
+                frame = np.empty((height, width, 3), dtype=np.uint8)
+                if not media._read_exact_into(proc.stdout, memoryview(frame).cast("B")):
                     frames.put(None)
                     return
-                frames.put((k, np.frombuffer(buf, dtype=np.uint8).reshape(height, width, 3)))
+                frames.put((k, frame))
                 k += 1
 
         def read_audio() -> None:

@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import media, thumbs
+from . import documents, media, thumbs
 from .config import PRESETS, Settings
 from .disk import InsufficientStorage
 from .disk import check as check_disk
@@ -44,6 +44,9 @@ AUDIO_TOKENS_PER_SEC = 25
 LABEL_TOKENS = 8
 
 
+INGEST_KINDS = ("video", "audio", "image", "document")  # キューで処理できる取り込み元の種類
+
+
 @dataclass(frozen=True)
 class IngestParams:
     """取り込みの設定。取り込み元ごとに DB へ記録します(あとで再取り込みできるように)。"""
@@ -55,6 +58,13 @@ class IngestParams:
     chunk_sec: int = 10  # 音声だけを取り込むときの区切り(秒)
     # 偽なら、元のファイル(アップロードしたもの)とサムネイルを残さない。検索結果は時刻などの情報だけになる
     store_media: bool = True
+    # 真なら、前に推論した窓と映像が変わらない窓を推論せず、前の窓の終わりを延ばす(映像のみの窓だけ。is_static_window)。
+    # 以前の版の取り込み元には無い項目のため、既定は偽(取り込み直しても、以前と同じ窓になる)
+    skip_static: bool = False
+    static_threshold: float = 4.0
+    # 文書の塊の大きさ(文字数)と重なり。文書だけで使う(documents.chunk_pages)
+    doc_chunk_chars: int = 800
+    doc_overlap_chars: int = 100
 
     @classmethod
     def from_settings(cls, s: Settings, preset: str | None = None, **overrides) -> IngestParams:
@@ -65,6 +75,10 @@ class IngestParams:
             "include_audio": s.include_audio,
             "chunk_sec": s.audio_chunk_sec,
             "store_media": s.store_media,
+            "skip_static": s.skip_static,
+            "static_threshold": s.static_threshold,
+            "doc_chunk_chars": s.doc_chunk_chars,
+            "doc_overlap_chars": s.doc_overlap_chars,
         }
         if preset:
             if preset not in PRESETS:
@@ -84,6 +98,12 @@ class IngestParams:
             raise ValueError("overlap_sec は 0 以上 window_sec 未満にしてください")
         if not 1 <= self.chunk_sec <= 300:
             raise ValueError("chunk_sec は 1〜300 にしてください")
+        if not 0.5 <= self.static_threshold <= 64:
+            raise ValueError("static_threshold は 0.5〜64 にしてください")
+        if not 100 <= self.doc_chunk_chars <= 4000:
+            raise ValueError("doc_chunk_chars は 100〜4000 にしてください")
+        if not 0 <= self.doc_overlap_chars <= self.doc_chunk_chars // 2:
+            raise ValueError("doc_overlap_chars は 0〜doc_chunk_chars の半分にしてください")
         tokens = self.frames_per_window * (IMAGE_TOKENS + 2 * LABEL_TOKENS)
         if self.include_audio:
             tokens += self.window_sec * AUDIO_TOKENS_PER_SEC
@@ -144,6 +164,26 @@ def decode_step_ms(plans: list[WindowPlan]) -> int:
     return max(step, 100) if step else 1000
 
 
+def decode_select_grid(need: list[list[int]]) -> tuple[int, int]:
+    """全窓で必要なフレーム番号(need)が等間隔の格子に乗る場合、(先頭オフセット, 間引き間隔)を返します。
+
+    既定の 2 秒窓・2 フレームでは sample_ms = [500, 1500, 2500, ...] となり、
+    step=500ms に対して必要な番号は 1, 3, 5, ... (offset=1, stride=2) だけです。
+    ffmpeg の scale フィルタの前に select で偶数フレームを落とすことで、出力画素を完全一致させたまま
+    縮小・色変換・パイプ転送の負荷を半減できます。
+    """
+    indices = [k for row in need for k in row]
+    if not indices:
+        return 0, 1
+    offset = min(indices)
+    stride = 0
+    for k in indices:
+        stride = math.gcd(stride, k - offset)
+    if stride <= 1:
+        return 0, 1
+    return offset, stride
+
+
 def audio_slice_bounds(start_ms: int, end_ms: int, count: int) -> list[tuple[int, int]]:
     """窓を、フレームの数だけ等分します(各フレームに、その前後の音声を対応させる)。"""
     if count <= 0 or end_ms <= start_ms:
@@ -192,6 +232,50 @@ def build_window_parts(
             parts += [TextPart(label), AudioPart(audio)]
         parts += [TextPart(label), ImagePart(frame)]
     return parts
+
+
+# 変化の無い区間の省略で使う、縮小した画像の大きさ(横 64 × 縦 36)と、判定の区画(横 16 × 縦 9。1 区画 4×4)
+SIGNATURE_W, SIGNATURE_H = 64, 36
+BLOCKS_W, BLOCKS_H = 16, 9
+# 1 つの窓を延ばせる長さの上限(ms)。検索結果の区間が長くなりすぎないようにし、ゆっくりした変化(日の傾きなど)も
+# この間隔で推論し直す
+MAX_STATIC_SPAN_MS = 300_000
+
+
+def frame_signature(image: np.ndarray) -> np.ndarray:
+    """フレームを、変化の判定に使う 36×64 の輝度(float32)に縮めます(面積の平均。追加の依存は使わない)。"""
+    gray = image.astype(np.float32).mean(axis=2) if image.ndim == 3 else image.astype(np.float32)
+    h, w = gray.shape
+    bh, bw = max(h // SIGNATURE_H, 1), max(w // SIGNATURE_W, 1)
+    gray = gray[: bh * SIGNATURE_H, : bw * SIGNATURE_W]
+    if gray.shape != (bh * SIGNATURE_H, bw * SIGNATURE_W):  # 36×64 より小さい画像(テスト用など)
+        from PIL import Image
+
+        return np.asarray(
+            Image.fromarray(image).convert("L").resize((SIGNATURE_W, SIGNATURE_H), Image.BILINEAR), dtype=np.float32
+        )
+    return gray.reshape(SIGNATURE_H, bh, SIGNATURE_W, bw).mean(axis=(1, 3))
+
+
+def block_change(a: np.ndarray, b: np.ndarray) -> float:
+    """2 つの縮小画像の差を、16×9 の区画ごとの平均の差の最大値で返します(0〜255)。
+
+    画面全体の平均ではなく区画ごとの最大を使うのは、遠くを歩く人のような小さな動きを、全体の平均で
+    薄めずに捉えるためです(1 区画は元の画面の 1/144。448×252 の画像で約 28×28 ピクセル)。
+    """
+    diff = np.abs(a - b).reshape(BLOCKS_H, SIGNATURE_H // BLOCKS_H, BLOCKS_W, SIGNATURE_W // BLOCKS_W)
+    return float(diff.mean(axis=(1, 3)).max())
+
+
+def is_static_window(signatures: list[np.ndarray], reference: list[np.ndarray] | None, threshold: float) -> bool:
+    """窓の全てのフレームが、前に推論した窓の対応するフレームと、どの区画でも threshold 未満の差しかないか。
+
+    前の窓(reference)とだけ比べ、省略した窓どうしでは比べません。少しずつ変わる場面(日の傾き・ゆっくり
+    動く物)で、差が積み重なっても気づけるようにするためです。フレームの数が違う窓(動画の末尾)は省略しません。
+    """
+    if not reference or len(signatures) != len(reference):
+        return False
+    return all(block_change(a, b) < threshold for a, b in zip(signatures, reference, strict=True))
 
 
 def save_thumbnail(image: np.ndarray, dest: Path) -> None:
@@ -266,45 +350,15 @@ class StageTimer:
         return out
 
 
-def _prefetch(iterable, size: int = 32):
-    """別のスレッドで iterable を先読みします(ffmpeg の復号と、推論を並行させるため)。"""
-    q: queue.Queue = queue.Queue(maxsize=size)
-    done = object()
-    stop = threading.Event()
-
-    def run() -> None:
-        it = iter(iterable)
+def _put_bounded(q: queue.Queue, item: object, stop: threading.Event) -> bool:
+    """有界キューへ要素を投入します。バックプレッシャーで待機中でも停止要求があれば抜けます。"""
+    while not stop.is_set():
         try:
-            for item in it:
-                if stop.is_set():
-                    break
-                q.put(item)
-            q.put(done)
-        except BaseException as exc:  # 呼び出し側で同じ例外を出す
-            q.put(exc)
-        finally:
-            close = getattr(it, "close", None)
-            if close:  # 途中で止めた場合も、ffmpeg のプロセスを確実に終わらせる
-                close()
-
-    th = threading.Thread(target=run, name="decode", daemon=True)
-    th.start()
-    try:
-        while True:
-            item = q.get()
-            if item is done:
-                return
-            if isinstance(item, BaseException):
-                raise item
-            yield item
-    finally:
-        stop.set()
-        while th.is_alive():  # 生成側が put で止まっていれば、取り出して終わらせる
-            try:
-                q.get(timeout=0.1)
-            except queue.Empty:
-                pass
-        th.join()
+            q.put(item, timeout=0.1)
+            return True
+        except queue.Full:
+            continue
+    return False
 
 
 class _Interrupted(Exception):
@@ -321,17 +375,27 @@ RETRY_BASE_SEC = 30  # 再試行までの間隔(1 回目 30 秒、以降 2 倍�
 
 
 class Ingestor:
-    """取り込みジョブを、バックグラウンドのスレッドで1つずつ処理します。"""
+    """取り込みジョブを、バックグラウンドのスレッドで処理します。
+
+    スレッドの数は INGEST_WORKERS(既定 1)です。2 以上にすると、複数のファイルの復号・前処理・保存を同時に進めます。
+    推論は Embedder の PriorityGate を通るため、GPU には今までどおり 1 回ずつ流れ、検索の優先も変わりません。
+    速い GPU では、1 本の ffmpeg の復号と Python の前処理が追いつかず GPU が待つため、ファイルを並べて埋めます。
+    同じ取り込み元のジョブ(取り込み直しなど)は、窓の削除と追加が混ざらないよう、同時には動かしません。
+    """
 
     def __init__(self, settings: Settings, store: Store, embedder: Embedder) -> None:
         self._settings = settings
         self._store = store
         self._embedder = embedder
         self._queue: queue.Queue[int | None] = queue.Queue()
-        self._thread: threading.Thread | None = None
+        self._workers = max(int(getattr(settings, "ingest_workers", 1) or 1), 1)
+        self._threads: list[threading.Thread] = []
         self._stopping = threading.Event()
-        self._current: int | None = None  # 実行中のジョブ
+        self._local = threading.local()  # スレッドごとの実行中のジョブ(取り消しの判定に使う)
+        self._running: set[int] = set()  # 実行中のジョブ
         self._cancel: set[int] = set()  # 取り消しを求められた実行中のジョブ
+        self._busy_sources: set[int] = set()  # 実行中のジョブの取り込み元
+        self._busy_cond = threading.Condition()
 
     # ------------------------------------------------------------------ 起動・停止
     def start(self) -> None:
@@ -346,27 +410,35 @@ class Ingestor:
             source = self._store.get_source(source_id)
             if source is None or source_id in running:
                 continue
-            if source["path"] and source["kind"] in ("video", "audio", "image") and Path(source["path"]).is_file():
+            if source["path"] and source["kind"] in INGEST_KINDS and Path(source["path"]).is_file():
                 log.warning("ベクトルが失われた取り込み元を取り込み直します: %s", source["name"])
                 self._store.update_source(source_id, status="queued", error=None)
                 self.submit(source_id)
-        self._thread = threading.Thread(target=self._loop, name="ingestor", daemon=True)
-        self._thread.start()
+        for i in range(self._workers):
+            name = "ingestor" if self._workers == 1 else f"ingestor-{i + 1}"
+            th = threading.Thread(target=self._loop, name=name, daemon=True)
+            th.start()
+            self._threads.append(th)
 
     def stop(self) -> None:
         # 取り込み中のジョブは、窓の区切りで止めて queued に戻す(次の起動で最初からやり直す)。
         # 推論の途中の窓は、終わるまで待つ(待たずに終了すると、推論中のスレッドが残ったまま Python が終了する)
         self._stopping.set()
-        self._queue.put(None)
-        if self._thread:
-            self._thread.join(timeout=45)
-            if self._thread.is_alive():
-                log.warning("取り込みの推論が 45 秒以内に終わりませんでした")
+        for _ in self._threads:  # スレッドごとに 1 つずつ、終わりの印を受け取る
+            self._queue.put(None)
+        with self._busy_cond:  # 同じ取り込み元の空きを待っているスレッドを起こす
+            self._busy_cond.notify_all()
+        deadline = time.monotonic() + 45
+        for th in self._threads:
+            th.join(timeout=max(deadline - time.monotonic(), 0.1))
+        if any(th.is_alive() for th in self._threads):
+            log.warning("取り込みの推論が 45 秒以内に終わりませんでした")
 
     def _check_stop(self) -> None:
         if self._stopping.is_set():
             raise _Interrupted()
-        if self._current is not None and self._current in self._cancel:
+        current = getattr(self._local, "job", None)
+        if current is not None and current in self._cancel:
             raise _Cancelled()
 
     def cancel(self, job_id: int) -> dict | None:
@@ -411,6 +483,44 @@ class Ingestor:
     def queue_size(self) -> int:
         return self._queue.qsize()
 
+    @property
+    def workers(self) -> int:
+        return self._workers
+
+    @property
+    def running(self) -> int:
+        """実行中のジョブの数。"""
+        return len(self._running)
+
+    @contextmanager
+    def _claim_sources(self, source_ids: list[int]):
+        """取り込み元を、このスレッドだけが処理している状態にします(同じ取り込み元のジョブを同時に動かさない)。
+
+        ほかのスレッドが同じ取り込み元を処理していれば、終わるまで待ちます。
+        停止を求められたら _Interrupted を送出します。
+        """
+        ids = set(source_ids)
+        with self._busy_cond:
+            while ids & self._busy_sources:
+                if self._stopping.is_set():
+                    raise _Interrupted()
+                self._busy_cond.wait(timeout=1.0)
+            self._busy_sources |= ids
+        try:
+            yield
+        finally:
+            with self._busy_cond:
+                self._busy_sources -= ids
+                self._busy_cond.notify_all()
+
+    def _source_ids(self, job_ids: list[int]) -> list[int]:
+        ids = []
+        for job_id in job_ids:
+            job = self._store.get_job(job_id)
+            if job is not None:
+                ids.append(job["source_id"])
+        return ids
+
     # ------------------------------------------------------------------ ジョブの実行
     IMAGE_BATCH = 16  # 画像はまとめて推論する(1 枚ずつより速い)
 
@@ -431,14 +541,20 @@ class Ingestor:
                         rest.append(None)
                         break
                     (batch if self._is_image_job(nxt) else rest).append(nxt)
-            if len(batch) > 1:
-                self._run_image_batch(batch)
-            else:
-                self._run_job(job_id)
-            for other in rest:
-                if other is None:
-                    return
-                self._run_job(other)
+            try:
+                if len(batch) > 1:
+                    with self._claim_sources(self._source_ids(batch)):
+                        self._run_image_batch(batch)
+                else:
+                    with self._claim_sources(self._source_ids([job_id])):
+                        self._run_job(job_id)
+                for other in rest:
+                    if other is None:
+                        return
+                    with self._claim_sources(self._source_ids([other])):
+                        self._run_job(other)
+            except _Interrupted:  # 停止中に、同じ取り込み元の空きを待っていた(ジョブは queued のまま残る)
+                return
 
     def _is_image_job(self, job_id: int) -> bool:
         job = self._store.get_job(job_id)
@@ -496,7 +612,8 @@ class Ingestor:
         source = self._begin(job_id)
         if source is None:
             return
-        self._current = job_id
+        self._local.job = job_id
+        self._running.add(job_id)
         try:
             check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
             info = self._embedder.info()
@@ -507,6 +624,8 @@ class Ingestor:
                 timings = self._index_audio(job_id, source)
             elif source["kind"] == "image":
                 timings = self._index_images([(job_id, source)])
+            elif source["kind"] == "document":
+                timings = self._index_document(job_id, source)
             else:
                 raise ValueError(f"キューで処理できない種類です: {source['kind']}")
         except _Interrupted:
@@ -524,7 +643,8 @@ class Ingestor:
             self._handle_error(job_id, source, exc)
             return
         finally:
-            self._current = None
+            self._local.job = None
+            self._running.discard(job_id)
             self._cancel.discard(job_id)
         self._finish(job_id, source, timings)
 
@@ -532,10 +652,12 @@ class Ingestor:
         return thumbs.path_for(self._settings.data_dir / "thumbs", window_id)
 
     def _index_video(self, job_id: int, source: dict) -> dict:
-        """動画を窓ごとにベクトルにします。
+        """動画を窓ごとにベクトルにします(Producer-Consumer パイプライン)。
 
-        ffmpeg は 1 回だけ起動し、先頭から最後まで連続で復号します(VideoFrameReader)。復号は別スレッドで
-        先読みし、推論と並行させます。音声も 1 回の ffmpeg でまとめて変換します(AudioTrack)。
+        Producer スレッド(name="decode")が ffmpeg からの連続復号・窓の組み立て・音声切り出し・
+        CPU 前処理(テンソル化・GPU 向け pin_memory)までを先行実行し、有界キュー(maxsize=INGEST_PREFETCH、
+        既定 2)越しに Consumer(ingestor スレッド)へ渡します。これにより窓 N の推論中に窓 N+1 の
+        復号と前処理をオーバーラップさせつつ、バックプレッシャーでメモリ肥大化を防ぎます。
         """
         timer = StageTimer()
         params = IngestParams(**source["params"])
@@ -556,68 +678,174 @@ class Ingestor:
         self._store.update_job(job_id, total=len(plans), progress=0)
 
         step = decode_step_ms(plans)
+        need = [[round(t / step) for t in plan.sample_ms] for plan in plans]
+        select_offset, select_stride = decode_select_grid(need)
         hwaccel, device = media.select_hwaccel(
             self._settings.ffmpeg_hwaccel, self._settings.ffmpeg_hwaccel_device
         )
+        source_size = (info.width, info.height) if info.width > 0 and info.height > 0 else None
         with timer.stage("probe"):
             reader = media.VideoFrameReader(
-                path, step, self._settings.image_max_side, hwaccel, device, self._settings.ffmpeg_skip_frames
+                path,
+                step,
+                self._settings.image_max_side,
+                hwaccel,
+                device,
+                self._settings.ffmpeg_skip_frames,
+                source_size=source_size,
+                select_offset=select_offset,
+                select_stride=select_stride,
             )
-        need = [[round(t / step) for t in plan.sample_ms] for plan in plans]
-        # 推論は別のスレッドで行い、その間に前の回の保存と、次の回の復号・組み立てを進める。
+        batch = max(self._embedder.info().batch_size, 1)
+        prefetch = max(self._settings.ingest_prefetch, 1)
+        # 推論は別のスレッドで行い、その間に前の回の保存(DB・サムネイル)と、Producer 側の復号・前処理を進める。
         # 先に次の回を推論に出してから前の回を保存するため、推論中の回は最大 2 つ
         embed_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ingest-embed")
         inflight: tuple[list[dict], Future] | None = None
+        # 変化の無い区間の省略は、映像のみの窓だけで行う(音声つきの窓は、映像が止まっていても音が変わり得るため)
+        skip_static = params.skip_static and not use_audio
         with tempfile.TemporaryDirectory(prefix="mediasearch-") as tmp:
             audio = media.AudioTrack(path, tmp) if use_audio else None
-            try:
+            work_q: queue.Queue = queue.Queue(maxsize=prefetch)
+            done = object()
+            stop = threading.Event()
+
+            def produce() -> None:
+                it = iter(reader)
                 frames: dict[int, np.ndarray] = {}
-                pending = 0  # 次に処理する窓
+                pending = 0  # 次に組み立てる窓
                 last_index = -1
-                stream = _prefetch(reader)
-                batch = max(self._embedder.info().batch_size, 1)
                 ready: list[dict] = []  # フレームが揃い、推論を待っている窓(batch 件たまったらまとめて推論する)
-                stored = 0
-                while pending < len(plans):
+                batch_audio_sec = 0.0
+                ref_win: dict | None = None  # 変化の判定の基準(最後に推論に回した窓)と、その縮小画像
+                ref_sigs: list[np.ndarray] | None = None
+                try:
+                    while pending < len(plans) and not stop.is_set():
+                        item = next(it, None)
+                        if item is not None:
+                            last_index = item[0] // step
+                            frames[last_index] = item[1]
+                        # 必要なフレームが揃った窓から順に前処理し、batch 件ごとに有界キューへ積む
+                        while pending < len(plans) and (item is None or max(need[pending]) <= last_index):
+                            if stop.is_set():
+                                return
+                            plan = plans[pending]
+                            win, audio_sec = self._prepare_window(plan, need[pending], frames, audio)
+                            batch_audio_sec += audio_sec
+                            skipped = False
+                            if skip_static:
+                                sigs = [frame_signature(p.image) for p in win["parts"] if isinstance(p, ImagePart)]
+                                if (
+                                    ref_win is not None
+                                    and plan.end_ms - ref_win["plan"].start_ms <= MAX_STATIC_SPAN_MS
+                                    and is_static_window(sigs, ref_sigs, params.static_threshold)
+                                ):
+                                    # 推論せず、基準の窓の終わりを延ばす。基準の窓がまだ手元にあれば直接、
+                                    # 既に推論に回していれば、取り込みのスレッドに延長を頼む(保存の前後どちらでも反映)
+                                    skipped = True
+                                    if any(w is ref_win for w in ready):
+                                        ref_win["end_ms"] = plan.end_ms
+                                        ref_win["skipped"] = ref_win.get("skipped", 0) + 1
+                                    elif not _put_bounded(work_q, ("extend", ref_win, plan.end_ms), stop):
+                                        return
+                                else:
+                                    ref_win, ref_sigs = win, sigs
+                            if not skipped:
+                                ready.append(win)
+                            pending += 1
+                            keep = min(need[pending]) if pending < len(plans) else last_index + 1
+                            for k in [k for k in frames if k < keep]:
+                                del frames[k]
+                            if ready and (len(ready) >= batch or pending == len(plans)):
+                                t_prep = time.perf_counter()
+                                prepared = self._embedder.prepare_parts_batch([w["parts"] for w in ready])
+                                prep_sec = time.perf_counter() - t_prep
+                                packet = (ready, prepared, batch_audio_sec, prep_sec)
+                                if not _put_bounded(work_q, packet, stop):
+                                    return
+                                ready = []
+                                batch_audio_sec = 0.0
+                        if item is None:
+                            break
+                    if ready and not stop.is_set():
+                        t_prep = time.perf_counter()
+                        prepared = self._embedder.prepare_parts_batch([w["parts"] for w in ready])
+                        prep_sec = time.perf_counter() - t_prep
+                        if not _put_bounded(work_q, (ready, prepared, batch_audio_sec, prep_sec), stop):
+                            return
+                    _put_bounded(work_q, done, stop)
+                except BaseException as exc:  # Consumer 側で同じ例外を送出する
+                    _put_bounded(work_q, exc, stop)
+                finally:
+                    close = getattr(it, "close", None)
+                    if close:  # 途中で止めた場合も、ffmpeg のプロセスを確実に終わらせる
+                        close()
+
+            producer = threading.Thread(target=produce, name="decode", daemon=True)
+            producer.start()
+            stored = 0
+            skipped_static = 0
+            try:
+                while True:
                     self._check_stop()
                     t = time.perf_counter()
-                    item = next(stream, None)
+                    packet = work_q.get()
                     timer.add("decode", time.perf_counter() - t)
-                    if item is not None:
-                        last_index = item[0] // step
-                        frames[last_index] = item[1]
-                    # 必要なフレームが揃った窓から順に処理する(動画が probe の長さより短い場合は、手元の分で処理)
-                    while pending < len(plans) and (item is None or max(need[pending]) <= last_index):
-                        ready.append(self._prepare_window(plans[pending], need[pending], frames, audio, timer))
-                        pending += 1
-                        keep = min(need[pending]) if pending < len(plans) else last_index + 1
-                        for k in [k for k in frames if k < keep]:
-                            del frames[k]
-                        if len(ready) >= batch or pending == len(plans):
-                            check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
-                            submitted = (ready, embed_pool.submit(self._embed_windows, ready, timer))
-                            ready = []
-                            if inflight is not None:
-                                stored += self._save_windows(source, inflight[0], inflight[1].result(), timer)
-                                self._store.update_job(job_id, progress=stored)
-                            inflight = submitted
-                    if item is None:
+                    if packet is done:
                         break
+                    if isinstance(packet, BaseException):
+                        raise packet
+                    if packet[0] == "extend":  # 変化の無い窓を省略し、基準の窓を延ばす
+                        _, ref, end_ms = packet
+                        if "window_id" in ref:  # 保存済み
+                            self._store.extend_window(ref["window_id"], end_ms)
+                        else:  # 推論中・保存前(保存のときに反映する)
+                            ref["end_ms"] = end_ms
+                        skipped_static += 1
+                        stored += 1
+                        self._store.update_job(job_id, progress=stored)
+                        continue
+                    ready, prepared, audio_sec, prep_sec = packet
+                    if audio_sec > 0:
+                        timer.add("audio", audio_sec)
+                    if prep_sec > 0:
+                        timer.add("preprocess", prep_sec)
+                    self._check_stop()
+                    check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
+                    submitted = (ready, embed_pool.submit(self._embed_windows, ready, prepared, timer))
+                    if inflight is not None:
+                        prev_ready, prev_fut = inflight
+                        inflight = submitted
+                        stored += self._save_windows(source, prev_ready, prev_fut.result(), timer)
+                        skipped_static += sum(w.get("skipped", 0) for w in prev_ready)
+                        self._store.update_job(job_id, progress=stored)
+                    else:
+                        inflight = submitted
                 if inflight is not None:
-                    stored += self._save_windows(source, inflight[0], inflight[1].result(), timer)
+                    prev_ready, prev_fut = inflight
                     inflight = None
+                    stored += self._save_windows(source, prev_ready, prev_fut.result(), timer)
+                    skipped_static += sum(w.get("skipped", 0) for w in prev_ready)
                     self._store.update_job(job_id, progress=stored)
             finally:
+                stop.set()
                 if inflight is not None:  # 途中で止めた場合も、推論中の回が終わるのを待ってから片付ける
                     inflight[1].cancel()
                 embed_pool.shutdown(wait=True)
-                stream.close()
+                while producer.is_alive():  # 生成側が put で止まっていれば、取り出して終わらせる
+                    try:
+                        work_q.get(timeout=0.1)
+                    except queue.Empty:
+                        pass
+                producer.join()
                 if audio is not None:
                     audio.close()
         timer.extra.update(
             decoder=reader.decoder, skip_frames=reader.skip_used, decode_step_ms=step, decoded_frames=reader.frames,
-            embed_batch=max(self._embedder.info().batch_size, 1),
+            embed_batch=batch, prefetch=prefetch, select_stride=select_stride,
         )  # fmt: skip
+        if skip_static:
+            timer.extra["skipped_static"] = skipped_static
         return timer.result(len(plans), info.duration_ms)
 
     def _prepare_window(
@@ -626,9 +854,8 @@ class Ingestor:
         need: list[int],
         frames: dict[int, np.ndarray],
         audio: media.AudioTrack | None,
-        timer: StageTimer,
-    ) -> dict:
-        """1 窓ぶんの入力を組み立てます(推論はまだしない。まとめて推論するため)。"""
+    ) -> tuple[dict, float]:
+        """1 窓ぶんの入力を組み立てます(推論はまだしない。Producer スレッドから呼ぶ)。"""
         picked, times = [], []
         for k, t in zip(need, plan.sample_ms, strict=True):
             if k in frames:
@@ -640,37 +867,48 @@ class Ingestor:
         if not picked:
             raise media.MediaError(f"{plan.start_ms}ms からの窓でフレームを1枚も取り出せません")
         slices = None
+        audio_sec = 0.0
         if audio is not None:
-            with timer.stage("audio"):
-                pcm = audio.slice(plan.start_ms, plan.end_ms)
+            t0 = time.perf_counter()
+            pcm = audio.slice(plan.start_ms, plan.end_ms)
+            audio_sec = time.perf_counter() - t0
             slices = split_window_pcm(pcm, plan.start_ms, plan.end_ms, len(picked))
-        return {"plan": plan, "parts": build_window_parts(picked, times, slices), "thumb": picked[len(picked) // 2]}
+        win = {"plan": plan, "parts": build_window_parts(picked, times, slices), "thumb": picked[len(picked) // 2]}
+        return win, audio_sec
 
-    def _embed_windows(self, ready: list[dict], timer: StageTimer) -> list[np.ndarray]:
-        """組み立てた窓をまとめて推論します(EMBED_BATCH が 1 なら 1 件ずつ推論する)。推論のスレッドで動く。"""
+    def _embed_windows(self, ready: list[dict], prepared, timer: StageTimer) -> list[np.ndarray]:
+        """前処理済みの窓をまとめて推論します(EMBED_BATCH が 1 なら 1 件ずつ推論する)。推論のスレッドで動く。"""
         with timer.overlapping("embed"):
+            if prepared is not None:
+                return self._embedder.embed_prepared_parts(prepared, high=False)
             return self._embedder.embed_parts_many([w["parts"] for w in ready], high=False)
 
     def _save_windows(self, source: dict, ready: list[dict], vecs: list[np.ndarray], timer: StageTimer) -> int:
-        """推論した窓を保存し、保存した件数を返します(DB への書き込みは、取り込みのスレッドだけで行う)。"""
+        """推論した窓を保存し、処理した窓の数を返します(DB への書き込みは、取り込みのスレッドだけで行う)。
+
+        変化が無いため省略した窓(推論に回す前に、この窓へまとめたもの)も、処理した数に含めます。
+        """
+        skipped = 0
         for w, vec in zip(ready, vecs, strict=True):
             plan = w["plan"]
             kind = "tav" if any(isinstance(p, AudioPart) for p in w["parts"]) else "frames"
+            skipped += w.get("skipped", 0)
             with timer.stage("store"):
                 window_id = self._store.add_window(
                     source_id=source["id"],
                     start_ms=plan.start_ms,
-                    end_ms=plan.end_ms,
+                    end_ms=w.get("end_ms", plan.end_ms),
                     kind=kind,
                     group_id=source["group_id"],
                     abs_ts=source["start_ts"] + plan.start_ms / 1000,
                     vec=vec,
                 )
+            w["window_id"] = window_id  # 後から延長の依頼が来たときに使う
             if source["params"].get("store_media", True):
                 with timer.stage("thumb"):
                     # 復号済みのフレームから作る(表示のたびに ffmpeg を起動しなくて済む)
                     save_thumbnail(w["thumb"], self._thumb_path(window_id))
-        return len(ready)
+        return len(ready) + skipped
 
     def _index_audio(self, job_id: int, source: dict) -> dict:
         timer = StageTimer()
@@ -716,6 +954,58 @@ class Ingestor:
                 audio.close()
         return timer.result(windows, info.duration_ms)
 
+    # 文書の塊を 1 回の推論にまとめる件数。推論の途中には検索が割り込めないため、まとめるほど取り込みは速いが、
+    # 取り込み中の検索が待たされる。RTX 3060・800 字の塊で、16 件: 1 塊 15.6 ms・検索 p50 235 ms、
+    # 4 件: 17.3 ms・67 ms、1 件: 29.5 ms・28 ms(2026-11-20 実測)。取り込みの遅れが 1 割で済む 4 にする
+    DOC_EMBED_BATCH = 4
+
+    def _index_document(self, job_id: int, source: dict) -> dict:
+        """文書を塊ごとにベクトルにします(窓の種類は document。時刻の幅は 0 で、ページを window_texts に記録)。
+
+        塊は document のプロンプトで埋め込みます(検索文は query のプロンプト)。推論は取り込みの優先度で、
+        DOC_EMBED_BATCH 件ずつ行い、合間に検索が割り込めるようにします。
+        """
+        timer = StageTimer()
+        params = IngestParams(**source["params"])
+        path = Path(source["path"])
+        with timer.stage("extract"):
+            extracted = documents.extract(path)
+        chunks = documents.chunk_pages(extracted.pages, params.doc_chunk_chars, params.doc_overlap_chars)
+        if not chunks:
+            raise documents.DocumentError(f"文書から文字を取り出せません: {source['name']}")
+        self._store.update_source(source["id"], duration_ms=0)
+        self._store.delete_windows(source["id"])
+        self._store.update_job(job_id, total=len(chunks), progress=0)
+        keep_text = params.store_media
+        done = 0
+        for i in range(0, len(chunks), self.DOC_EMBED_BATCH):
+            self._check_stop()
+            check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
+            part = chunks[i : i + self.DOC_EMBED_BATCH]
+            with timer.stage("embed"):
+                vecs = self._embedder.embed_texts([c.text for c in part], kind="document")
+            with timer.stage("store"):
+                for c, vec in zip(part, vecs, strict=True):
+                    self._store.add_window(
+                        source_id=source["id"],
+                        start_ms=0,
+                        end_ms=0,
+                        kind="document",
+                        group_id=source["group_id"],
+                        abs_ts=source["start_ts"],
+                        vec=vec,
+                        page=c.page,
+                        text=c.text if keep_text else None,
+                    )
+            done += len(part)
+            self._store.update_job(job_id, progress=done)
+        timer.extra.update(
+            pages=extracted.total_pages,
+            chars=sum(len(p.text) for p in extracted.pages),
+            truncated=extracted.truncated,
+        )
+        return timer.result(len(chunks), 0)
+
     def _run_image_batch(self, job_ids: list[int]) -> None:
         """続けて登録された複数の画像を、1 回の推論でまとめてベクトルにします。
 
@@ -728,6 +1018,14 @@ class Ingestor:
                 items.append((job_id, source))
         if not items:
             return
+        ids = {job_id for job_id, _ in items}
+        self._running |= ids
+        try:
+            self._run_image_items(items)
+        finally:
+            self._running -= ids
+
+    def _run_image_items(self, items: list[tuple[int, dict]]) -> None:
         try:
             check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
             info = self._embedder.info()

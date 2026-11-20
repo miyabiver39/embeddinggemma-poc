@@ -127,13 +127,14 @@ Intel の古い内蔵 GPU(Iris Xe など)は PyTorch の XPU 対応外の可能�
 
 | 計測の内容 | CPU(Ryzen 7 5700X・`:cpu`) | RTX 3060 12GB(`:cuda`) | RX 9060 XT 16GB(`:rocm`) |
 |---|---|---|---|
-| 動画の取り込み(1080p・60 秒・2 秒窓 30 件) | 215.8 秒(1 窓 7.19 秒) | **5.3 秒(1 窓 0.18 秒)** | 7.8 秒(1 窓 0.26 秒) |
-| 実時間に対する取り込みの速さ | 0.28 倍 | **11.4 倍** | 7.7 倍 |
-| 音声の取り込み(60 秒・10 秒区切り 6 件) | 5.17 秒 | **0.67 秒** | 0.91 秒 |
-| 画像の取り込み(1080p・50 枚) | 0.29 枚/秒 | **6.64 枚/秒** | 5.62 枚/秒 |
+| 動画の取り込み(1080p・60 秒・2 秒窓 30 件) | 215.8 秒(1 窓 7.19 秒) | **5.2 秒(1 窓 0.17 秒)** | 7.8 秒(1 窓 0.26 秒) |
+| 実時間に対する取り込みの速さ | 0.28 倍 | **11.5 倍** | 7.7 倍 |
+| 音声の取り込み(60 秒・10 秒区切り 6 件) | 5.17 秒 | **0.70 秒** | 0.91 秒 |
+| 画像の取り込み(1080p・50 枚) | 0.29 枚/秒 | **9.67 枚/秒** | 5.62 枚/秒 |
 | 文章の検索(同時 4 件・30 秒) | 7.1 件/秒(p50 440 ms) | **194 件/秒(p50 19 ms)** | 16.9 件/秒(p50 176 ms) |
 
-- RTX 3060: Ubuntu 26.04.1 LTS、Core i7-6700K、ドライバ 595.99.02。2026-11-20 に、推論の高速化(torch.compile・CUDA Graph など。[docs/gpu.md](docs/gpu.md) の「推論の高速化」)を入れた状態で計測。高速化の前(2026-11-19)は、動画 9.4 秒(1 窓 0.31 秒)・音声 1.01 秒・画像 5.12 枚/秒・検索 17.4 件/秒(p50 166 ms)でした。検索 1 件ずつの応答は p50 7.6 ms(高速化の前は 51 ms)。GPU メモリの使用量は最大約 3.4GB、動画の復号も GPU で行います。初回の起動は、高速化の準備のため約 80 秒かかります(2 回目以降は約 32 秒)。
+- RTX 3060: Ubuntu 26.04.1 LTS、Core i7-6700K、ドライバ 595.99.02。2026-11-20 に、CI でビルドした `:cuda`(main の c5a27c3。推論の高速化(torch.compile・CUDA Graph など。[docs/gpu.md](docs/gpu.md) の「推論の高速化」)と PR #14 の改善を含む)で計測。PR #14 の前後で速度の差は誤差の範囲でした([bench/README.md](bench/README.md))。高速化の前(2026-11-19)は、動画 9.4 秒(1 窓 0.31 秒)・音声 1.01 秒・画像 5.12 枚/秒・検索 17.4 件/秒(p50 166 ms)でした。検索 1 件ずつの応答は p50 7.6 ms(高速化の前は 51 ms)。GPU メモリの使用量は最大約 3.5GB、動画の復号も GPU で行います。初回の起動は、高速化の準備のため約 80 秒かかります(2 回目以降は約 37 秒)。
+- RTX 3060 の音声の取り込みは、音声側の高速化(torch.compile)を品質の都合で外した後の値です(外す前は 0.44 秒。[docs/gpu.md](docs/gpu.md))。
 - CPU と RX 9060 XT: Windows 11 + Docker Desktop(WSL2)。2026-10-13 に計測。RX 9060 XT は高速な注意機構を有効にした状態(`rocm` イメージの既定。[docs/gpu.md](docs/gpu.md))の値です。
 - GPU では、2 秒窓の映像を実時間の 6 倍以上の速さで取り込めます。処理時間の大半は推論で、音声と短い文章の検索は計算が小さいため、GPU による差が小さくなります。
 - 合成の素材での値です。実際の録画映像では、解像度・長さ・窓の設定によって変わります。
@@ -193,6 +194,10 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `FRAMES_PER_WINDOW` | `2` | 窓あたりのフレーム数 |
 | `OVERLAP_SEC` | `0` | 窓の重なり(秒) |
 | `INCLUDE_AUDIO` | `false` | 動画の音声も同じベクトルに含める |
+| `SKIP_STATIC` | `false` | 前の窓と映像が変わらない窓を推論せず、前の窓を延ばす(映像のみの窓だけ。動きの少ない監視カメラで、窓の数と取り込みの時間が減る。[docs/design.md](docs/design.md)) |
+| `STATIC_THRESHOLD` | `4.0` | `SKIP_STATIC` で「変化なし」とみなす、区画ごとの明るさの差の上限(0〜255。小さいほど省略しにくい) |
+| `DOC_CHUNK_CHARS` | `800` | 文書を 1 つのベクトルにする文字数の目安(100〜4000)。塊はページをまたがない |
+| `DOC_OVERLAP_CHARS` | `100` | 前の塊の終わりを、次の塊の頭に重ねる文字数(0〜`DOC_CHUNK_CHARS` の半分) |
 | `AUDIO_CHUNK_SEC` | `10` | 音声ファイルの分割長(秒) |
 | `IMAGE_MAX_SIDE` | `448` | 画像を縮小する長辺(px) |
 | `FFMPEG_HWACCEL` | `auto` | 動画の復号に使う GPU(`auto` / `cuda` / `vaapi` / `qsv` / `none`)。使えない場合は CPU に切り替える(`docs/gpu.md`) |
@@ -200,6 +205,10 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `FFMPEG_SKIP_FRAMES` | `noref` | 動画の復号を省く範囲。`noref`(参照されないフレームを省く。時刻のずれは 1〜2 フレーム)/ `none`(全フレーム)/ `keyframes`(キーフレームのみ。数倍速いが、時刻が数秒ずれることがある) |
 | `EMBED_BATCH` | `auto` | まとめて推論する最大の件数。`auto` は CPU で 1(まとめない。CPU では速くならないことを実測)、GPU で 4(効果は小さい。`docs/gpu.md`) |
 | `TORCH_COMPILE` | `auto` | 推論の高速化(torch.compile・CUDA Graph)。`auto` は NVIDIA の GPU で C コンパイラがあるとき(`cuda` イメージ)に使う。`off` で使わない(起動は速くなるが、推論は遅くなる)。準備の結果は `DATA_DIR/cache/torch` に保存する(`docs/gpu.md`) |
+| `TORCH_CACHE_DIR` | `DATA_DIR/cache/torch` | PyTorch(`TORCHINDUCTOR_CACHE_DIR` / `TRITON_CACHE_DIR`)のコンパイルキャッシュ永続化先(各環境変数での個別上書きを優先) |
+| `WARMUP_ON_START` | `true` | 起動時に `/readyz` が Ready になる直前でダミー入力(テキスト・画像・音声)による 1 回のウォームアップ推論を行う(`remote` や `TORCH_COMPILE` で実施済みの場合を除く) |
+| `INGEST_PREFETCH` | `2` | 動画取り込みの Producer-Consumer パイプラインの有界キュー上限(1〜16)。窓 N の推論中に窓 N+1 の復号・前処理を先行実行しつつ、バックプレッシャーでメモリ肥大化を防ぐ |
+| `INGEST_WORKERS` | `1` | 同時に取り込むファイルの数(1〜8)。復号・前処理・保存を並べて進める。推論は優先度の仕組みを通して GPU に 1 回ずつ流すため、検索の優先とベクトルは変わらない。1 本の ffmpeg の復号では GPU が待ってしまう、速い GPU で効く。メモリの使用量はおおむねこの数に比例して増える |
 | `IMAGE_MAX_TOKENS` | `0` | 画像1枚あたりのトークン上限(0=モデル既定) |
 | `TOP_K` | `10` | 検索の既定件数 |
 | `DATA_DIR` | `/data` | DB・サムネイル・アップロード動画の保存先 |
@@ -215,6 +224,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `EMBEDDING_TOKEN` | `API_TOKEN` と同じ | remote のとき、compute に送るトークン |
 | `INGEST_ROOTS` | `/recordings` | パス指定・フォルダ一括で取り込めるフォルダ(カンマ区切り)。`DATA_DIR` と監視フォルダは自動で追加 |
 | `MAX_UPLOAD_MB` | `4096` | 1 リクエストの大きさの上限(MB)。`0` で無制限 |
+| `CLIP_MAX_SEC` | `600` | `GET /api/sources/{id}/clip` で 1 回に切り出せる長さの上限(秒)。`0` で切り出しを無効にする |
 | `ALLOWED_ORIGINS` | (空) | 別のオリジンのページから更新系の API を呼ぶ場合に許可するオリジン(カンマ区切り) |
 | `ALLOWED_HOSTS` | `*` | 受け付ける Host ヘッダー(カンマ区切り)。DNS リバインディング対策 |
 | `PUID` / `PGID` | `1000` | アプリを動かすユーザー / グループの ID。`PUID=0` で root のまま動かす |
@@ -240,6 +250,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 - 「映像のみ(frames)」「映像+音声(tav)」「音声のみ(audio)」「静止画(image)」は種類(`kind`)を分けて保存し、検索時に選びます。`auto` は、文字・画像で検索したときは `INCLUDE_AUDIO` の設定に合わせて tav か frames と、image を探します。音声で検索したときの `auto` は `audio` を探します。
 - **動画・画像を保存しないモードがあります。** `STORE_MEDIA=false`(または取り込みの `store_media=false`)で取り込むと、ベクトルと情報(取り込み元の名前・時刻・グループ ID など)だけを残し、アップロードされたファイルは取り込み後に削除し、サムネイルも作りません。検索結果の `media_url` / `thumb_url` は `null` になります。パス指定で取り込んだファイルは利用者のものなので削除せず、配信の対象から外すだけです。元のファイルが無いため、取り込み直し(reindex)はできません。
 - **画像だけでも登録できます。** 動画から切り出せない場合や写真だけを扱う場合は、画像 1 枚を 1 件として取り込みます(`/api/ingest/image`、パス指定、フォルダ一括、監視フォルダのいずれも対応)。撮影日時は指定値、ファイル名の日時、EXIF の撮影日時の順に採用します。
+- **文書(PDF・Word・テキスト)も登録できます。** `.pdf` / `.docx` / `.txt` / `.md` を、約 800 字の塊ごとに 1 ベクトルにします(`/api/ingest/document`、パス指定、フォルダ一括、監視フォルダのいずれも対応)。検索は `kind=document`(映像と混ぜるときは `all`)で行い、結果にページ(`page`)と本文(`text`)が付きます。Shift_JIS のテキストも読めます。画像だけの PDF(スキャンしたもの)は文字を取り出せないため取り込めません。文書は保存期間(`RETENTION_DAYS`)の対象外です。
 - **保存期間を設定できます。** ストリームや監視フォルダでは窓が増え続けます(2 秒窓のストリーム 1 本で 1 日約 4.3 万窓・ベクトル約 140MB)。`RETENTION_DAYS` を設定すると、古い窓を 10 分ごとに削除し、メモリとディスクの使用量を一定の範囲に保ちます。窓が無くなったファイルは状態が `expired` になり、元のファイルは削除しません。
 - **ベクトルは組み込み型のベクトル DB(USearch)に保存します。** 設定・取り込み元・窓の情報は SQLite(`mediasearch.db`)、ベクトルは `vectors.usearch` に保存します。どちらも `DATA_DIR` の中の 1 ファイルで、別のサーバーは不要です。件数が増えると近似検索(HNSW)に切り替えるため、検索時間はほぼ一定です。メモリはベクトルの大きさに比例します(768 次元・10 万窓で約 320MB)。
 
@@ -248,7 +259,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | | |
 |---|---|
 | `GET /api/info` | 状態・版・既定値・プリセット・索引の件数・監視フォルダの状態 |
-| `POST /api/ingest/video` / `audio` / `image` | ファイルのアップロード取り込み(画像は複数枚をまとめて送れる) |
+| `POST /api/ingest/video` / `audio` / `image` / `document` | ファイルのアップロード取り込み(画像は複数枚をまとめて送れる。文書は PDF・Word・テキスト) |
 | `POST /api/ingest/path` | コンテナ内パスの取り込み |
 | `POST /api/ingest/dir` | コンテナ内フォルダの一括取り込み |
 | `POST /api/watch/scan` | 監視フォルダを今すぐ走査 |
@@ -289,7 +300,7 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"          # モデル不要のテスト用
 pytest -q                        # ダミー埋め込みでの通しテスト(ffmpeg が必要)
-pip install -e ".[model]"        # 実モデルを使う場合(transformers は AGENTS.md の固定コミットを推奨)
+pip install -e ".[model]"        # 実モデルを使う場合(transformers 5.23.0 以降。イメージは 5.23.0 に固定)
 RUN_MODEL_TESTS=1 pytest -q -m model
 EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:create_app --reload
 ```

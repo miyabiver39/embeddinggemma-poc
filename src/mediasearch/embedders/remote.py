@@ -145,5 +145,9 @@ class RemoteEmbedder(Embedder):
         ).json()
         return finalize(np.asarray(data["vectors"][0], dtype=np.float32), self._dims)
 
+    def warmup(self) -> dict:
+        """外部 compute は自身の起動時にウォームアップするため、app 側からは呼ばない。"""
+        return {"ok": True, "skipped": True, "modalities": [], "elapsed_ms": 0.0}
+
     def close(self) -> None:
         self._client.close()

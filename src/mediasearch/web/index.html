@@ -31,6 +31,10 @@
   .hit img { width:100%; aspect-ratio:16/9; object-fit:cover; background:#000; display:block; }
   .hit .nothumb { width:100%; aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; background:var(--line); color:var(--mute); font-size:12px; }
   .hit .meta { padding:6px 8px; font-size:12px; }
+  .hit .doctext { font-size:12px; line-height:1.5; max-height:9em; overflow:hidden; white-space:pre-wrap; word-break:break-all; padding:6px 8px; background:var(--line); }
+  .hit .acts { display:flex; gap:4px; flex-wrap:wrap; margin-top:4px; }
+  .hit .acts button, .hit .acts a.btn { font-size:11px; padding:2px 6px; cursor:pointer; }
+  a.btn { color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:4px; text-decoration:none; }
   .score { font-weight:700; color:var(--acc); }
   .mute { color:var(--mute); }
   table { border-collapse:collapse; width:100%; font-size:13px; }
@@ -71,7 +75,8 @@
       <option value="frames">frames(映像のみ)</option>
       <option value="tav">tav(映像+音声)</option>
       <option value="audio">audio(音声のみ)</option>
-      <option value="image">image(静止画)</option></select></label>
+      <option value="image">image(静止画)</option>
+      <option value="document">document(文書: PDF・Word・テキスト)</option></select></label>
     <label>件数<input id="f-topk" type="number" min="1" value="10" style="width:70px"></label>
     <label>最小スコア<input id="f-min" type="number" step="0.01" value="0" style="width:80px"></label>
     <label>グループID<input id="f-grp" style="width:120px"></label>
@@ -79,6 +84,7 @@
     <label>開始日時<input id="f-from" type="datetime-local"></label>
     <label>終了日時<input id="f-to" type="datetime-local"></label>
     <label>連続区間をまとめる<select id="f-merge"><option value="true">する</option><option value="false">しない</option></select></label>
+    <label>ほぼ同じ場面をまとめる<select id="f-dedupe"><option value="">しない</option><option value="0.95">する(類似度 0.95 以上)</option><option value="0.9">強くまとめる(0.9 以上)</option></select></label>
     <label>新しい窓を通知(文章の検索のみ)<select id="f-live"><option value="false">しない</option><option value="true">する(取り込み中のリアルタイム検索)</option></select></label>
   </div>
   <div class="note">スコアはコサイン類似度です。テキスト→映像の一致は 0.3〜0.5 程度でも十分に意味があることがあります(最小スコアは実データを見て調整してください)。</div>
@@ -113,19 +119,21 @@
     <button id="btn-aup" class="primary" style="margin-bottom:8px">音声を取り込む</button>
     <label style="margin-left:24px">画像(複数選択可)<input type="file" id="i-ifile" accept="image/*" multiple></label>
     <button id="btn-iup" class="primary" style="margin-bottom:8px">画像を取り込む</button>
+    <label style="margin-left:24px">文書(PDF・Word・テキスト)<input type="file" id="i-dfile" accept=".pdf,.docx,.txt,.md,.markdown"></label>
+    <button id="btn-dup" class="primary" style="margin-bottom:8px">文書を取り込む</button>
   </div>
 
   <h3>コンテナ内のパスを指定(録画ディレクトリをマウントして使う)</h3>
   <div class="row">
     <label class="grow">パス(コンテナ内)<input id="i-path" placeholder="/recordings/group-a/20260101_000000.mp4"></label>
-    <label>種類<select id="i-pkind"><option value="auto">拡張子で判定</option><option>video</option><option>audio</option><option>image</option></select></label>
+    <label>種類<select id="i-pkind"><option value="auto">拡張子で判定</option><option>video</option><option>audio</option><option>image</option><option>document</option></select></label>
     <button id="btn-path" class="primary" style="margin-bottom:8px">取り込む</button>
   </div>
 
   <h3>フォルダを一括で取り込む</h3>
   <div class="row">
     <label class="grow">フォルダ(コンテナ内)<input id="i-dir" placeholder="/recordings"></label>
-    <label>種類<select id="i-dkind"><option value="auto">拡張子で判定</option><option value="video">video のみ</option><option value="audio">audio のみ</option><option value="image">image のみ</option></select></label>
+    <label>種類<select id="i-dkind"><option value="auto">拡張子で判定</option><option value="video">video のみ</option><option value="audio">audio のみ</option><option value="image">image のみ</option><option value="document">document のみ</option></select></label>
     <label style="flex-direction:row;align-items:center;gap:4px"><input type="checkbox" id="i-rec" checked> 下位フォルダも対象にする</label>
     <label style="flex-direction:row;align-items:center;gap:4px"><input type="checkbox" id="i-grpdir"> フォルダ名をグループIDにする</label>
     <button id="btn-dir" class="primary" style="margin-bottom:8px">一括で取り込む</button>
@@ -222,7 +230,19 @@ async function loadInfo() {
 function filters() {
   return { top_k: +$("f-topk").value || null, min_score: +$("f-min").value || 0, group_id: $("f-grp").value || null,
     location: $("f-loc").value || null, from_ts: tsOrEmpty("f-from") || null, to_ts: tsOrEmpty("f-to") || null,
-    kind: $("f-kind").value, merge: $("f-merge").value === "true" };
+    kind: $("f-kind").value, merge: $("f-merge").value === "true", dedupe: +$("f-dedupe").value || null };
+}
+async function searchSimilar(windowId, otherSources) {
+  $("s-msg").textContent = "似た場面を検索中…"; $("s-msg").className = "mute"; $("hits").innerHTML = ""; stopLive();
+  try {
+    const f = filters(); delete f.kind;  // 種類は元の窓に合わせる(auto)
+    const res = await api("/api/search/similar", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ window_id: windowId, exclude_same_source: !!otherSources, ...f }) });
+    renderHits(res);
+    const q = res.query_window;
+    $("s-msg").textContent = `窓 #${q.id}(${q.abs_time}${q.group_id ? "・" + q.group_id : ""})に似た場面` +
+      (otherSources ? "(別の録画のみ)" : "") + " — " + $("s-msg").textContent;
+  } catch (e) { $("s-msg").textContent = e.message; $("s-msg").className = "err"; }
 }
 function formFilters(fd) {
   const f = filters();
@@ -262,14 +282,23 @@ function startLive() {
     const h = JSON.parse(ev.data); count++;
     $("live-msg").textContent = `新しく見つかった窓: ${count} 件(最新が先頭)`;
     const el = document.createElement("div"); el.className = "hit";
-    el.innerHTML = `${h.thumb_url ? `<img loading="lazy" src="${esc(h.thumb_url)}" alt="">` : `<div class="nothumb">画像なし</div>`}
-      <div class="meta"><span class="score">${h.score.toFixed(3)}</span> ${esc(h.source_name)} ${fmt(h.start_ms)}–${fmt(h.end_ms)}<br>
+    el.innerHTML = `${h.kind === "document" ? docText(h) : h.thumb_url ? `<img loading="lazy" src="${esc(h.thumb_url)}" alt="">` : `<div class="nothumb">画像なし</div>`}
+      <div class="meta"><span class="score">${h.score.toFixed(3)}</span> ${esc(h.source_name)} ${place(h, h)}<br>
       <span class="mute">${esc(h.group_id || "")} ${esc(h.abs_time || "")} [${esc(h.kind)}]</span></div>`;
-    el.onclick = () => { if (!h.media_url) return; const pl = $("player"); $("viewer").style.display = "none"; pl.style.display = "block";
+    el.onclick = () => { if (!h.media_url || h.kind === "document") return; const pl = $("player"); $("viewer").style.display = "none"; pl.style.display = "block";
       pl.src = h.media_url + "#t=" + (h.start_ms / 1000).toFixed(2); pl.play().catch(() => {}); };
     $("live-hits").prepend(el);
   });
   LIVE.onerror = () => { $("live-msg").textContent = "通知の接続が切れました。自動で再接続します。"; };
+}
+// 結果の位置: 文書はページ、静止画は無し、それ以外は時刻の範囲
+function place(it, first) {
+  if (first.kind === "document") return first.page ? `${first.page} ページ` : "(ページなし)";
+  if (first.kind === "image") return "(静止画)";
+  return fmt(it.start_ms) + "–" + fmt(it.end_ms);
+}
+function docText(h) {
+  return `<div class="doctext">${h.text ? esc(h.text) : '<span class="mute">本文を保存していません</span>'}</div>`;
 }
 function renderHits(res) {
   const items = res.intervals || res.results.map((r) => ({ ...r, window_ids: [r.window_id] }));
@@ -279,14 +308,22 @@ function renderHits(res) {
     const first = byWin[it.window_ids[0]] || {};
     const thumb = first.thumb_url || "";
     return `<div class="hit" data-i="${i}">
-      ${thumb ? `<img loading="lazy" src="${esc(thumb)}" alt="">` : `<div class="nothumb">${first.kind === "audio" ? "音声" : "画像を保存していません"}</div>`}
+      ${first.kind === "document" ? docText(first) : thumb ? `<img loading="lazy" src="${esc(thumb)}" alt="">` : `<div class="nothumb">${first.kind === "audio" ? "音声" : "画像を保存していません"}</div>`}
       <div class="meta"><span class="score">${it.score.toFixed(3)}</span>
-      ${esc(it.source_name)} ${first.kind === "image" ? "(静止画)" : fmt(it.start_ms) + "–" + fmt(it.end_ms)}<br>
-      <span class="mute">${esc(it.group_id || "")} ${esc(it.location || "")} ${esc(first.abs_time || "")} ${first.kind ? "["+esc(first.kind)+"]" : ""}</span></div></div>`;
+      ${esc(it.source_name)} ${place(it, first)}<br>
+      <span class="mute">${esc(it.group_id || "")} ${esc(it.location || "")} ${esc(first.abs_time || "")} ${first.kind ? "["+esc(first.kind)+"]" : ""}</span>
+      ${first.duplicates ? `<br><span class="mute">ほぼ同じ場面 ほか ${first.duplicates} 件</span>` : ""}
+      <div class="acts"><button type="button" data-sim="${it.window_ids[0]}">${first.kind === "document" ? "似た箇所" : "似た場面"}</button><button type="button" data-sim="${it.window_ids[0]}" data-other="1">${first.kind === "document" ? "別の文書で似た箇所" : "別の録画で似た場面"}</button>
+      ${first.media_url && first.kind === "document" ? `<a class="btn" data-clip href="${esc(first.media_url)}" download>元の文書を保存</a>` : ""}
+      ${first.media_url && !["image", "document"].includes(first.kind) ? `<a class="btn" data-clip href="/api/sources/${it.source_id}/clip?start_ms=${it.start_ms}&end_ms=${it.end_ms}" download>切り出して保存</a>` : ""}</div></div></div>`;
   }).join("");
+  document.querySelectorAll("#hits [data-clip]").forEach((a) => a.onclick = (ev) => ev.stopPropagation());
+  document.querySelectorAll("#hits [data-sim]").forEach((b) => b.onclick = (ev) => {
+    ev.stopPropagation(); searchSimilar(+b.dataset.sim, b.dataset.other === "1");
+  });
   document.querySelectorAll(".hit").forEach((el) => el.onclick = () => {
     const it = items[+el.dataset.i], url = (byWin[it.window_ids[0]] || {}).media_url;
-    if (!url) return;
+    if (!url || (byWin[it.window_ids[0]] || {}).kind === "document") return;  // 文書は「元の文書を保存」から開く
     const p = $("player"), v = $("viewer");
     if ((byWin[it.window_ids[0]] || {}).kind === "image") {
       p.pause(); p.style.display = "none"; v.src = url; v.style.display = "block";
@@ -310,23 +347,24 @@ function ingestFields(fd) {
   return fd;
 }
 async function ingest(kind) {
-  const file = $(kind === "video" ? "i-vfile" : "i-afile").files[0];
+  const file = $({ video: "i-vfile", audio: "i-afile", document: "i-dfile" }[kind]).files[0];
   if (!file) { $("i-msg").innerHTML = '<span class="err">ファイルを選択してください。</span>'; return; }
   $("i-msg").textContent = "アップロード中…";
   try {
     const fd = ingestFields(new FormData()); fd.append("file", file);
-    if (kind === "audio") { fd.delete("preset"); fd.delete("window_sec"); fd.delete("frames_per_window"); fd.delete("overlap_sec"); fd.delete("include_audio"); }
+    if (kind !== "video") { fd.delete("preset"); fd.delete("window_sec"); fd.delete("frames_per_window"); fd.delete("overlap_sec"); fd.delete("include_audio"); }
     const r = await api("/api/ingest/" + kind, { method: "POST", body: fd });
     $("i-msg").textContent = acceptedText(r) + "(進捗は「ジョブ・ソース」タブで確認できます)";
   } catch (e) { $("i-msg").innerHTML = '<span class="err">' + esc(e.message) + "</span>"; }
 }
-const TS_FROM = { request: "指定値", filename: "ファイル名", exif: "撮影日時(EXIF)", now: "受付時刻", existing: "取り込み済み" };
+const TS_FROM = { request: "指定値", filename: "ファイル名", exif: "撮影日時(EXIF)", mtime: "ファイルの更新日時", now: "受付時刻", existing: "取り込み済み" };
 function acceptedText(r) {
   if (r.duplicate) return `取り込み済みのファイルです(source_id=${r.source_id})。再度取り込む場合は「取り込み済みのファイルも再度取り込む」を選択してください。`;
   return `受け付けました: source_id=${r.source_id}, job_id=${r.job_id}、録画開始 ${r.start_ts}(${TS_FROM[r.start_ts_from] || r.start_ts_from})`;
 }
 $("btn-vup").onclick = () => ingest("video");
 $("btn-aup").onclick = () => ingest("audio");
+$("btn-dup").onclick = () => ingest("document");
 $("btn-iup").onclick = async () => {
   const files = $("i-ifile").files;
   if (!files.length) { $("i-msg").innerHTML = '<span class="err">画像ファイルを選択してください。</span>'; return; }

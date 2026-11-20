@@ -22,6 +22,7 @@
 | Pillow | 画像処理 | MIT-CMU |
 | HTTPX | compute との通信 | BSD-3-Clause |
 | USearch(`usearch`)と NumKong(`numkong`) | ベクトル DB(近傍検索) | Apache-2.0 |
+| pypdf | 文書(PDF)の文字の取り出し | BSD-3-Clause |
 | MCP Python SDK(`mcp`)と依存パッケージ(httpx2、sse-starlette など) | MCP サーバー | MIT(依存パッケージは BSD-3-Clause / MIT など) |
 
 ## モデルを同梱するイメージ(cpu / cuda / rocm / intel)
@@ -31,7 +32,7 @@
 | [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2)(Google) | 埋め込みモデル(イメージに同梱。版は `docker/Dockerfile` の `MODEL_REVISION`) | Apache-2.0(モデルカードの記載による) |
 | PyTorch | 推論 | Apache-2.0 ほか(パッケージのメタデータによる。同梱ライブラリのライセンスはパッケージ内の記載を参照) |
 | torchvision | 画像の前処理 | BSD-3-Clause |
-| Transformers(Hugging Face。固定したコミットのアーカイブ) | モデルの実装 | Apache-2.0 |
+| Transformers(Hugging Face。版は `docker/Dockerfile` の `TRANSFORMERS_VERSION`) | モデルの実装 | Apache-2.0 |
 | sentence-transformers | 埋め込みの計算 | Apache-2.0 |
 | huggingface_hub / tokenizers / safetensors | モデルの読み込み | Apache-2.0 |
 | SoundFile | 音声の読み込み | BSD-3-Clause |

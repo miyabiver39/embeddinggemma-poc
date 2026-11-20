@@ -1,8 +1,8 @@
 # GPU モードの確認手順
 
-> **作者の環境には GPU がないため、GPU 版(`cuda` / `rocm` / `intel`)は実機で動かしていません。**
-> PyTorch のホイールの存在(2.14.1 の cu126 / rocm7.2 / xpu が cp312 向けに公開されていること)までは確認しましたが、
-> モデルが各 GPU で正しい出力を返すかは未確認です。以下の手順で確認し、結果を Issue かコミットで残してください。
+> 実機で確認した GPU は、NVIDIA の RTX 3060 12GB(`cuda`。Linux)と、AMD の RX 9060 XT 16GB(`rocm`。Windows の WSL2)です
+> (結果は下の記録欄)。Intel の GPU(`intel`)と、Linux ネイティブの AMD(`/dev/kfd`)は未確認です。
+> 未確認の環境で動かした場合は、以下の手順で確認し、結果を Issue かコミットで残してください。
 
 ## 共通の確認(どの GPU でも)
 
@@ -96,7 +96,8 @@ EmbeddingGemma 2 では画像エンコーダの注意機構がこの影響を受
 - `vaapi` のデバイスは `/dev/dri/renderD128` などを自動で選びます。複数ある場合は `FFMPEG_HWACCEL_DEVICE` で指定します。
 - イメージには、`rocm` に AMD 用(mesa)、`intel` に Intel 用(iHD)の VA-API ドライバを入れています。`cuda` は、NVIDIA Container Toolkit が
   ドライバの復号ライブラリを渡すよう、イメージに `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` を設定しています。
-- **実機の GPU での復号は未確認です。** GPU が無い環境では、GPU を指定しても CPU に切り替わること(テスト `tests/test_decode.py`)までを確認しています。
+- 実機の GPU での復号は、RTX 3060(`cuda`。NVDEC)で確認しました(`timings.decoder` が `cuda`)。AMD・Intel の VA-API での復号は未確認です
+  (WSL2 の AMD は CPU で復号します)。GPU が無い環境では、GPU を指定しても CPU に切り替わること(テスト `tests/test_decode.py`)を確認しています。
 
 実機での確認:
 
@@ -117,7 +118,7 @@ ffmpeg -v error -hwaccel cuda -i <動画> -f null -                             
 |---|---|---|
 | `encode()` の無駄を省く | sentence-transformers の `encode()` は呼ぶたびにモデル全体の `.to()` と `.eval()` を行うため、前処理 → 転送 → 計算を直接呼ぶ(全機器。結果は完全に一致) | 文章 1 件 48.5 → 35.3 ms |
 | 画像の詰め物を外す | 同じ大きさの画像だけのとき、2520 パッチの枠の詰め物(16:9 で 144 個)を外し、高速な Flash 方式の注意機構を使う(数学的に同じ) | 1 窓 286 → 255 ms |
-| 層ごとの torch.compile | 細かい計算を 1 つにまとめる。途中の値を float32 のまま扱えるため、float32 の結果に近づく。画像側・文章側・音声側の各層が対象 | 1 窓 → 169 ms、10 秒の音声 97 → 76 ms |
+| 層ごとの torch.compile | 細かい計算を 1 つにまとめる。途中の値を float32 のまま扱えるため、float32 の結果に近づく。画像側・文章側の各層が対象。音声側は、compile すると float32 の結果から離れ(合成のサイン波で 0.9980 → 0.9951)、起動のたびに結果が変わったため対象外(2026-11-20) | 1 窓 → 169 ms |
 | 文章の CUDA Graph | 検索の文章の推論を、件数(1 / 2 / 4 / 8)× 長さ(16 / 32 / 64 / 128 トークン)の段階ごとに記録して再生する。GPU に命令を出す CPU 側の処理(1 件 約 11 ms)を省く | 文章 1 件 15 → 4 ms |
 | 検索の文章をまとめる | 同時に来た検索の文章を 1 回で推論する(同時に来ているときだけ 3 ms 待つ。単独の検索は待たない) | 同時 8 件で 155 → 274 件/秒 |
 | 前処理・保存との並行 | 推論中に、次の回の前処理(CPU)と前の回の保存(DB・サムネイル)を進める(全機器) | |
@@ -132,7 +133,7 @@ ffmpeg -v error -hwaccel cuda -i <動画> -f null -                             
 | 文章・画像で探した場面が 1 位(正解率) | 31 / 32・16 / 16 | 31 / 32・16 / 16 |
 
 - 1 位が float32 と違った検索は、最適化の有無にかかわらず、float32 で 1 位と 2 位の点数の差が 0.0013 以下のもの(ほぼ同点)だけでした。
-- 起動時の準備: 初回は約 1 分(compile)。結果を `DATA_DIR/cache/torch` に保存するため、2 回目以降の起動は約 32 秒です(最適化なしは約 20 秒)。
+- 起動時の準備: 初回は約 1 分(compile)。結果を `DATA_DIR/cache/torch` に保存するため、2 回目以降の起動は約 32〜39 秒です(CI のイメージでは 37〜39 秒。2026-11-20)(最適化なしは約 20 秒)。
   `DATA_DIR` を作り直すと、初回と同じ時間がかかります。`DATA_DIR` は、ほかの利用者が書き込めない場所に置いてください(保存した compile の結果を読み込むため。`docs/security.md`)。
 - C コンパイラが無い場合(`cuda` 以外のイメージに相当する構成)や、準備に失敗した場合は、警告を出して最適化を使わずに動きます。
   `TORCH_COMPILE=off` で、compile と CUDA Graph を使わない設定にできます(詰め物の除去と `encode()` の無駄を省く処理は残ります)。
@@ -169,7 +170,7 @@ python bench/compare.py bench/results/*-batch1 bench/results/*-batch8
 
 アプリは起動直後に一般ユーザー(uid 1000)へ切り替えて動きます(`docs/security.md`)。
 `/dev/dri` と `/dev/kfd` のグループはデバイスファイルから自動で引き継ぐため、通常は追加の設定は不要です。
-ただし実機の GPU では未確認です。GPU を掴めない(`accelerator: cpu`)場合は、切り分けのために `-e PUID=0`(root のまま動かす)でも試し、
+RTX 3060(`cuda`、`--gpus all`)では、一般ユーザーのまま GPU を使えることを確認しました。AMD・Intel の実機では未確認です。GPU を掴めない(`accelerator: cpu`)場合は、切り分けのために `-e PUID=0`(root のまま動かす)でも試し、
 結果の違いを下の記録欄に残してください。起動ログの「補助グループ=…」に、デバイスファイルのグループ番号が含まれているかも確認してください。
 
 ## 複数 GPU・選択
@@ -180,7 +181,7 @@ python bench/compare.py bench/results/*-batch1 bench/results/*-batch8
 
 | GPU | イメージ | 起動 | accelerator | CPUとの類似度 | 取り込み速度 | メモ |
 |---|---|---|---|---|---|---|
-| RTX 3060 12GB | cuda(Ubuntu 24.04 / 26.04.1、`--gpus all`) | 可(約 11〜18 秒。高速化ありは初回約 80 秒・2 回目以降約 32 秒) | nvidia-cuda(bf16) | 0.9999 以上(文章 5 件・画像 3 件。NaN なし。2026-10-13) | frames 約 0.18 秒/窓(1080p・2 秒窓・まとめる件数 4、推論の高速化あり。2026-11-20。高速化の前は約 0.31 秒)。動画の復号も GPU(`decoder: cuda`) | ドライバ 595.99.02、NVIDIA Container Toolkit 1.20.1、`torch 2.14.1+cu126`。CPU は Core i7-6700K。結果は `bench/README.md` |
+| RTX 3060 12GB | cuda(Ubuntu 24.04 / 26.04.1、`--gpus all`) | 可(約 11〜18 秒。高速化ありは初回約 80 秒・2 回目以降約 32〜39 秒) | nvidia-cuda(bf16) | 0.9999 以上(文章 5 件・画像 3 件。NaN なし。2026-10-13) | frames 約 0.18 秒/窓(1080p・2 秒窓・まとめる件数 4、推論の高速化あり。2026-11-20。高速化の前は約 0.31 秒)。動画の復号も GPU(`decoder: cuda`) | ドライバ 595.99.02、NVIDIA Container Toolkit 1.20.1、`torch 2.14.1+cu126`。CPU は Core i7-6700K。結果は `bench/README.md` |
 | RX 9060 XT 16GB | rocm(修正後。Windows 11 + Docker Desktop の WSL2、`/dev/dxg`) | 可(約 11 秒) | amd-rocm(bf16) | 0.9999 以上(文章 5 件・画像 3 件。NaN なし) | frames 約 0.26 秒/窓(1080p・2 秒窓・まとめる件数 4。注意機構の高速化の前は約 1.03 秒)。CPU(Ryzen 7 5700X)の約 28 倍 | ドライバ Adrenalin 26.8.1(32.0.31041.1004)、librocdxg 1.2.2、`torch 2.14.1+rocm7.2`。修正前のイメージは libatomic1 の不足で推論を開始できない |
 | Intel 内蔵 | intel | | | | | |
 | (GPU なし・4 vCPU) | cuda | 可(約 16 秒) | cpu | (未計測。検索スコアは cpu 版と小数 3 桁まで一致) | frames 約 8 秒/窓 | `torch 2.14.1+cu126`。GPU の確認にはならない |

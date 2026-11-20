@@ -61,6 +61,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 - 音声を使う場合は、時刻付きで音声とフレームを交互に並べて1回で埋め込みます。
 - Gallery のプリセットを初期値の目安にします(物体: 2秒・2枚・音声なし / 動作: 4秒・4枚・音声なし / 会話: 6秒・6枚・音声あり)。
 - 窓が短いほどベクトル数が増えます。1台あたり1日の件数と容量を、必ず設計書に書いて確認してください。
+- 動きの少ない映像は、`SKIP_STATIC` で変化の無い窓を省略し、前の窓を延ばせます(既定は無効。映像のみの窓だけ。`docs/design.md`)。
 
 ## 6. 検証状況(実測したら更新すること)
 
@@ -71,7 +72,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 - [x] ONNX 版リポジトリ(`onnx-community/embeddinggemma-2-ONNX`)に `model.onnx` / `vision_encoder.onnx` / `audio_encoder.onnx` があり、fp32/fp16/q4/q4f16/quantized が公開されている(変換・精度比較は未実施)
 - [x] sentence-transformers 6.1.0 で text / image / audio / video(`(T,H,W,3)` 配列)/ 構造化メッセージ(順序つき混在入力)が 1 ベクトルを返す
 - [x] 時刻ラベルを挟んだ交互配置(TAV)は、構造化メッセージで再現できる
-- [x] `transformers` は PyPI 版に `embedding_gemma2` が無く、git のコミット `cb33194ad6152bd9fad6305378d92db385dd7b32` が必要。`torchvision` も必須
+- [x] `transformers` は、正式版 5.23.0(PyPI)で `embedding_gemma2` を使える。以前に使っていた git のコミット `cb33194` を含み、RTX 3060 で text / image / audio / 窓 / tav のベクトルが完全に一致(差 0。高速化あり・なしの両方)、速度も同じ(2026-11-20)。`torchvision` も必須
 - [x] `torchcodec` はサンドボックスで読み込めない → ファイル/URL を渡さず、ffmpeg で復号した配列を渡す(設計もそうしている)
 - [x] アプリ経由(実モデル・CPU)で「青い画面」→青い動画が 1 位(`RUN_MODEL_TESTS=1 pytest -m model`)
 - [x] GitHub Actions でテストと 5 イメージのビルド・ghcr.io への公開が成功。匿名で `docker pull` できる(公開設定の変更は不要だった)
@@ -86,6 +87,10 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
   同じ機種で 2026-11-19〜20 に、高速な注意機構を既定で有効にする前のビルド `056b937` で取り込みと検索を再計測した。 [README.ja.md の再計測結果](README.ja.md#windows-での再計測)
 - [x] RTX 3060 12GB(Ubuntu 24.04、ドライバ 595.99.02)で `:cuda` が `nvidia-cuda` / bf16 で動く(2026-10-13)。CPU 版との類似度 0.9999 以上・NaN なし。1080p・2 秒窓で 1 窓約 0.29 秒。動画の復号も GPU(NVDEC)で行われる。2026-11-19 に Ubuntu 26.04.1 で測り直し、1 窓約 0.31 秒・画像 5.12 枚/秒・検索(並行 4)17.4 件/秒・GPU メモリ最大約 3.1GB(`bench/README.md`、README の「ベンチマーク」)
 - [x] RTX 3060 12GB で推論の高速化(層ごとの torch.compile・画像の詰め物の除去・文章の CUDA Graph・検索の文章のまとめ。`embedders/accel.py`)が動く(2026-11-20)。1080p・2 秒窓で 1 窓約 0.18 秒(高速化の前 0.31 秒)、検索(並行 4)194 件/秒・p50 19 ms(前 17.4 件/秒・166 ms)、単独の検索 p50 7.6 ms(前 51 ms)。float32 で計算した結果との点数の差は高速化の前より小さく(平均 0.00068 → 0.00051)、合成の場面を探した正解率は同じ。初回の起動は約 80 秒(2 回目以降約 32 秒)(`docs/gpu.md`)
+- [x] RTX 3060 12GB で、CI がビルドした `:cuda`(main の c5a27c3。PR #14 の優先度キュー・取り込みのパイプライン・ウォームアップなどを含む)を計測(2026-11-20)。1 窓約 0.175 秒・画像 9.67 枚/秒・検索(並行 4)194 件/秒で、PR #14 の前(3a44a24)と誤差の範囲で同じ。検索の 1 位と点数も前後で一致(`bench/README.md`)
+- [x] 変化の無い区間の省略(`SKIP_STATIC`)が RTX 3060 で動く(2026-11-20)。8 つの場面を 8 秒ずつ並べた合成の動画で窓 36 → 8 件・取り込み 6.2 → 3.8 秒、場面を探した 1 位は 8/8 のまま。動き続ける映像では 1 件も省略しない。実際の録画でのしきい値(`STATIC_THRESHOLD`)の妥当性は未確認
+- [x] 複数のファイルの同時取り込み(`INGEST_WORKERS`)が RTX 3060 で動く(2026-11-20)。1080p・60 秒の動画 4 本(窓 120 件)で、1 本ずつ 20.8 秒 → 2 本同時 19.5 秒(約 6% 短縮)、推論の稼働率 85% → 90%。4 本同時は 2 本と同じ(19.7 秒)で、GPU メモリが約 0.8GB 増える。RTX 3060 は推論が律速のため効果は小さい。ベクトルは 1・2・4 本同時で完全に一致
+- [x] 文書(PDF・Word・テキスト)の取り込みと検索が RTX 3060 で動く(2026-11-20)。架空の社内文書 5 件(txt / Shift_JIS の txt / md / docx / PDF、塊 200 字)で、日本語・英語の質問 13 件の 1 位が 13 件とも正しい文書の正しい箇所(スコア 0.70〜0.84)。800 字の塊 100 件の取り込みは 1 塊約 17 ms、取り込み中の検索は p50 67 ms(1 回の推論を 4 塊までにした結果。16 塊では 235 ms)。実際の業務文書・長い文書での精度は未確認
 - [x] イメージの容量(ghcr の圧縮サイズ): slim 0.27GB / cpu 1.46GB / cuda 4.94GB / rocm 7.89GB / intel 3.82GB。展開後は slim 1.1GB / cpu 5.1GB / intel 14.1GB / cuda 14.4GB
 
 未確認(推測を含む。実測してから記述を確定すること):
@@ -93,9 +98,12 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 - [ ] xpu(Intel GPU)の動作と bf16 の NaN の有無。rocm の Linux ネイティブ(`/dev/kfd`)での動作と速度
 - [ ] Intel の GPU での 1 窓あたりの処理時間
 - [ ] EMBED_BATCH がほとんど効かない原因(窓をまとめても推論の時間が件数に比例する)。RTX 3060 では、画像側の計算が GPU の実効性能(約 18 TFLOPS)で動いており、まとめても計算量が減らないためと考えられる
+- [ ] 速い GPU(L40 など)での `INGEST_WORKERS` の効果(復号・前処理が律速になる場合に、どこまで GPU を埋められるか)
 - [ ] 推論の高速化(torch.compile・CUDA Graph)の AMD / Intel の GPU での効果と品質(現在は NVIDIA の GPU だけで有効)
+- [ ] 音声側の torch.compile で、float32 の結果から離れ、起動ごとに結果が変わる原因(合成のサイン波で確認。音声側は compile の対象から外した。2026-11-20)
 - [ ] ONNX Runtime / OpenVINO / TensorRT へ変換したときのベクトル一致度と速度(フェーズ 2)
 - [ ] 実際の録画映像での検索精度
+- [ ] 実際の業務文書(長い PDF・表の多い Word・縦書き)での文書検索の精度と、文字の取り出しの崩れの有無
 - [ ] リリース時の SBOM・脆弱性検査ワークフロー(`security.yml`)のタグ契機での実行とリリースへの添付(手動実行では 5 イメージの SBOM 作成・検査・集計まで成功を確認済み)
 
 ## 7. ディレクトリ構成
@@ -113,6 +121,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 │   ├── compute_api.py     ベクトル化 API(/compute/*)
 │   ├── pipeline.py        窓の計画と取り込みワーカー
 │   ├── ingest_files.py    取り込みの受付(検証・重複確認・フォルダ一括・ファイル名の日時)
+│   ├── documents.py       文書(PDF・Word・テキスト)の文字の取り出しと、塊への分割
 │   ├── watcher.py         監視フォルダの自動取り込み(WATCH_DIRS)
 │   ├── security.py        認証・CSRF・Host・本文の上限・応答ヘッダー(ASGI ミドルウェア)
 │   ├── store.py           SQLite(設定・取り込み元・窓・ジョブ)と検索
@@ -169,7 +178,7 @@ EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:creat
 - コミットメッセージの末尾には、利用環境の指示(Co-Authored-By など)に従った行を付けます。
 - 設計に関わる変更では、`docs/design.md` を同じコミットで更新します。
 - API を変更したら `python scripts/export_openapi.py` で `docs/openapi.json` を更新します(古いとテストが失敗します)。
-- CI(`build.yml` / `codeql.yml`)は、文書(`*.md`)と `LICENSE` だけの変更では動きません。イメージのビルドは、イメージの中身(`src/`・`docker/`・`pyproject.toml`・`.dockerignore`)か `build.yml` が変わったときだけ行います。イメージを作り直したいときは、build ワークフローを手動で実行します。
+- CI(`build.yml` / `codeql.yml`)は、文書(`*.md`)と `LICENSE` だけの変更では動きません(プルリクエストでは、`build.yml` の `test` ジョブだけが中身の手順を省いて成功します。main のブランチ保護で `test` の成功を必須にしているため)。main へは直接 push できません。変更はプルリクエストで入れます。イメージのビルドは、イメージの中身(`src/`・`docker/`・`pyproject.toml`・`.dockerignore`)か `build.yml` が変わったときだけ行います。イメージを作り直したいときは、build ワークフローを手動で実行します。
 - リリースはタグ `v*` の push で作成します。SBOM と脆弱性検査の結果は自動で添付されます(`docs/release.md`)。
 - README のバッジのうち、テスト件数・カバレッジ・脆弱性の件数は、CI が `badges` ブランチに書き出す JSON を表示しています(`scripts/badges.py`)。`badges` ブランチは手で編集しません。
 - 同梱物を追加・変更したときは、`THIRD_PARTY_NOTICES.md` のライセンスの一覧も更新します。

@@ -5,7 +5,8 @@
 ## 起動と永続化
 
 - 停止には最大で約 1 分かかることがあります(推論の途中の窓とベクトル DB の書き出しを待つため。CPU では 1 窓に 10 秒以上かかる)。`docker run` では `--stop-timeout 60` を付けてください(`docker-compose.yml` は `stop_grace_period: 60s` を設定済み)。途中で止めたファイルの取り込みは、次の起動で最初からやり直します。
-- 保存先は `-v ./data:/data` で永続化します。中身: `mediasearch.db`(SQLite。設定・取り込み元・窓・ジョブ)、`vectors.usearch`(ベクトル DB)、`thumbs/`、`media/`(アップロードした動画・音声)。
+- 保存先は `-v ./data:/data` で永続化します。中身: `mediasearch.db`(SQLite。設定・取り込み元・窓・ジョブ)、`vectors.usearch`(ベクトル DB)、`thumbs/`、`media/`(アップロードした動画・音声)、`cache/torch/`(PyTorch Inductor / Triton のコンパイルキャッシュ。`TORCH_CACHE_DIR` や `TORCHINDUCTOR_CACHE_DIR` で上書き可能)。
+- 起動時は、`/readyz` が Ready を返す直前にダミー入力(テキスト・画像・音声)で 1 回のウォームアップ推論を実行します(`WARMUP_ON_START=false` で無効化できます)。
 - バックアップは、動かしたまま取れます(下の「バックアップと復元」)。`data/` を丸ごとコピーする場合は、停止してから行ってください。
 - 停止・再起動しても未完了の取り込みジョブは再開されます。
 - 外から使う場合は、Nginx で HTTPS を終端する構成(`deploy/compose.nginx.yml`)を使います。経路ごとのバッファ・待ち時間・上限の設定は `docs/nginx.md` を参照してください。

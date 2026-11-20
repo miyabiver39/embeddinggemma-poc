@@ -721,6 +721,97 @@
         ]
       }
     },
+    "/api/ingest/document": {
+      "post": {
+        "tags": [
+          "取り込み"
+        ],
+        "summary": "文書(PDF・Word・テキスト)をアップロードして取り込む",
+        "description": "文書から文字を取り出し、約 DOC_CHUNK_CHARS 字の塊ごとにベクトルにします(窓の種類は document)。\n\n塊はページをまたぎません。検索結果には、ページ(`page`)と塊の本文(`text`)が付きます。\n画像だけの PDF(スキャンしたもの)は、文字を取り出せないため取り込めません(文字認識には対応していません)。",
+        "operationId": "ingest_document_api_ingest_document_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_document_api_ingest_document_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "リクエストが大きすぎる(MAX_UPLOAD_MB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "映像・音声・画像として扱えないファイル、または入力の検証エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
     "/api/ingest/path": {
       "post": {
         "tags": [
@@ -1136,6 +1227,107 @@
         ]
       }
     },
+    "/api/search/similar": {
+      "post": {
+        "tags": [
+          "検索"
+        ],
+        "summary": "検索結果の場面に似た場面を探す",
+        "description": "取り込み済みの窓(検索結果の `window_id`)に似た場面を探します。\n\n保存済みのベクトルをそのまま使うため、推論は行いません。元の窓は結果に含めません。\n`exclude_same_source=true` で、同じ録画の別の時刻を外し、別の録画・別のカメラだけを探せます。",
+        "operationId": "search_similar_api_search_similar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimilarSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DB のモデル・次元と、現在の設定が一致しない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "推論側(compute)に接続できない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
     "/api/search/image": {
       "post": {
         "tags": [
@@ -1418,7 +1610,8 @@
                 "frames",
                 "tav",
                 "audio",
-                "image"
+                "image",
+                "document"
               ],
               "type": "string",
               "description": "探す窓の種類",
@@ -2547,6 +2740,7 @@
                     "video",
                     "audio",
                     "image",
+                    "document",
                     "frames",
                     "stream"
                   ],
@@ -3449,7 +3643,7 @@
           "配信"
         ],
         "summary": "元ファイル(Range 対応)",
-        "description": "元の動画・音声・画像を返します。Range リクエストに対応するため、動画は `#t=秒` で頭出し再生できます。",
+        "description": "元の動画・音声・画像・文書を返します。Range リクエストに対応するため、動画は `#t=秒` で頭出し再生できます。\n\n文書は、ブラウザで開かずダウンロードとして返します(`Content-Disposition: attachment`)。",
         "operationId": "get_media_api_media__source_id__get",
         "parameters": [
           {
@@ -3486,6 +3680,141 @@
           },
           "404": {
             "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "apiKey": []
+          },
+          {}
+        ]
+      }
+    },
+    "/api/sources/{source_id}/clip": {
+      "get": {
+        "tags": [
+          "配信"
+        ],
+        "summary": "取り込み元の一部を切り出す(MP4 / M4A)",
+        "description": "検索で見つかった区間を、ファイルとして書き出します(証拠の保存や共有のため)。\n\n長さは `CLIP_MAX_SEC`(既定 600 秒)まで。同時に処理できるのは 2 件までで、超えると 503 を返します。\n静止画と、保存しない設定(`store_media=false`)で取り込んだものは切り出せません。",
+        "operationId": "get_clip_api_sources__source_id__clip_get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Source Id"
+            }
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "開始位置(先頭からのミリ秒。検索結果の start_ms)",
+              "title": "Start Ms"
+            },
+            "description": "開始位置(先頭からのミリ秒。検索結果の start_ms)"
+          },
+          {
+            "name": "end_ms",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "切り出しの終了位置(ミリ秒。検索結果の end_ms)",
+              "title": "End Ms"
+            },
+            "description": "切り出しの終了位置(ミリ秒。検索結果の end_ms)"
+          },
+          {
+            "name": "accurate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "true: 指定の位置ちょうどで切る(H.264 でエンコードし直すため時間がかかる)。false: エンコードし直さずに切る(速い。MP4 の編集リストで指定の位置から再生される)",
+              "default": false,
+              "title": "Accurate"
+            },
+            "description": "true: 指定の位置ちょうどで切る(H.264 でエンコードし直すため時間がかかる)。false: エンコードし直さずに切る(速い。MP4 の編集リストで指定の位置から再生される)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "切り出したファイル(動画は MP4、音声は M4A。ダウンロードとして返す)",
+            "content": {
+              "video/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証が必要(API_TOKEN を設定している場合)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "見つからない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "推論側(compute)に接続できない",
             "content": {
               "application/json": {
                 "schema": {
@@ -3715,11 +4044,12 @@
               "request",
               "filename",
               "exif",
+              "mtime",
               "now",
               "existing"
             ],
             "title": "Start Ts From",
-            "description": "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 受付時刻 / 取り込み済みの値)"
+            "description": "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 文書の更新日時 / 受付時刻 / 取り込み済みの値)"
           }
         },
         "type": "object",
@@ -3853,7 +4183,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "探す窓の種類",
@@ -4098,7 +4429,8 @@
                   "frames",
                   "tav",
                   "audio",
-                  "image"
+                  "image",
+                  "document"
                 ]
               },
               {
@@ -4325,6 +4657,69 @@
           "file"
         ],
         "title": "Body_ingest_audio_api_ingest_audio_post"
+      },
+      "Body_ingest_document_api_ingest_document_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "文書ファイル(.pdf / .docx / .txt / .md)"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "任意のグループ ID"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "任意の場所の名前"
+          },
+          "start_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ts",
+            "description": "文書の日時(省略時はファイル名の日時、なければ受付時刻)"
+          },
+          "store_media": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Media",
+            "description": "false にすると、ファイルを取り込み後に削除し、サムネイルも作らない(検索結果は情報だけ)。省略時は STORE_MEDIA。偽なら塊の本文も保存しない"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_ingest_document_api_ingest_document_post"
       },
       "Body_ingest_frames_api_ingest_frames_post": {
         "properties": {
@@ -4700,7 +5095,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "探す窓の種類(auto は音声のみの窓)",
@@ -4729,6 +5125,18 @@
             ],
             "title": "After Window Id",
             "description": "この ID より後に追加された窓だけを探す"
+          },
+          "dedupe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe",
+            "description": "ほぼ同じ場面をまとめるしきい値(例 0.95)"
           }
         },
         "type": "object",
@@ -4825,7 +5233,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "探す窓の種類(auto は映像の窓と静止画)",
@@ -4854,6 +5263,18 @@
             ],
             "title": "After Window Id",
             "description": "この ID より後に追加された窓だけを探す"
+          },
+          "dedupe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe",
+            "description": "ほぼ同じ場面をまとめるしきい値(例 0.95)"
           }
         },
         "type": "object",
@@ -5029,11 +5450,12 @@
               "request",
               "filename",
               "exif",
+              "mtime",
               "now",
               "existing"
             ],
             "title": "Start Ts From",
-            "description": "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 受付時刻 / 取り込み済みの値)"
+            "description": "start_ts を何から決めたか(指定値 / ファイル名 / EXIF / 文書の更新日時 / 受付時刻 / 取り込み済みの値)"
           },
           "path": {
             "type": "string",
@@ -5207,7 +5629,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind"
           }
@@ -5363,6 +5786,18 @@
             "type": "integer",
             "title": "Queue Size",
             "description": "取り込みを待っているジョブの数"
+          },
+          "running_jobs": {
+            "type": "integer",
+            "title": "Running Jobs",
+            "description": "取り込み中のジョブの数",
+            "default": 0
+          },
+          "ingest_workers": {
+            "type": "integer",
+            "title": "Ingest Workers",
+            "description": "同時に取り込むファイルの数の上限(INGEST_WORKERS)",
+            "default": 1
           },
           "vector_db": {
             "anyOf": [
@@ -5568,7 +6003,8 @@
               "auto",
               "video",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "対象にする種類(auto は拡張子で判定し、映像・音声・画像のすべて)",
@@ -5744,7 +6180,8 @@
               "auto",
               "video",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "取り込む種類(auto は拡張子で判定)",
@@ -6077,6 +6514,63 @@
         ],
         "title": "KindStats"
       },
+      "QueryWindow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "source_id": {
+            "type": "integer",
+            "title": "Source Id"
+          },
+          "start_ms": {
+            "type": "integer",
+            "title": "Start Ms"
+          },
+          "end_ms": {
+            "type": "integer",
+            "title": "End Ms"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "frames",
+              "tav",
+              "audio",
+              "image",
+              "document"
+            ],
+            "title": "Kind"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "abs_time": {
+            "type": "string",
+            "title": "Abs Time"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "source_id",
+          "start_ms",
+          "end_ms",
+          "kind",
+          "abs_time"
+        ],
+        "title": "QueryWindow"
+      },
       "Reindexed": {
         "properties": {
           "source_id": {
@@ -6123,7 +6617,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind"
           },
@@ -6198,6 +6693,42 @@
             ],
             "title": "Thumb Url",
             "description": "サムネイル(JPEG)の URL。音声の窓と、保存しない設定(store_media=false)で取り込んだものは null"
+          },
+          "duplicates": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicates",
+            "description": "dedupe を指定したとき、この窓にまとめた、ほぼ同じ場面の窓の数(指定しないときは返さない)"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page",
+            "description": "文書の塊のページ(1 始まり。ページの分からない形式は 0)。文書でない窓は返さない"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "文書の塊の本文。文書でない窓と、保存しない設定(store_media=false)の文書は返さない"
           }
         },
         "additionalProperties": true,
@@ -6336,6 +6867,17 @@
             "type": "integer",
             "title": "Last Window Id",
             "description": "検索の時点で最後に追加されていた窓の ID。次の検索の after_window_id に渡すと、その後に増えた窓だけを探せる"
+          },
+          "query_window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueryWindow"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "似た場面の検索で元にした窓(ほかの検索では返さない)"
           }
         },
         "type": "object",
@@ -6347,6 +6889,137 @@
           "last_window_id"
         ],
         "title": "SearchResponse"
+      },
+      "SimilarSearchRequest": {
+        "properties": {
+          "window_id": {
+            "type": "integer",
+            "title": "Window Id",
+            "description": "元にする窓の ID(検索結果の window_id)"
+          },
+          "exclude_same_source": {
+            "type": "boolean",
+            "title": "Exclude Same Source",
+            "description": "元の窓と同じ取り込み元(同じ録画)の窓を結果から外す(別の録画・別のカメラだけを探す)",
+            "default": false
+          },
+          "top_k": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top K",
+            "description": "返す件数(省略時は TOP_K)"
+          },
+          "min_score": {
+            "type": "number",
+            "title": "Min Score",
+            "description": "これより低いスコアは返さない",
+            "default": 0.0
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id",
+            "description": "グループ ID で絞り込む"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "場所で絞り込む"
+          },
+          "from_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Ts",
+            "description": "この日時以降(UNIX 秒か ISO 8601)"
+          },
+          "to_ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Ts",
+            "description": "この日時以前(UNIX 秒か ISO 8601)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "all",
+              "frames",
+              "tav",
+              "audio",
+              "image",
+              "document"
+            ],
+            "title": "Kind",
+            "description": "探す窓の種類(auto は元の窓と同じベクトルの空間の種類。映像の窓と静止画は同じ空間)",
+            "default": "auto"
+          },
+          "merge": {
+            "type": "boolean",
+            "title": "Merge",
+            "description": "隣り合う窓を区間にまとめた intervals も返す",
+            "default": true
+          },
+          "dedupe": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe",
+            "description": "ほぼ同じ場面の窓を 1 件にまとめる。結果どうしのコサイン類似度がこの値以上なら同じ場面とみなす(例 0.95。省略時はまとめない)。動きの無い場面が長く続く録画で、同じ場面ばかりが並ぶのを防ぐ"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window_id"
+        ],
+        "title": "SimilarSearchRequest",
+        "examples": [
+          {
+            "dedupe": 0.95,
+            "exclude_same_source": true,
+            "top_k": 10,
+            "window_id": 123
+          }
+        ]
       },
       "Source": {
         "properties": {
@@ -6360,6 +7033,7 @@
               "video",
               "audio",
               "image",
+              "document",
               "frames",
               "stream"
             ],
@@ -7082,7 +7756,8 @@
               "frames",
               "tav",
               "audio",
-              "image"
+              "image",
+              "document"
             ],
             "title": "Kind",
             "description": "探す窓の種類",
@@ -7093,6 +7768,20 @@
             "title": "Merge",
             "description": "隣り合う窓を区間にまとめた intervals も返す",
             "default": true
+          },
+          "dedupe": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe",
+            "description": "ほぼ同じ場面の窓を 1 件にまとめる。結果どうしのコサイン類似度がこの値以上なら同じ場面とみなす(例 0.95。省略時はまとめない)。動きの無い場面が長く続く録画で、同じ場面ばかりが並ぶのを防ぐ"
           },
           "after_window_id": {
             "anyOf": [

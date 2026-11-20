@@ -28,7 +28,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 
 from . import __version__, media
-from .ingest_files import MEDIA_KINDS, media_kind_of
+from .ingest_files import INGEST_KINDS, media_kind_of
 from .media import MediaError
 from .pipeline import IngestParams
 from .service import Context, InvalidInput, NotFound, Overloaded, Service, parse_opt_ts
@@ -56,6 +56,11 @@ def _trim_hit(h: dict) -> dict:
             "group_id", "location", "media_url", "thumb_url")
     out = {k: h.get(k) for k in keys}
     out["score"] = round(float(out["score"]), 4)
+    if "duplicates" in h:  # 重複の除去(dedupe)を指定したときだけ
+        out["duplicates"] = h["duplicates"]
+    if "page" in h:  # 文書の塊(ページと本文)
+        out["page"] = h["page"]
+        out["text"] = h.get("text")
     return out
 
 
@@ -128,8 +133,9 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         to_time: str | None = None,
         kind: str = "auto",
         after_window_id: int | None = None,
+        dedupe: float | None = None,
     ) -> dict[str, Any]:
-        """文章で、録画映像・音声・画像の該当する場面を探します。
+        """文章で、録画映像・音声・画像の該当する場面や、文書の該当する箇所を探します。
 
         Args:
             query: 探したい内容を表す文章(日本語・英語など。例「赤い車が通り過ぎる」)
@@ -139,14 +145,50 @@ def build_mcp_server(ctx: Context) -> MCPServer:
             location: 場所で絞り込む
             from_time: この日時以降(ISO 8601。例 2026-01-01T09:00:00)
             to_time: この日時以前(ISO 8601)
-            kind: 探す種類(auto / all / frames / tav / audio / image)。auto は映像の窓と静止画
+            kind: 探す種類(auto / all / frames / tav / audio / image / document)。auto は映像の窓と静止画。
+                文書(PDF・Word・テキスト)を探すときは document。結果に page(ページ)と text(本文)が付く
             after_window_id: この ID より後に追加された窓だけを探す。取り込み中に、前回の結果の last_window_id を渡して
                 新しく増えた場面だけを確認するのに使う
+            dedupe: ほぼ同じ場面を 1 件にまとめるしきい値(結果どうしのコサイン類似度。例 0.95)。省略時はまとめない
         """
         top_k = max(1, min(int(top_k), 100))
         f = _filters(top_k, min_score, group_id, location, from_time, to_time, kind)
-        res = _guard(svc.search_text, query, **f, after_window_id=after_window_id)
+        res = _guard(svc.search_text, query, **f, after_window_id=after_window_id, dedupe=dedupe)
         return _trim_search(res)
+
+    @server.tool(annotations=_READ_ONLY)
+    def search_similar(
+        window_id: int,
+        exclude_same_source: bool = False,
+        top_k: int = 10,
+        min_score: float = 0.0,
+        group_id: str | None = None,
+        location: str | None = None,
+        from_time: str | None = None,
+        to_time: str | None = None,
+        kind: str = "auto",
+        dedupe: float | None = None,
+    ) -> dict[str, Any]:
+        """検索結果の場面(window_id)に似た場面を探します。保存済みのベクトルを使うため、推論はしません。
+
+        Args:
+            window_id: 元にする窓の ID(search_text などの結果の window_id)
+            exclude_same_source: 元の窓と同じ取り込み元(同じ録画)を外し、別の録画・別のカメラだけを探す
+            top_k: 返す件数(1〜100)
+            min_score: これより低いスコアは返さない
+            group_id: グループ ID で絞り込む
+            location: 場所で絞り込む
+            from_time: この日時以降(ISO 8601)
+            to_time: この日時以前(ISO 8601)
+            kind: 探す種類(auto は元の窓と同じベクトルの空間の種類)
+            dedupe: ほぼ同じ場面を 1 件にまとめるしきい値(例 0.95)。省略時はまとめない
+        """
+        top_k = max(1, min(int(top_k), 100))
+        f = _filters(top_k, min_score, group_id, location, from_time, to_time, kind)
+        res = _guard(svc.search_similar, window_id, exclude_same_source=exclude_same_source, **f, dedupe=dedupe)
+        out = _trim_search(res)
+        out["query_window"] = res.get("query_window")
+        return out
 
     @server.tool(annotations=_READ_ONLY)
     def search_image(
@@ -258,7 +300,7 @@ def build_mcp_server(ctx: Context) -> MCPServer:
 
         Args:
             path: サーバー内のファイルのパス(取り込みを許可したフォルダの中)
-            kind: auto(拡張子で判定)/ video / audio / image
+            kind: auto(拡張子で判定)/ video / audio / image / document(PDF・Word・テキスト)
             group_id: 任意のグループ ID
             location: 任意の場所の名前
             start_time: 録画開始(撮影)の日時(ISO 8601)。省略時はファイル名・EXIF・受付時刻の順
@@ -270,11 +312,11 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         _guard(ctx.intake.check_allowed, p)
         if not p.is_file():
             raise ToolError(f"ファイルが見つかりません: {path}")
-        if kind not in ("auto", *MEDIA_KINDS):
-            raise ToolError("kind は auto / video / audio / image のいずれかにしてください")
+        if kind not in ("auto", *INGEST_KINDS):
+            raise ToolError("kind は auto / video / audio / image / document のいずれかにしてください")
         resolved = media_kind_of(p) if kind == "auto" else kind
         if resolved is None:
-            raise ToolError(f"映像・音声・画像として扱えない拡張子です: {p.name}")
+            raise ToolError(f"映像・音声・画像・文書として扱えない拡張子です: {p.name}")
         accepted = _guard(
             ctx.intake.accept,
             p,
@@ -299,12 +341,12 @@ def build_mcp_server(ctx: Context) -> MCPServer:
         force: bool = False,
         store_media: bool | None = None,
     ) -> dict[str, Any]:
-        """サーバー内のフォルダの動画・音声・画像を、まとめて取り込みます。取り込み済みのファイルは対象外です。
+        """サーバー内のフォルダの動画・音声・画像・文書を、まとめて取り込みます。取り込み済みのファイルは対象外です。
 
         Args:
             dir: サーバー内のフォルダのパス(取り込みを許可したフォルダの中)
             recursive: 下位のフォルダも対象にする
-            kind: auto(拡張子で判定)/ video / audio / image
+            kind: auto(拡張子で判定)/ video / audio / image / document(PDF・Word・テキスト)
             group_id: 任意のグループ ID
             group_from_dir: ファイルが入っているフォルダ名をグループ ID にする
             location: 任意の場所の名前
@@ -312,8 +354,8 @@ def build_mcp_server(ctx: Context) -> MCPServer:
             force: 取り込み済みでも、もう一度取り込む
             store_media: false にすると、サムネイルを作らず、検索結果に画像・再生の URL を付けない(省略時はサーバー設定)
         """
-        if kind not in ("auto", *MEDIA_KINDS):
-            raise ToolError("kind は auto / video / audio / image のいずれかにしてください")
+        if kind not in ("auto", *INGEST_KINDS):
+            raise ToolError("kind は auto / video / audio / image / document のいずれかにしてください")
         result = _guard(
             ctx.intake.accept_dir,
             Path(dir),

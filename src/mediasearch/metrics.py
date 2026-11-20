@@ -277,7 +277,7 @@ def app_metrics(ctx) -> dict:
         "vectors": len(store.vectors),
         "journal_pending": store.vectors.pending,
     }
-    out["ingest"] = {"queue": ctx.ingestor.queue_size}
+    out["ingest"] = {"queue": ctx.ingestor.queue_size, "running": ctx.ingestor.running}
     if ctx.streams is not None:
         items = ctx.streams.list()
         out["streams"] = [

@@ -53,7 +53,7 @@ def test_tools_are_listed_with_descriptions(mcp):
     tools = {t["name"]: t for t in mcp.rpc("tools/list").json()["result"]["tools"]}
     expected = {
         "search_text", "search_image", "search_audio", "get_thumbnail", "ingest_path", "ingest_dir",
-        "get_job", "list_jobs", "list_sources", "get_status", "list_streams",
+        "get_job", "list_jobs", "list_sources", "get_status", "list_streams", "search_similar",
     }
     assert expected <= set(tools)
     assert tools["search_text"]["annotations"]["readOnlyHint"] is True
@@ -78,6 +78,10 @@ def test_ingest_search_and_thumbnail(mcp, client, tmp_path):
 
     by_image = mcp.call("search_image", image_base64=base64.b64encode(_png((20, 20, 200))).decode())
     assert by_image["structuredContent"]["results"][0]["window_id"] == top["window_id"]
+
+    similar = mcp.call("search_similar", window_id=top["window_id"])["structuredContent"]
+    assert similar["query_window"]["id"] == top["window_id"]
+    assert all(h["window_id"] != top["window_id"] for h in similar["results"])  # 元の窓は含めない
 
     thumb = mcp.call("get_thumbnail", window_id=top["window_id"])
     content = thumb["content"][0]

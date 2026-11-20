@@ -19,6 +19,9 @@ from PIL import Image
 from .embedders.base import SAMPLE_RATE
 
 log = logging.getLogger(__name__)
+# 16bit PCM(-32768..32767)の正規化係数。2^-15 は float32 で厳密に表現できるため、
+# / 32768.0 とビット単位で完全に一致し、インプレース乗算で余分な配列確保を省ける。
+_INV_INT16 = np.float32(1.0 / 32768.0)
 
 
 class MediaError(RuntimeError):
@@ -30,6 +33,8 @@ class MediaInfo:
     duration_ms: int
     has_video: bool
     has_audio: bool
+    width: int = 0
+    height: int = 0
 
 
 def _run(cmd: list[str], timeout: int = 120) -> bytes:
@@ -45,8 +50,22 @@ def _run(cmd: list[str], timeout: int = 120) -> bytes:
     return done.stdout
 
 
+def _video_dimensions(streams: list[dict]) -> tuple[int, int]:
+    """ffprobe の streams から最初の映像トラックの幅と高さ(回転の指定を反映)を取り出します。"""
+    video = next((s for s in streams if s.get("codec_type") == "video"), None)
+    if not video:
+        return 0, 0
+    width, height = int(video.get("width") or 0), int(video.get("height") or 0)
+    rotation = 0
+    for side in video.get("side_data_list") or []:
+        rotation = int(side.get("rotation") or 0) or rotation
+    if abs(rotation) in (90, 270):  # スマートフォンの縦撮りなど。ffmpeg は自動で回転するため、出力の縦横も入れ替える
+        width, height = height, width
+    return (width, height) if width > 0 and height > 0 else (0, 0)
+
+
 def probe(path: str | Path) -> MediaInfo:
-    """長さと、映像・音声のトラックの有無を調べます。"""
+    """長さと、映像・音声のトラックの有無(および映像の解像度)を調べます。"""
     out = _run(
         [
             "ffprobe",
@@ -65,10 +84,13 @@ def probe(path: str | Path) -> MediaInfo:
     if duration <= 0:
         for s in streams:
             duration = max(duration, float(s.get("duration") or 0.0))
+    width, height = _video_dimensions(streams)
     return MediaInfo(
         duration_ms=int(duration * 1000),
         has_video=any(s.get("codec_type") == "video" for s in streams),
         has_audio=any(s.get("codec_type") == "audio" for s in streams),
+        width=width,
+        height=height,
     )
 
 
@@ -96,10 +118,12 @@ def extract_frame(path: str | Path, at_ms: int, max_side: int = 448) -> np.ndarr
     )
     if not out:
         raise MediaError(f"{at_ms}ms のフレームを取り出せませんでした(動画の末尾を超えた可能性)")
-    image = Image.open(io.BytesIO(out)).convert("RGB")
-    if max_side > 0:
-        image.thumbnail((max_side, max_side))
-    return np.asarray(image)
+    with Image.open(io.BytesIO(out)) as image:
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        if max_side > 0:
+            image.thumbnail((max_side, max_side))
+        return np.asarray(image)
 
 
 def extract_audio(path: str | Path, start_ms: int, duration_ms: int) -> np.ndarray:
@@ -126,7 +150,9 @@ def extract_audio(path: str | Path, start_ms: int, duration_ms: int) -> np.ndarr
         ],
         timeout=300,
     )
-    return np.frombuffer(out, dtype="<i2").astype(np.float32) / 32768.0
+    pcm = np.frombuffer(out, dtype="<i2").astype(np.float32)
+    pcm *= _INV_INT16
+    return pcm
 
 
 # ---------------------------------------------------------------------- 連続復号(取り込み用)
@@ -160,13 +186,7 @@ def video_size(path: str | Path) -> tuple[int, int]:
     streams = json.loads(out).get("streams") or []
     if not streams:
         raise MediaError("映像トラックがありません")
-    s = streams[0]
-    width, height = int(s.get("width") or 0), int(s.get("height") or 0)
-    rotation = 0
-    for side in s.get("side_data_list") or []:
-        rotation = int(side.get("rotation") or 0) or rotation
-    if abs(rotation) in (90, 270):  # スマートフォンの縦撮りなど。ffmpeg は自動で回転するため、出力の縦横も入れ替える
-        width, height = height, width
+    width, height = _video_dimensions(streams)
     if width <= 0 or height <= 0:
         raise MediaError("映像の大きさを取得できません")
     return width, height
@@ -225,6 +245,22 @@ DECODE_SKIP: dict[str, list[str]] = {
 }
 
 
+def _read_exact_into(stream, mv: memoryview) -> bool:
+    """パイプから mv の長さぶんを直接読み込みます。途中で EOF になったら False。
+
+    read(size) による bytes の中間コピーを省き、書き込み可能な numpy 配列へ直接流し込むことで、
+    コピー負荷と PyTorch の non-writable 警告の両方を解消します。
+    """
+    pos = 0
+    total = len(mv)
+    while pos < total:
+        n = stream.readinto(mv[pos:])
+        if not n:
+            return False
+        pos += n
+    return True
+
+
 class VideoFrameReader:
     """1 つの ffmpeg プロセスで動画を先頭から復号し、一定間隔のフレームを順に返します。
 
@@ -234,6 +270,8 @@ class VideoFrameReader:
 
     hwaccel に cuda / vaapi などを渡すと、復号を GPU で行う(縮小は CPU)。GPU で始められなかった場合は、
     ソフトウェアの復号でやり直す(fallback が真のとき)。
+    select_stride > 1 を指定した場合は、scale / rgb24 変換の前に select フィルタで不要フレームを落とし、
+    出力画素をビット一致させたまま縮小・色変換・パイプ転送の負荷を削減する。
     """
 
     def __init__(
@@ -244,6 +282,9 @@ class VideoFrameReader:
         hwaccel: str | None = None,
         hwaccel_device: str | None = None,
         skip: str = "noref",
+        source_size: tuple[int, int] | None = None,
+        select_offset: int = 0,
+        select_stride: int = 1,
     ) -> None:
         if skip not in DECODE_SKIP:
             raise ValueError(f"復号の省略の指定は {list(DECODE_SKIP)} のいずれかにしてください: {skip!r}")
@@ -251,32 +292,44 @@ class VideoFrameReader:
         self.skip = skip
         self.skip_used = skip
         self.step_ms = max(int(step_ms), 1)
-        self.width, self.height = output_size(*video_size(path), max_side)
+        src_w, src_h = source_size if source_size and source_size[0] > 0 and source_size[1] > 0 else video_size(path)
+        self.width, self.height = output_size(src_w, src_h, max_side)
         self.hwaccel = hwaccel
         self.hwaccel_device = hwaccel_device
+        self.select_offset = max(int(select_offset), 0)
+        self.select_stride = max(int(select_stride), 1)
         self.decoder = "cpu"
         self.frames = 0
 
-    def _command(self, hwaccel: str | None, skip: str) -> list[str]:
+    def _command(self, hwaccel: str | None, skip: str, use_select: bool) -> list[str]:
         cmd = ["ffmpeg", "-v", "error", "-nostdin", *DECODE_SKIP[skip]]
         if hwaccel:
             cmd += ["-hwaccel", hwaccel]
             if self.hwaccel_device:
                 cmd += ["-hwaccel_device", self.hwaccel_device]
         fps = 1000.0 / self.step_ms
+        # round=near: 各出力時刻に最も近い元のフレームを使う。area: 縮小のときに画質がよい
+        filters = [f"fps=fps={fps:.6f}:round=near{VIDEO_TIMING}"]
+        extra: list[str] = []
+        if use_select and self.select_stride > 1:
+            # scale と YUV->RGB 変換の前に、どの窓でも使わない中間フレームを間引く(残るフレームはビット一致)
+            off, stride = self.select_offset, self.select_stride
+            filters.append(f"select=gte(n\\,{off})*not(mod(n-{off}\\,{stride}))")
+            extra += ["-fps_mode", "passthrough"]
+        filters.append(f"scale={self.width}:{self.height}:flags=area")
         cmd += [
-            "-i", self.path, "-an", "-sn", "-dn",
-            # round=near: 各出力時刻に最も近い元のフレームを使う。area: 縮小のときに画質がよい
-            "-vf", f"fps=fps={fps:.6f}:round=near{VIDEO_TIMING},scale={self.width}:{self.height}:flags=area",
+            "-i", self.path, "-an", "-sn", "-dn", *extra,
+            "-vf", ",".join(filters),
             "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
         ]  # fmt: skip
         return cmd
 
-    def _attempts(self) -> list[tuple[str | None, str]]:
-        """試す順の (GPU 復号, 省略の範囲)。GPU で始められない場合は CPU で、省略して 1 枚も取れない場合
-        (キーフレームが先頭の 1 枚だけの短い動画など)は全フレームの復号でやり直す。"""
-        out: list[tuple[str | None, str]] = []
-        for item in ((self.hwaccel, self.skip), (None, self.skip), (None, "none")):
+    def _attempts(self) -> list[tuple[str | None, str, bool]]:
+        """試す順の (GPU 復号, 省略の範囲, select による間引き)。GPU で始められない場合は CPU で、
+        省略・間引きで 1 枚も取れない場合(極端に短い動画など)は全フレームの復号でやり直す。"""
+        use_sel = self.select_stride > 1
+        out: list[tuple[str | None, str, bool]] = []
+        for item in ((self.hwaccel, self.skip, use_sel), (None, self.skip, use_sel), (None, "none", False)):
             if item not in out:
                 out.append(item)
         return out
@@ -284,21 +337,30 @@ class VideoFrameReader:
     def __iter__(self):
         """(フレームの時刻 ms, RGB 配列) を順に返します。"""
         err = ""
-        for hw, skip in self._attempts():
+        size = self.width * self.height * 3
+        pipe_buf = max(size, 65536)
+        for hw, skip, use_sel in self._attempts():
             yielded = 0
-            proc = subprocess.Popen(self._command(hw, skip), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            size = self.width * self.height * 3
+            offset = self.select_offset if use_sel else 0
+            stride = self.select_stride if use_sel else 1
+            proc = subprocess.Popen(
+                self._command(hw, skip, use_sel),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=pipe_buf,
+            )
             try:
+                assert proc.stdout is not None
                 while True:
-                    buf = proc.stdout.read(size)
-                    if len(buf) < size:
+                    frame = np.empty((self.height, self.width, 3), dtype=np.uint8)
+                    if not _read_exact_into(proc.stdout, memoryview(frame).cast("B")):
                         break
-                    frame = np.frombuffer(buf, dtype=np.uint8).reshape(self.height, self.width, 3)
+                    ts_ms = (offset + yielded * stride) * self.step_ms
                     self.decoder = hw or "cpu"
                     self.skip_used = skip
-                    yield yielded * self.step_ms, frame
                     yielded += 1
                     self.frames += 1
+                    yield ts_ms, frame
             finally:
                 if proc.poll() is None:
                     proc.kill()
@@ -323,8 +385,8 @@ class AudioTrack:
 
     def __init__(self, path: str | Path, tmp_dir: str | Path) -> None:
         self._file = Path(tmp_dir) / "audio.s16le"
-        cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(path), "-vn", *AUDIO_TIMING, "-ac", "1",
-               "-ar", str(SAMPLE_RATE), "-f", "s16le", str(self._file)]  # fmt: skip
+        cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(path), "-vn", "-sn", "-dn", *AUDIO_TIMING,
+               "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", str(self._file)]  # fmt: skip
         self._proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self._data: np.ndarray | None = None
 
@@ -343,13 +405,41 @@ class AudioTrack:
         data = self._ready()
         lo = max(start_ms, 0) * SAMPLE_RATE // 1000
         hi = max(end_ms, start_ms) * SAMPLE_RATE // 1000
-        return np.asarray(data[lo:hi], dtype=np.float32) / 32768.0
+        pcm = np.asarray(data[lo:hi], dtype=np.float32)
+        pcm *= _INV_INT16
+        return pcm
 
     def close(self) -> None:
         if self._proc.poll() is None:
             self._proc.kill()
             self._proc.wait()
         self._data = None
+
+
+def cut_clip(path: str | Path, start_ms: int, end_ms: int, out_path: Path, kind: str, accurate: bool = False) -> None:
+    """元のファイルの start_ms〜end_ms を切り出して out_path に書きます(動画は MP4、音声は M4A)。
+
+    動画は既定で再エンコードせずに切ります(速く、画質が変わらない)。復号は直前のキーフレームから始める必要があるため、
+    その分も含めて書き出し、MP4 の編集リスト(edit list)で指定の位置から再生されるようにします。タイムスタンプを
+    0 からに詰める(-avoid_negative_ts make_zero)と編集リストが作られず、キーフレームの間隔の分(実測で約 7 秒)だけ
+    前から始まってしまうため、詰めません。編集リストに対応しない再生ソフトでは少し前から始まるため、accurate=True で
+    指定の位置ちょうどで切れるようにしています(H.264 でエンコードし直すため時間がかかる)。
+    音声は、元の形式によらず AAC にエンコードします(WAV などをそのまま
+    M4A に入れられないため)。字幕・データのストリームは含めません。
+    """
+    start = f"{start_ms / 1000:.3f}"
+    duration = f"{(end_ms - start_ms) / 1000:.3f}"
+    cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-ss", start, "-i", str(path), "-t", duration, "-sn", "-dn"]
+    if kind == "audio":
+        cmd += ["-vn", "-c:a", "aac", "-b:a", "128k"]
+    elif accurate:
+        cmd += ["-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac"]
+    else:
+        cmd += ["-map", "0:v:0", "-map", "0:a?", "-c", "copy"]
+    cmd += ["-movflags", "+faststart", str(out_path)]
+    _run(cmd, timeout=max(120, (end_ms - start_ms) // 1000 * 4))
+    if not out_path.is_file() or out_path.stat().st_size == 0:
+        raise MediaError("切り出した結果が空でした(指定の範囲が、ファイルの長さを超えている可能性)")
 
 
 def make_thumbnail(path: str | Path, at_ms: int, out_path: Path, width: int = 320) -> None:
@@ -380,7 +470,9 @@ def load_image(path: str | Path, max_side: int = 448) -> np.ndarray:
             if max_side and img.format == "JPEG":
                 # JPEG は縮小しながら復号できる(1/2〜1/8)。大きな写真ほど読み込みが速くなる
                 img.draft("RGB", (max_side * 2, max_side * 2))
-            img = ImageOps.exif_transpose(img).convert("RGB")
+            img = ImageOps.exif_transpose(img)
+            if img.mode != "RGB":
+                img = img.convert("RGB")
             if max_side and max(img.size) > max_side:
                 img.thumbnail((max_side, max_side))
             return np.asarray(img)

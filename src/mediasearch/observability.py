@@ -252,6 +252,7 @@ def prometheus(stats: RequestStats, ctx=None, embedder=None) -> str:
             m["index"]["journal_pending"],
         )
         w.metric(p + "ingest_queue", "gauge", "取り込みを待っているジョブの数", m["ingest"]["queue"])
+        w.metric(p + "ingest_running", "gauge", "取り込み中のジョブの数", m["ingest"]["running"])
         for s in m.get("streams") or []:
             lab = {"stream": s["id"], "name": s["name"]}
             w.metric(

@@ -129,13 +129,14 @@ Ingestion figures are the median of 3 runs. See [bench/README.md](bench/README.m
 
 | Measurement | CPU (Ryzen 7 5700X, `:cpu`) | RTX 3060 12GB (`:cuda`) | RX 9060 XT 16GB (`:rocm`) |
 |---|---|---|---|
-| Video ingestion (1080p, 60 s, 30 two-second windows) | 215.8 s (7.19 s per window) | **5.3 s (0.18 s per window)** | 7.8 s (0.26 s per window) |
-| Ingestion speed relative to real time | 0.28x | **11.4x** | 7.7x |
-| Audio ingestion (60 s, 6 ten-second chunks) | 5.17 s | **0.67 s** | 0.91 s |
-| Image ingestion (1080p, 50 images) | 0.29 images/s | **6.64 images/s** | 5.62 images/s |
+| Video ingestion (1080p, 60 s, 30 two-second windows) | 215.8 s (7.19 s per window) | **5.2 s (0.17 s per window)** | 7.8 s (0.26 s per window) |
+| Ingestion speed relative to real time | 0.28x | **11.5x** | 7.7x |
+| Audio ingestion (60 s, 6 ten-second chunks) | 5.17 s | **0.70 s** | 0.91 s |
+| Image ingestion (1080p, 50 images) | 0.29 images/s | **9.67 images/s** | 5.62 images/s |
 | Text search (4 concurrent, 30 s) | 7.1 req/s (p50 440 ms) | **194 req/s (p50 19 ms)** | 16.9 req/s (p50 176 ms) |
 
-- RTX 3060: Ubuntu 26.04.1 LTS, Core i7-6700K, driver 595.99.02. Measured on 2026-11-20 with the inference optimizations (torch.compile, CUDA Graphs and more; see "推論の高速化" in [docs/gpu.md](docs/gpu.md)). Before the optimizations (2026-11-19): video 9.4 s (0.31 s per window), audio 1.01 s, images 5.12 images/s, search 17.4 req/s (p50 166 ms). A single search responds in p50 7.6 ms (51 ms before). Peak GPU memory use is about 3.4 GB, and video is also decoded on the GPU. The first start takes about 80 seconds to prepare the optimizations (about 32 seconds afterwards).
+- RTX 3060: Ubuntu 26.04.1 LTS, Core i7-6700K, driver 595.99.02. Measured on 2026-11-20 with the CI-built `:cuda` image (main at c5a27c3), which includes the inference optimizations (torch.compile, CUDA Graphs and more; see "推論の高速化" in [docs/gpu.md](docs/gpu.md)) and the improvements from PR #14. Speed before and after PR #14 was the same within measurement error ([bench/README.md](bench/README.md)). Before the optimizations (2026-11-19): video 9.4 s (0.31 s per window), audio 1.01 s, images 5.12 images/s, search 17.4 req/s (p50 166 ms). A single search responds in p50 7.6 ms (51 ms before). Peak GPU memory use is about 3.5 GB, and video is also decoded on the GPU. The first start takes about 80 seconds to prepare the optimizations (about 37 seconds afterwards).
+- The RTX 3060 audio figure is after removing the audio-side optimization (torch.compile) for quality reasons (0.44 s before; see [docs/gpu.md](docs/gpu.md)).
 - CPU and RX 9060 XT: Windows 11 + Docker Desktop (WSL2). Measured on 2026-10-13. The RX 9060 XT figures are with the fast attention kernels enabled (the default of the `rocm` image; [docs/gpu.md](docs/gpu.md)).
 - On a GPU, two-second-window video is ingested more than 6 times faster than real time. Most of the time is spent on inference; audio and short text searches need little computation, so the GPU makes less of a difference there.
 - These figures are for synthetic media. With real recordings they vary with resolution, length and window settings.
@@ -195,6 +196,10 @@ You can also send your own pre-processed frames to `/api/ingest/frames`.
 | `FRAMES_PER_WINDOW` | `2` | Frames per window |
 | `OVERLAP_SEC` | `0` | Overlap between windows (seconds) |
 | `INCLUDE_AUDIO` | `false` | Include the video's audio in the same vector |
+| `SKIP_STATIC` | `false` | Do not embed windows whose video has not changed from the previous window; extend the previous window instead (video-only windows). Reduces the number of windows and the ingestion time for cameras with little motion ([docs/design.md](docs/design.md)) |
+| `STATIC_THRESHOLD` | `4.0` | For `SKIP_STATIC`, the largest per-block brightness difference (0-255) still treated as "no change". Smaller values skip less |
+| `DOC_CHUNK_CHARS` | `800` | Approximate number of characters per document vector (100-4000). Chunks never span pages |
+| `DOC_OVERLAP_CHARS` | `100` | Number of characters from the end of a chunk repeated at the start of the next one (0 to half of `DOC_CHUNK_CHARS`) |
 | `AUDIO_CHUNK_SEC` | `10` | Chunk length for audio files (seconds) |
 | `IMAGE_MAX_SIDE` | `448` | Long side images are resized to (px) |
 | `FFMPEG_HWACCEL` | `auto` | GPU used to decode video (`auto` / `cuda` / `vaapi` / `qsv` / `none`). Falls back to the CPU if unavailable (`docs/gpu.md`) |
@@ -202,6 +207,10 @@ You can also send your own pre-processed frames to `/api/ingest/frames`.
 | `FFMPEG_SKIP_FRAMES` | `noref` | Frames skipped when decoding. `noref` (skip non-reference frames; timing is off by 1-2 frames) / `none` (all frames) / `keyframes` (keyframes only; several times faster, but timing can be off by a few seconds) |
 | `EMBED_BATCH` | `auto` | Maximum number of items embedded together. `auto` is 1 on CPU (no batching; measured not to be faster on CPU) and 4 on GPU (small effect, see `docs/gpu.md`) |
 | `TORCH_COMPILE` | `auto` | Inference optimizations (torch.compile, CUDA Graphs). `auto` uses them on NVIDIA GPUs when a C compiler is available (the `cuda` image). `off` disables them (faster startup, slower inference). The prepared results are cached in `DATA_DIR/cache/torch` (`docs/gpu.md`) |
+| `TORCH_CACHE_DIR` | `DATA_DIR/cache/torch` | Persistent directory for PyTorch (`TORCHINDUCTOR_CACHE_DIR` / `TRITON_CACHE_DIR`) compilation caches (explicit per-variable overrides take precedence) |
+| `WARMUP_ON_START` | `true` | Runs one dummy warmup inference (text, image, audio) right before `/readyz` becomes ready (skipped for `remote`, or when already warmed up by `TORCH_COMPILE`) |
+| `INGEST_PREFETCH` | `2` | Bounded queue capacity (1-16) for the video ingestion producer-consumer pipeline. Overlaps frame decoding and preprocessing for window N+1 with inference of window N while applying backpressure to bound memory usage |
+| `INGEST_WORKERS` | `1` | Number of files ingested at the same time (1-8). Decoding, preprocessing and saving run in parallel; inference still goes to the GPU one call at a time through the priority gate, so search priority and vectors are unchanged. Useful on fast GPUs where a single ffmpeg decoder cannot keep the GPU busy. Memory use grows roughly with this number |
 | `IMAGE_MAX_TOKENS` | `0` | Token limit per image (0 = model default) |
 | `TOP_K` | `10` | Default number of search results |
 | `DATA_DIR` | `/data` | Where the DB, thumbnails and uploaded videos are stored |
@@ -217,6 +226,7 @@ You can also send your own pre-processed frames to `/api/ingest/frames`.
 | `EMBEDDING_TOKEN` | same as `API_TOKEN` | Token sent to compute when remote |
 | `INGEST_ROOTS` | `/recordings` | Folders allowed for path and folder ingestion (comma-separated). `DATA_DIR` and the watched folders are added automatically |
 | `MAX_UPLOAD_MB` | `4096` | Maximum size of one request (MB). `0` for unlimited |
+| `CLIP_MAX_SEC` | `600` | Maximum length (seconds) of one clip cut out with `GET /api/sources/{id}/clip`. `0` disables clipping |
 | `ALLOWED_ORIGINS` | (empty) | Origins allowed to call state-changing APIs from a page on another origin (comma-separated) |
 | `ALLOWED_HOSTS` | `*` | Accepted Host headers (comma-separated). Protection against DNS rebinding |
 | `PUID` / `PGID` | `1000` | User / group ID the app runs as. `PUID=0` keeps it running as root |
@@ -242,6 +252,7 @@ Ingestion presets (`preset`): `object` (2-second windows, 2 frames, no audio; fo
 - "Video only (frames)", "video + audio (tav)", "audio only (audio)" and "still image (image)" are stored as separate kinds (`kind`) and selected at search time. With `auto`, text and image searches look at tav or frames (depending on `INCLUDE_AUDIO`) and image; audio searches look at `audio`.
 - **There is a mode that does not keep videos or images.** When ingesting with `STORE_MEDIA=false` (or `store_media=false` per ingestion), only vectors and information (source name, time, group ID, etc.) are kept; uploaded files are deleted after ingestion and no thumbnails are created. `media_url` / `thumb_url` in search results become `null`. Files ingested by path belong to the user, so they are not deleted, only excluded from serving. Since the original file is gone, re-ingestion (reindex) is not possible.
 - **Images alone can be registered.** When frames cannot be extracted from video, or when only photos are handled, each image is ingested as one item (`/api/ingest/image`, path, folder and watched folder ingestion are all supported). The capture time is taken from the specified value, the date in the file name, then the EXIF capture time, in that order.
+- **Documents (PDF, Word, text) can be registered.** `.pdf` / `.docx` / `.txt` / `.md` files are split into chunks of about 800 characters, one vector per chunk (`/api/ingest/document`, path, folder and watched folder ingestion are all supported). Search them with `kind=document` (or `all` to mix them with video); results include the page (`page`) and the chunk text (`text`). Shift_JIS text files are supported. Image-only PDFs (scans) cannot be ingested because no text can be extracted. Documents are not subject to the retention period (`RETENTION_DAYS`).
 - **A retention period can be set.** With streams and watched folders, windows keep increasing (one 2-second-window stream produces about 43,000 windows and about 140 MB of vectors per day). With `RETENTION_DAYS`, old windows are deleted every 10 minutes, keeping memory and disk usage within bounds. Files whose windows are all gone get the status `expired`; the original files are not deleted.
 - **Vectors are stored in an embedded vector DB (USearch).** Settings, sources and window information are stored in SQLite (`mediasearch.db`), and vectors in `vectors.usearch`. Both are single files in `DATA_DIR`; no separate server is needed. As the count grows it switches to approximate search (HNSW), so search time stays nearly constant. Memory is proportional to the vector size (about 320 MB for 100,000 windows at 768 dimensions).
 
@@ -250,7 +261,7 @@ Ingestion presets (`preset`): `object` (2-second windows, 2 frames, no audio; fo
 | | |
 |---|---|
 | `GET /api/info` | Status, version, defaults, presets, index counts, watched folder status |
-| `POST /api/ingest/video` / `audio` / `image` | Ingest uploaded files (several images can be sent at once) |
+| `POST /api/ingest/video` / `audio` / `image` / `document` | Ingest uploaded files (several images can be sent at once; documents are PDF, Word or text) |
 | `POST /api/ingest/path` | Ingest a path inside the container |
 | `POST /api/ingest/dir` | Ingest a folder inside the container in bulk |
 | `POST /api/watch/scan` | Scan the watched folders now |
@@ -291,7 +302,7 @@ For details see `/scalar` (Scalar), `/docs` (Swagger UI), `/redoc`, [docs/api.md
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"          # For tests without the model
 pytest -q                        # End-to-end tests with dummy embeddings (requires ffmpeg)
-pip install -e ".[model]"        # To use the real model (the pinned transformers commit in AGENTS.md is recommended)
+pip install -e ".[model]"        # To use the real model (transformers 5.23.0 or later; the images pin 5.23.0)
 RUN_MODEL_TESTS=1 pytest -q -m model
 EMBEDDING_BACKEND=dummy DATA_DIR=./data uvicorn --factory mediasearch.main:create_app --reload
 ```

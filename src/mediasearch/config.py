@@ -86,6 +86,10 @@ class Settings:
     image_max_tokens: int  # 画像1枚あたりの上限トークン。0 ならモデルの既定
     image_max_side: int  # 推論前に縮小する画像の長辺(px)
     embed_batch: str  # まとめて推論する最大の件数(auto / 整数)。auto は CPU で 1、GPU で 4
+    torch_cache_dir: Path  # PyTorch(Inductor / Triton 等)のコンパイルキャッシュ保存先(既定 DATA_DIR/cache/torch)
+    warmup_on_start: bool  # 起動時(/readyz が Ready になる直前)にダミー入力でウォームアップ推論を行う
+    ingest_prefetch: int  # 動画取り込みの Producer-Consumer キューの上限(有界にしてメモリ肥大化を防ぐ)
+    ingest_workers: int  # 同時に取り込むファイルの数(復号・前処理を並べる。推論は PriorityGate で 1 回ずつ)
     ffmpeg_hwaccel: str  # 動画の復号に使う GPU(auto / none / cuda / vaapi / qsv)
     ffmpeg_hwaccel_device: str  # GPU 復号のデバイス(vaapi なら /dev/dri/renderD128 など。空なら自動)
     ffmpeg_skip_frames: str  # 復号を省く範囲(none / noref / keyframes。media.DECODE_SKIP)
@@ -139,6 +143,17 @@ class Settings:
     # --- 推論の高速化(embedders/accel.py) ---
     torch_compile: str = "auto"  # auto / on / off。auto は NVIDIA の GPU で C コンパイラがあるときに使う
 
+    # --- 切り出し(GET /api/sources/{id}/clip) ---
+    clip_max_sec: int = 600  # 1 回に切り出せる長さの上限(秒)。0 なら切り出しを無効にする
+
+    # --- 変化の無い区間の省略(pipeline.is_static_window) ---
+    skip_static: bool = False  # 真なら、前の窓と映像が変わらない窓を推論せず、前の窓を延ばす(映像のみの窓だけ)
+    static_threshold: float = 4.0  # 区画ごとの輝度の差(0〜255 の平均)がこれ未満なら「変化なし」とみなす
+
+    # --- 文書(PDF・Word・テキスト。documents.py) ---
+    doc_chunk_chars: int = 800  # 1 つのベクトルにする文字数の目安
+    doc_overlap_chars: int = 100  # 前の塊の終わりを、次の塊の頭に重ねる文字数
+
     @classmethod
     def from_env(cls) -> Settings:
         role = _env("ROLE", "all")
@@ -189,7 +204,13 @@ class Settings:
             image_max_tokens=_env_int("IMAGE_MAX_TOKENS", 0),
             image_max_side=_env_int("IMAGE_MAX_SIDE", 448),
             embed_batch=_env("EMBED_BATCH", "auto").lower(),
+            torch_cache_dir=(
+                Path(_env("TORCH_CACHE_DIR", "")) if _env("TORCH_CACHE_DIR", "") else data_dir / "cache" / "torch"
+            ),
             torch_compile=torch_compile,
+            warmup_on_start=_env_bool("WARMUP_ON_START", True),
+            ingest_prefetch=min(max(_env_int("INGEST_PREFETCH", 2), 1), 16),
+            ingest_workers=min(max(_env_int("INGEST_WORKERS", 1), 1), 8),
             ffmpeg_hwaccel=_env("FFMPEG_HWACCEL", "auto"),
             ffmpeg_hwaccel_device=_env("FFMPEG_HWACCEL_DEVICE", ""),
             ffmpeg_skip_frames=skip_frames,
@@ -227,4 +248,9 @@ class Settings:
             max_upload_mb=max(_env_int("MAX_UPLOAD_MB", 4096), 0),
             allowed_origins=tuple(o.strip().rstrip("/") for o in _env("ALLOWED_ORIGINS", "").split(",") if o.strip()),
             allowed_hosts=tuple(h.strip().lower() for h in _env("ALLOWED_HOSTS", "*").split(",") if h.strip()),
+            clip_max_sec=max(_env_int("CLIP_MAX_SEC", 600), 0),
+            skip_static=_env_bool("SKIP_STATIC", False),
+            static_threshold=_env_float("STATIC_THRESHOLD", 4.0),
+            doc_chunk_chars=_env_int("DOC_CHUNK_CHARS", 800),
+            doc_overlap_chars=_env_int("DOC_OVERLAP_CHARS", 100),
         )

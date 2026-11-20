@@ -22,12 +22,13 @@ import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from . import disk, media
 from .alerts import new_secret, public_alert, validate_webhook
 from .backup import BackupError
-from .ingest_files import MEDIA_KINDS, is_within, media_kind_of
+from .ingest_files import INGEST_KINDS, media_kind_of
 from .live import LiveHub, Subscriber
 from .media import MediaError
 from .metrics import app_metrics
@@ -52,6 +53,7 @@ from .schemas import (
     Reindexed,
     SearchKind,
     SearchResponse,
+    SimilarSearchRequest,
     Source,
     SourceKind,
     SourceList,
@@ -64,7 +66,7 @@ from .schemas import (
     WatchScanResponse,
     errors,
 )
-from .service import Context, Service, media_stored, parse_opt_ts, parse_ts
+from .service import Context, Service, parse_opt_ts, parse_ts
 
 log = logging.getLogger(__name__)
 
@@ -150,6 +152,16 @@ class IngestDirRequest(_WindowOptions):
     model_config = ConfigDict(json_schema_extra={"examples": [{"dir": "/recordings", "group_from_dir": True}]})
 
 
+# 文書を配信するときの Content-Type(ダウンロードとして返すため、表示のための値ではない)
+DOC_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".txt": "text/plain; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+    ".markdown": "text/markdown; charset=utf-8",
+}
+
+
 def _filters_form(kind_description: str):
     """multipart の検索(画像・音声)で共通の絞り込み条件。"""
 
@@ -163,11 +175,16 @@ def _filters_form(kind_description: str):
         kind: SearchKind = Form("auto", description=kind_description),
         merge: str | None = Form(None, description="隣り合う窓を区間にまとめた intervals も返す(既定 true)"),
         after_window_id: str | None = Form(None, description="この ID より後に追加された窓だけを探す"),
+        dedupe: str | None = Form(None, description="ほぼ同じ場面をまとめるしきい値(例 0.95)"),
     ) -> dict:
         try:
             score = float(min_score) if min_score else 0.0
         except ValueError as exc:
             raise HTTPException(400, f"min_score は数値で指定してください: {min_score!r}") from exc
+        try:
+            dedupe_value = float(dedupe) if dedupe else None
+        except ValueError as exc:
+            raise HTTPException(400, f"dedupe は数値で指定してください: {dedupe!r}") from exc
         return {
             "top_k": _opt_int(top_k, "top_k"),
             "min_score": score,
@@ -178,6 +195,7 @@ def _filters_form(kind_description: str):
             "kind": kind,
             "merge": _opt_bool(merge) is not False,
             "after_window_id": _opt_int(after_window_id, "after_window_id"),
+            "dedupe": dedupe_value,
         }
 
     return dependency
@@ -335,6 +353,28 @@ def build_api_router(ctx: Context) -> APIRouter:
         return {"queued": len(items), "items": items, "errors": errs}
 
     @router.post(
+        "/ingest/document",
+        tags=["取り込み"],
+        summary="文書(PDF・Word・テキスト)をアップロードして取り込む",
+        response_model=Accepted,
+        responses=errors(400, 401, 409, 413, 422),
+    )
+    def ingest_document(
+        file: UploadFile = File(..., description="文書ファイル(.pdf / .docx / .txt / .md)"),
+        group_id: str | None = Form(None, description="任意のグループ ID"),
+        location: str | None = Form(None, description="任意の場所の名前"),
+        start_ts: str | None = Form(None, description="文書の日時(省略時はファイル名の日時、なければ受付時刻)"),
+        store_media: str | None = Form(None, description=_STORE_MEDIA_FORM + "。偽なら塊の本文も保存しない"),
+    ) -> dict:
+        """文書から文字を取り出し、約 DOC_CHUNK_CHARS 字の塊ごとにベクトルにします(窓の種類は document)。
+
+        塊はページをまたぎません。検索結果には、ページ(`page`)と塊の本文(`text`)が付きます。
+        画像だけの PDF(スキャンしたもの)は、文字を取り出せないため取り込めません(文字認識には対応していません)。
+        """
+        params = _params(None, None, None, None, None, store_media=_opt_bool(store_media))
+        return _accept_upload(file, "document", start_ts, group_id=group_id, location=location, params=params)
+
+    @router.post(
         "/ingest/path",
         tags=["取り込み"],
         summary="コンテナ内のファイルを取り込む",
@@ -347,12 +387,14 @@ def build_api_router(ctx: Context) -> APIRouter:
         取り込み済みのファイルは重複として既存の取り込み元を返します(`force=true` で取り込み直し)。
         """
         path = Path(body.path)
+        # 許可したフォルダの外なら、拡張子やファイルの有無に関係なく 403 にする。存在の確認より先に行うのは、
+        # 400(無い)と 403(外)の違いから、許可していない場所のファイルの有無を調べられないようにするため
+        ctx.intake.check_allowed(path)
         if not path.is_file():
             raise HTTPException(400, f"ファイルが見つかりません: {body.path}(コンテナ内のパスで指定してください)")
-        ctx.intake.check_allowed(path)  # 許可したフォルダの外なら、拡張子に関係なく 403 にする
         kind = media_kind_of(path) if body.kind == "auto" else body.kind
         if kind is None:
-            raise MediaError(f"映像・音声・画像として扱えない拡張子です: {path.name}")
+            raise MediaError(f"映像・音声・画像・文書として扱えない拡張子です: {path.name}")
         params = _params(
             body.preset,
             body.window_sec,
@@ -476,6 +518,23 @@ def build_api_router(ctx: Context) -> APIRouter:
         """文章に近い場面(窓)を、スコアの高い順に返します。`kind=auto` は映像の窓と静止画を探します。"""
         f = body.model_dump()
         return svc.search_text(f.pop("query"), **f)
+
+    @router.post(
+        "/search/similar",
+        tags=["検索"],
+        summary="検索結果の場面に似た場面を探す",
+        response_model=SearchResponse,
+        responses=errors(400, 401, 404, 409, 503),
+    )
+    def search_similar(body: SimilarSearchRequest) -> dict:
+        """取り込み済みの窓(検索結果の `window_id`)に似た場面を探します。
+
+        保存済みのベクトルをそのまま使うため、推論は行いません。元の窓は結果に含めません。
+        `exclude_same_source=true` で、同じ録画の別の時刻を外し、別の録画・別のカメラだけを探せます。
+        """
+        f = body.model_dump()
+        window_id = f.pop("window_id")
+        return svc.search_similar(window_id, **f)
 
     @router.post(
         "/search/image",
@@ -838,7 +897,7 @@ def build_api_router(ctx: Context) -> APIRouter:
     def reindex_source(source_id: int) -> dict:
         """同じ設定で取り込み直します(古い窓は削除されます)。"""
         src = ctx.store.get_source(source_id)
-        if src is None or src["kind"] not in MEDIA_KINDS:
+        if src is None or src["kind"] not in INGEST_KINDS:
             raise HTTPException(404, "再取り込みできる取り込み元が見つかりません")
         if not src["path"]:
             raise HTTPException(404, "元のファイルを保存していないため、取り込み直せません(store_media=false)")
@@ -968,20 +1027,60 @@ def build_api_router(ctx: Context) -> APIRouter:
         },
     )
     def get_media(source_id: int) -> FileResponse:
-        """元の動画・音声・画像を返します。Range リクエストに対応するため、動画は `#t=秒` で頭出し再生できます。"""
-        src = ctx.store.get_source(source_id)
-        # 配信するのは、受付時の検証を通ったものだけ(取り込みに失敗したものは返さない)
-        if (
-            src is None
-            or src["kind"] not in MEDIA_KINDS
-            or src["status"] in ("failed", "expired")
-            or not media_stored(src)  # 保存しない設定で取り込んだものは返さない(情報だけを返す)
-            or not src["path"]
-            or not is_within(src["path"], s.ingest_roots)  # 以前の版で登録された、許可外のパスも返さない
-            or not Path(src["path"]).is_file()
-        ):
-            raise HTTPException(404, "ファイルが見つかりません")
+        """元の動画・音声・画像・文書を返します。Range リクエストに対応するため、動画は `#t=秒` で頭出し再生できます。
+
+        文書は、ブラウザで開かずダウンロードとして返します(`Content-Disposition: attachment`)。
+        """
+        # 配信するのは、受付時の検証を通ったものだけ(取り込みに失敗したもの・保存しない設定のものは返さない)
+        src = svc.servable_source(source_id)
+        if src["kind"] == "document":
+            # 文書はブラウザで開かず、ダウンロードとして返す(HTML などとして解釈され、スクリプトが動くのを防ぐ)
+            ext = Path(src["path"]).suffix.lower()
+            return FileResponse(
+                src["path"],
+                media_type=DOC_MEDIA_TYPES.get(ext, "application/octet-stream"),
+                filename=src["name"] or Path(src["path"]).name,
+                content_disposition_type="attachment",
+            )
         return FileResponse(src["path"])
+
+    @router.get(
+        "/sources/{source_id}/clip",
+        tags=["配信"],
+        summary="取り込み元の一部を切り出す(MP4 / M4A)",
+        response_class=FileResponse,
+        responses={
+            200: {
+                "description": "切り出したファイル(動画は MP4、音声は M4A。ダウンロードとして返す)",
+                "content": {
+                    "video/mp4": {"schema": {"type": "string", "format": "binary"}},
+                    "audio/mp4": {"schema": {"type": "string", "format": "binary"}},
+                },
+            },
+            **errors(400, 401, 404, 503),
+        },
+    )
+    def get_clip(
+        source_id: int,
+        start_ms: int = Query(..., ge=0, description="開始位置(先頭からのミリ秒。検索結果の start_ms)"),
+        end_ms: int = Query(..., gt=0, description="切り出しの終了位置(ミリ秒。検索結果の end_ms)"),
+        accurate: bool = Query(
+            False,
+            description=(
+                "true: 指定の位置ちょうどで切る(H.264 でエンコードし直すため時間がかかる)。"
+                "false: エンコードし直さずに切る(速い。MP4 の編集リストで指定の位置から再生される)"
+            ),
+        ),
+    ) -> FileResponse:
+        """検索で見つかった区間を、ファイルとして書き出します(証拠の保存や共有のため)。
+
+        長さは `CLIP_MAX_SEC`(既定 600 秒)まで。同時に処理できるのは 2 件までで、超えると 503 を返します。
+        静止画と、保存しない設定(`store_media=false`)で取り込んだものは切り出せません。
+        """
+        out, name, media_type = svc.clip(source_id, start_ms, end_ms, accurate)
+        return FileResponse(
+            out, media_type=media_type, filename=name, background=BackgroundTask(out.unlink, missing_ok=True)
+        )
 
     @router.get(
         "/thumb/{window_id}",
