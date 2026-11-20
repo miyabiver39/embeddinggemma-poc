@@ -112,10 +112,9 @@ class Server:
     def _dirs(self, dims: int) -> tuple[Path, Path]:
         data = self.data_root / f"data-d{dims}"  # DB は次元を記録して照合するため、DIMS ごとに分ける
         cache = self.data_root / "torch-cache"  # compile の結果は共通にして、作り直しを避ける
+        # 所有者は、コンテナの起動スクリプト(docker/entrypoint.sh)が、コンテナの利用者に合わせて変更する
         for d in (data, cache):
             d.mkdir(parents=True, exist_ok=True)
-            if self.args.launcher == "docker":
-                os.chmod(d, 0o777)  # コンテナの利用者(uid 1000)が書けるように
         return data, cache
 
     def _launch_docker(self, env: dict, data: Path, cache: Path) -> None:
