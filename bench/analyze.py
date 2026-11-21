@@ -80,6 +80,11 @@ def derive(samples: list[dict]) -> list[dict]:
             row["gpu_mem_total_mb"] = round(sum(d.get("memory_total_mb") or 0 for d in devices), 1)
 
         row["rss_mb"] = round(pb["process"]["rss_bytes"] / 2**20, 1)
+        if pb["process"].get("rss_shmem_bytes") is not None:  # GPU への転送用の固定のメモリは、共有メモリに数えられる
+            row["shmem_mb"] = round(pb["process"]["rss_shmem_bytes"] / 2**20, 1)
+        pinned = _get(side_b, "gpu", "torch", "pinned_mb")
+        if pinned is not None:
+            row["pinned_mb"] = pinned
         if cg_b.get("memory_bytes"):
             row["mem_mb"] = round(cg_b["memory_bytes"] / 2**20, 1)
             if cg_b.get("memory_anon_bytes") is not None:
@@ -121,6 +126,8 @@ METRICS = [  # (キー, 表示名, 単位)
     ("rss_mb", "メモリ: アプリ本体(RSS)", "MB"),
     ("mem_anon_mb", "メモリ: コンテナ全体(キャッシュを除く)", "MB"),
     ("mem_mb", "メモリ: コンテナ全体(キャッシュを含む)", "MB"),
+    ("pinned_mb", "メモリ: GPU への転送用の固定のメモリ(pin_memory)", "MB"),
+    ("shmem_mb", "メモリ: アプリ本体の共有メモリ(固定のメモリを含む)", "MB"),
     ("io_read_mbps", "ディスクの読み込み", "MB/秒"),
     ("io_write_mbps", "ディスクの書き込み", "MB/秒"),
     ("windows_per_sec", "窓の作成", "件/秒"),
