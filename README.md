@@ -98,7 +98,7 @@ The name of the folder containing the file becomes the group ID (`group-a` for `
 
 | Tag | Use | Run options |
 |---|---|---|
-| `:cpu` (= `:latest`) | CPU inference. Runs anywhere | none |
+| `:cpu` (= `:latest`) | CPU inference (ONNX Runtime `fp32` default). Runs anywhere | none |
 | `:cuda` | NVIDIA GPU (RTX 3060, etc.) | `--gpus all` |
 | `:rocm` | AMD GPU (RX 9060 XT, etc.) | `--device=/dev/kfd --device=/dev/dri --group-add video` |
 | `:intel` | Intel GPU (Arc / Core Ultra integrated) | `--device=/dev/dri` |
@@ -118,9 +118,16 @@ docker run -d -p 8000:8000 -v ./data:/data --device=/dev/dri ghcr.io/miyabiver39
 ```
 
 You can check whether the GPU is used on the "状態" (Status) tab of the WebUI, or with `embedder.accelerator` in `curl localhost:8000/api/info`
-(`nvidia-cuda` / `amd-rocm` / `intel-xpu` / `cpu`).
+(`nvidia-cuda` / `amd-rocm` / `intel-xpu` / `cpu`, and `embedder.runtime` shows `onnx` or `pytorch`).
 **Of the GPU images, only NVIDIA RTX 3060 (Linux) and AMD RX 9060 XT (Windows WSL2) have been tested on real hardware** (Intel and native Linux AMD are not tested yet). See [docs/gpu.md](docs/gpu.md) for the test procedure, results and known issues.
 Older Intel integrated GPUs (Iris Xe, etc.) are likely not supported by PyTorch XPU; in that case the image runs on the CPU.
+
+### Notes on `:cpu` (ONNX Runtime default)
+
+- **Default inference engine and GPU DB compatibility**: `:cpu` bundles the `fp32` variant of [onnx-community/embeddinggemma-2-ONNX](https://huggingface.co/onnx-community/embeddinggemma-2-ONNX) and runs ONNX Runtime (`fp32`) by default, with lossless image padding removal and automatic thread sizing (75% of logical CPUs when more than 4 cores are available, e.g. 12 threads on a 16-thread CPU). Vectors match PyTorch FP32 with cosine similarity `1.000000` across all modalities, so vector DBs built on CPU and GPU (BF16) remain fully compatible without re-indexing. On Ryzen 7 5700X (inference-only comparison), text queries dropped from 64.1 ms to 28.1 ms (2.28x faster), 2-frame video windows dropped from 7.41 s to 4.86 s (1.52x faster), and peak RSS dropped from 4.71 GB to 3.85 GB ([bench/README.md](bench/README.md)).
+- **Image size and startup load time**: To avoid double-bundling model weights, `:cpu` bundles only the ONNX `fp32` weights (~2.93 GB) and omits the PyTorch safetensors weights (~1.49 GB). As a result, the image is larger than earlier PyTorch-only `:cpu` builds, and initial model loading takes about 17-20 seconds.
+- **Switching back to PyTorch on CPU**: Because PyTorch weights are not bundled in `:cpu`, switching to PyTorch requires allowing downloads from Hugging Face (`-e EMBEDDING_RUNTIME=pytorch -e HF_HUB_OFFLINE=0`), or running a GPU image (`:cuda` / `:rocm` / `:intel`) without passing a GPU.
+- **Quantized ONNX (`q8` / `q4`)**: Quantized models are not bundled. You can try them online with `-e HF_HUB_OFFLINE=0 -e ONNX_PRECISION=q8` (or `q4`) to reduce memory (~2.0-2.3 GB). However, quantized vectors diverge from FP32 / GPU BF16 (especially `q4`: cosine similarity 0.97-0.99, score difference up to 0.032), and on CPUs without AVX-512 VNNI (such as Ryzen Zen 3), `q8` is slower than `fp32`. Do not mix quantized vectors into a DB created with FP32 or GPU.
 
 ## Benchmark
 
@@ -135,7 +142,7 @@ Ingestion figures are the median of 3 runs. See [bench/README.md](bench/README.m
 | Image ingestion (1080p, 50 images) | 0.28 images/s | **9.67 images/s** | 5.62 images/s |
 | Text search (4 concurrent, 30 s) | 8.1 req/s (p50 497 ms, p95 524 ms) | **194 req/s (p50 19 ms)** | 16.9 req/s (p50 176 ms) |
 
-- CPU (`:cpu`): Windows 11 Pro + Docker Desktop (WSL2, 16 logical CPUs), AMD Ryzen 7 5700X. Re-measured on 2026-11-21 with the CI-built `:cpu` image (`main` at `47f1668`, PyTorch 2.14.1+cpu, transformers 5.23.0, sentence-transformers 6.3.0). Startup (including warmup) took 11.8 s; single-request search responded in p50 134 ms (7.53 req/s); search during video ingestion kept p50 504 ms / p95 548 ms (p99 8.0 s, waiting at most one in-flight window). Compared with earlier CPU measurements (`056b937`: 4.57 req/s, p95 1,890 ms; 2026-10-13: 7.1 req/s, p95 1,297 ms), concurrent text search throughput rose and p95 latency fell sharply. With `SKIP_STATIC` on a synthetic 8-scene x 8 s video (64 s, 32 windows), 25 windows were skipped and ingestion dropped from 257.8 s (0.25x) to 56.8 s (1.13x real time); ingesting 100 document chunks (~76,000 chars) took 72.5 s (725 ms per chunk) ([bench/README.md](bench/README.md)).
+- CPU (`:cpu`): Windows 11 Pro + Docker Desktop (WSL2, 16 logical CPUs), AMD Ryzen 7 5700X. Re-measured on 2026-11-21 with the CI-built `:cpu` image (`main` at `47f1668`, PyTorch 2.14.1+cpu, transformers 5.23.0, sentence-transformers 6.3.0; before switching the `:cpu` default to ONNX Runtime). Startup (including warmup) took 11.8 s; single-request search responded in p50 134 ms (7.53 req/s); search during video ingestion kept p50 504 ms / p95 548 ms (p99 8.0 s, waiting at most one in-flight window). Compared with earlier CPU measurements (`056b937`: 4.57 req/s, p95 1,890 ms; 2026-10-13: 7.1 req/s, p95 1,297 ms), concurrent text search throughput rose and p95 latency fell sharply. With `SKIP_STATIC` on a synthetic 8-scene x 8 s video (64 s, 32 windows), 25 windows were skipped and ingestion dropped from 257.8 s (0.25x) to 56.8 s (1.13x real time); ingesting 100 document chunks (~76,000 chars) took 72.5 s (725 ms per chunk). For the ONNX Runtime `fp32` / `q8` / `q4` comparison on the same CPU, see [bench/README.md](bench/README.md).
 - RTX 3060: Ubuntu 26.04.1 LTS, Core i7-6700K, driver 595.99.02. Measured on 2026-11-20 with the CI-built `:cuda` image (main at c5a27c3), which includes the inference optimizations (torch.compile, CUDA Graphs and more; see "推論の高速化" in [docs/gpu.md](docs/gpu.md)) and the improvements from PR #14. Speed before and after PR #14 was the same within measurement error ([bench/README.md](bench/README.md)). Before the optimizations (2026-11-19): video 9.4 s (0.31 s per window), audio 1.01 s, images 5.12 images/s, search 17.4 req/s (p50 166 ms). A single search responds in p50 7.6 ms (51 ms before). Peak GPU memory use is about 3.5 GB, and video is also decoded on the GPU. The first start takes about 80 seconds to prepare the optimizations (about 37 seconds afterwards).
 - The RTX 3060 audio figure is after removing the audio-side optimization (torch.compile) for quality reasons (0.44 s before; see [docs/gpu.md](docs/gpu.md)).
 - RX 9060 XT: Windows 11 + Docker Desktop (WSL2). Measured on 2026-10-13 with the fast attention kernels enabled (the default of the `rocm` image; [docs/gpu.md](docs/gpu.md)).
@@ -194,6 +201,10 @@ You can also send your own pre-processed frames to `/api/ingest/frames`.
 | `EMBEDDING_URL` | `http://localhost:8001` | URL of compute when remote |
 | `DEVICE` | `auto` | `auto` / `cpu` / `cuda` (AMD ROCm is also `cuda`) / `xpu` |
 | `DTYPE` | `auto` | bf16 on GPU, fp32 on CPU. Set `float32` if the output becomes NaN |
+| `EMBEDDING_RUNTIME` | `auto` | `auto` / `onnx` / `pytorch`. On CPU, `auto` uses ONNX Runtime when `onnxruntime` and an ONNX model are available (default in `:cpu`); GPU images use PyTorch |
+| `ONNX_PRECISION` | `fp32` | Precision for ONNX Runtime (`fp32` / `q8` / `q4` / `fp16`). Only `fp32` is bundled in `:cpu` (cosine similarity `1.000000` with PyTorch FP32, compatible with GPU DBs). Quantized modes need `HF_HUB_OFFLINE=0` and must not be mixed with FP32 / GPU DBs |
+| `ONNX_THREADS` | `0` | Intra-op threads for ONNX Runtime (`0` = auto: all logical CPUs up to 4, or 75% above 4, respecting container CPU limits and `OMP_NUM_THREADS`) |
+| `ONNX_MODEL_DIR` | `/opt/onnx` (`:cpu`) | Directory of bundled/local ONNX files (`onnx/*.onnx` and processor config). Empty downloads from `ONNX_MODEL_ID` |
 | `DIMS` | `768` | Dimensions of stored vectors (768/512/256/128). **Cannot be changed after the DB is created** (see below) |
 | `WINDOW_SEC` | `2` | Length of the time window turned into one vector (seconds) |
 | `FRAMES_PER_WINDOW` | `2` | Frames per window |

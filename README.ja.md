@@ -96,7 +96,7 @@ docker run -d --name mediasearch -p 8000:8000 -v ./data:/data -v /path/to/record
 
 | タグ | 用途 | 起動オプション |
 |---|---|---|
-| `:cpu`(= `:latest`) | CPU 推論。どこでも動く | なし |
+| `:cpu`(= `:latest`) | CPU 推論(ONNX Runtime `fp32` 既定)。どこでも動く | なし |
 | `:cuda` | NVIDIA GPU(RTX 3060 など) | `--gpus all` |
 | `:rocm` | AMD GPU(RX 9060 XT など) | `--device=/dev/kfd --device=/dev/dri --group-add video` |
 | `:intel` | Intel GPU(Arc / Core Ultra 内蔵) | `--device=/dev/dri` |
@@ -116,9 +116,16 @@ docker run -d -p 8000:8000 -v ./data:/data --device=/dev/dri ghcr.io/miyabiver39
 ```
 
 GPU が使われているかは WebUI の「状態」タブ、または `curl localhost:8000/api/info` の `embedder.accelerator` で確認できます
-(`nvidia-cuda` / `amd-rocm` / `intel-xpu` / `cpu`)。
+(`nvidia-cuda` / `amd-rocm` / `intel-xpu` / `cpu`。実行基盤は `embedder.runtime` に `onnx` または `pytorch` と表示されます)。
 **GPU 版のうち実機で確認したのは、NVIDIA の RTX 3060(Linux)と AMD の RX 9060 XT(Windows の WSL2)です**(Intel と、Linux ネイティブの AMD は未確認)。実機での確認手順・結果と既知の注意点は [docs/gpu.md](docs/gpu.md) を見てください。
 Intel の古い内蔵 GPU(Iris Xe など)は PyTorch の XPU 対応外の可能性が高く、その場合は CPU で動きます。
+
+### `:cpu` イメージに関する注意事項(ONNX Runtime 既定)
+
+- **既定の推論エンジンと GPU DB との互換性**: `:cpu` は [onnx-community/embeddinggemma-2-ONNX](https://huggingface.co/onnx-community/embeddinggemma-2-ONNX) の `fp32` 版を同梱し、画像の詰め物パッチ除去とスレッド数の自動最適化(論理 CPU 数が 5 以上なら 75%。例: 16 スレッド CPU で 12 スレッド)を有効にした ONNX Runtime(`fp32`)を既定で動かします。PyTorch FP32 とのコサイン類似度は全モダリティで `1.000000` 一致するため、CPU と GPU(BF16)で作成したベクトル DB は再インデックスなしでそのまま互換性を保てます。Ryzen 7 5700X での推論単体比較では、テキスト検索が 64.1 ms → 28.1 ms(2.28 倍)、動画 2 フレーム窓が 7.41 秒 → 4.86 秒(1.52 倍)、ピークメモリ(RSS)が 4.71 GB → 3.85 GB に改善しています([bench/README.md](bench/README.md))。
+- **イメージ容量と起動時の読み込み時間**: モデルの二重同梱を避けるため、`:cpu` には ONNX `fp32` の重み(約 2.93 GB)のみを同梱し、PyTorch の safetensors 重み(約 1.49 GB)は同梱していません。そのため以前の PyTorch 版 `:cpu` よりイメージ容量が大きくなり、起動時のモデル読み込みに約 17〜20 秒かかります。
+- **CPU で PyTorch 推論へ戻す場合**: `:cpu` には PyTorch の重みが同梱されていないため、`EMBEDDING_RUNTIME=pytorch` を使う場合は Hugging Face からのダウンロードを許可する(`-e EMBEDDING_RUNTIME=pytorch -e HF_HUB_OFFLINE=0`)か、GPU イメージ(`:cuda` / `:rocm` / `:intel`)を GPU なしで起動してください。
+- **量子化版 ONNX(`q8` / `q4`)について**: 量子化モデルはイメージに同梱していません。メモリを抑えたい場合(約 2.0〜2.3 GB)は `-e HF_HUB_OFFLINE=0 -e ONNX_PRECISION=q8`(または `q4`)でオンライン取得して試せますが、FP32 / GPU(BF16)とのベクトルに差が生じます(特に `q4` は類似度 0.97〜0.99、検索スコア差最大 0.032)。また AVX-512 VNNI を持たない CPU(Ryzen Zen 3 など)では `q8` は `fp32` より遅くなります。量子化版のベクトルは FP32 や GPU の DB に混在させないでください。
 
 ## ベンチマーク
 
@@ -133,7 +140,7 @@ Intel の古い内蔵 GPU(Iris Xe など)は PyTorch の XPU 対応外の可能�
 | 画像の取り込み(1080p・50 枚) | 0.28 枚/秒 | **9.67 枚/秒** | 5.62 枚/秒 |
 | 文章の検索(同時 4 件・30 秒) | 8.1 件/秒(p50 497 ms、p95 524 ms) | **194 件/秒(p50 19 ms)** | 16.9 件/秒(p50 176 ms) |
 
-- CPU(`:cpu`): Windows 11 Pro + Docker Desktop(WSL2、16 論理 CPU)、AMD Ryzen 7 5700X。2026-11-21 に、CI でビルドした `:cpu`(main の `47f1668`、PyTorch 2.14.1+cpu、transformers 5.23.0、sentence-transformers 6.3.0)で再計測。起動(ウォームアップ込み)は 11.8 秒、検索 1 件ずつの応答は p50 134 ms(7.53 件/秒)、動画の取り込み中の検索は p50 504 ms / p95 548 ms(p99 8.0 秒。実行中の 1 窓の完了待ち)でした。以前の CPU 計測(`056b937`: 4.57 件/秒・p95 1,890 ms、2026-10-13: 7.1 件/秒・p95 1,297 ms)と比べて、同時検索の処理量が増え p95 応答時間が大幅に短縮しています。`SKIP_STATIC` を有効にすると 8 場面 × 8 秒(64 秒・32 窓)の合成動画で 25 窓を省略し、257.8 秒(0.25 倍)→ 56.8 秒(実時間比 1.13 倍)に短縮、約 7.6 万字(100 塊)の文書取り込みは 72.5 秒(1 塊 725 ms)でした([bench/README.md](bench/README.md))。
+- CPU(`:cpu`): Windows 11 Pro + Docker Desktop(WSL2、16 論理 CPU)、AMD Ryzen 7 5700X。2026-11-21 に、CI でビルドした `:cpu`(main の `47f1668`、PyTorch 2.14.1+cpu、transformers 5.23.0、sentence-transformers 6.3.0。ONNX Runtime 既定化前の版)で再計測。起動(ウォームアップ込み)は 11.8 秒、検索 1 件ずつの応答は p50 134 ms(7.53 件/秒)、動画の取り込み中の検索は p50 504 ms / p95 548 ms(p99 8.0 秒。実行中の 1 窓の完了待ち)でした。以前の CPU 計測(`056b937`: 4.57 件/秒・p95 1,890 ms、2026-10-13: 7.1 件/秒・p95 1,297 ms)と比べて、同時検索の処理量が増え p95 応答時間が大幅に短縮しています。`SKIP_STATIC` を有効にすると 8 場面 × 8 秒(64 秒・32 窓)の合成動画で 25 窓を省略し、257.8 秒(0.25 倍)→ 56.8 秒(実時間比 1.13 倍)に短縮、約 7.6 万字(100 塊)の文書取り込みは 72.5 秒(1 塊 725 ms)でした。同一 CPU での ONNX Runtime(`fp32` / `q8` / `q4`)の比較結果は [bench/README.md](bench/README.md) を参照してください。
 - RTX 3060: Ubuntu 26.04.1 LTS、Core i7-6700K、ドライバ 595.99.02。2026-11-20 に、CI でビルドした `:cuda`(main の c5a27c3。推論の高速化(torch.compile・CUDA Graph など。[docs/gpu.md](docs/gpu.md) の「推論の高速化」)と PR #14 の改善を含む)で計測。PR #14 の前後で速度の差は誤差の範囲でした([bench/README.md](bench/README.md))。高速化の前(2026-11-19)は、動画 9.4 秒(1 窓 0.31 秒)・音声 1.01 秒・画像 5.12 枚/秒・検索 17.4 件/秒(p50 166 ms)でした。検索 1 件ずつの応答は p50 7.6 ms(高速化の前は 51 ms)。GPU メモリの使用量は最大約 3.5GB、動画の復号も GPU で行います。初回の起動は、高速化の準備のため約 80 秒かかります(2 回目以降は約 37 秒)。
 - RTX 3060 の音声の取り込みは、音声側の高速化(torch.compile)を品質の都合で外した後の値です(外す前は 0.44 秒。[docs/gpu.md](docs/gpu.md))。
 - RX 9060 XT: Windows 11 + Docker Desktop(WSL2)。2026-10-13 に計測。高速な注意機構を有効にした状態(`rocm` イメージの既定。[docs/gpu.md](docs/gpu.md))の値です。
@@ -192,6 +199,10 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `EMBEDDING_URL` | `http://localhost:8001` | remote のときの compute の URL |
 | `DEVICE` | `auto` | `auto` / `cpu` / `cuda`(AMD ROCm も `cuda`) / `xpu` |
 | `DTYPE` | `auto` | GPU は bf16、CPU は fp32。出力が NaN になる場合は `float32` に |
+| `EMBEDDING_RUNTIME` | `auto` | `auto` / `onnx` / `pytorch`。CPU では `onnxruntime` と ONNX モデルがあるときに `auto` が ONNX Runtime を選択(`:cpu` の既定)。GPU イメージは PyTorch |
+| `ONNX_PRECISION` | `fp32` | ONNX Runtime の精度(`fp32` / `q8` / `q4` / `fp16`)。`:cpu` に同梱されるのは `fp32` のみ(PyTorch FP32 と類似度 `1.000000`・GPU DB と互換)。量子化版は `HF_HUB_OFFLINE=0` が必要で、FP32 / GPU の DB への混在は不可 |
+| `ONNX_THREADS` | `0` | ONNX Runtime の演算スレッド数(`0` は自動: 論理 CPU 数が 4 以下なら全コア、5 以上なら 75%。コンテナの CPU 上限と `OMP_NUM_THREADS` を尊重) |
+| `ONNX_MODEL_DIR` | `/opt/onnx`(`:cpu`) | 同梱・配置済み ONNX モデルのフォルダ(`onnx/*.onnx` とプロセッサ設定)。空なら `ONNX_MODEL_ID` から取得 |
 | `DIMS` | `768` | 保存するベクトルの次元(768/512/256/128)。**DB 作成後は変更不可**(下記) |
 | `WINDOW_SEC` | `2` | 1つのベクトルにする時間窓(秒) |
 | `FRAMES_PER_WINDOW` | `2` | 窓あたりのフレーム数 |

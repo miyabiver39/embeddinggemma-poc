@@ -7,6 +7,7 @@
 - 停止には最大で約 1 分かかることがあります(推論の途中の窓とベクトル DB の書き出しを待つため。CPU では 1 窓に 10 秒以上かかる)。`docker run` では `--stop-timeout 60` を付けてください(`docker-compose.yml` は `stop_grace_period: 60s` を設定済み)。途中で止めたファイルの取り込みは、次の起動で最初からやり直します。
 - 保存先は `-v ./data:/data` で永続化します。中身: `mediasearch.db`(SQLite。設定・取り込み元・窓・ジョブ)、`vectors.usearch`(ベクトル DB)、`thumbs/`、`media/`(アップロードした動画・音声)、`cache/torch/`(PyTorch Inductor / Triton のコンパイルキャッシュ。`TORCH_CACHE_DIR` や `TORCHINDUCTOR_CACHE_DIR` で上書き可能)。
 - 起動時は、`/readyz` が Ready を返す直前にダミー入力(テキスト・画像・音声)で 1 回のウォームアップ推論を実行します(`WARMUP_ON_START=false` で無効化できます)。
+- `:cpu` イメージは既定で ONNX Runtime(`ONNX_PRECISION=fp32`、`/opt/onnx` に同梱)を使用します。モデル読み込みに約 17〜20 秒かかります。スレッド数は利用可能な論理 CPU 数(cgroup 上限を考慮)が 5 以上なら 75% を自動設定します(`ONNX_THREADS` または `OMP_NUM_THREADS` で上書き可)。PyTorch の重みは同梱しないため、`EMBEDDING_RUNTIME=pytorch` へ切り替える場合は `HF_HUB_OFFLINE=0` を併せて指定してください。
 - バックアップは、動かしたまま取れます(下の「バックアップと復元」)。`data/` を丸ごとコピーする場合は、停止してから行ってください。
 - 停止・再起動しても未完了の取り込みジョブは再開されます。
 - 外から使う場合は、Nginx で HTTPS を終端する構成(`deploy/compose.nginx.yml`)を使います。経路ごとのバッファ・待ち時間・上限の設定は `docs/nginx.md` を参照してください。
@@ -162,7 +163,8 @@ python bench/compare.py bench/results/<前> bench/results/<後>                 
 | 録画ファイルを読めない(Permission denied) | アプリは uid 1000 で動きます。`-e PUID=<所有者の uid> -e PGID=<gid>` を指定するか、ファイルに読み取り権限を付けてください |
 | 起動時に「以前の版の DB を現在の形式に移行しました」と出る | 正常です。以前の版で作った DB を自動で移行しました(データはそのまま使えます) |
 | 500「DB の処理に失敗しました」 | ログと `detail` の内容を確認してください。`DATA_DIR` に別のアプリの DB を指定していないかも確認してください |
-| 起動が遅い | モデル読み込みに数十秒かかります。`/healthz` が通れば準備完了 |
+| 起動が遅い | モデル読み込みに数十秒かかります(`:cpu` の ONNX `fp32` は約 17〜20 秒)。`/readyz` が通れば準備完了 |
+| `:cpu` で `EMBEDDING_RUNTIME=pytorch` や `ONNX_PRECISION=q8` がオフラインエラーになる | `:cpu` に同梱されるのは ONNX `fp32` のみです。他のランタイム・精度を使う場合は `-e HF_HUB_OFFLINE=0` を付けて起動してください(量子化版は FP32 / GPU の DB に混在させないでください) |
 
 ## ログ
 

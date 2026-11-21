@@ -69,7 +69,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 
 確認済み(CPU・合成動画/画像/音声):
 
-- [x] ONNX 版リポジトリ(`onnx-community/embeddinggemma-2-ONNX`)に `model.onnx` / `vision_encoder.onnx` / `audio_encoder.onnx` があり、fp32/fp16/q4/q4f16/quantized が公開されている(変換・精度比較は未実施)
+- [x] ONNX 版リポジトリ(`onnx-community/embeddinggemma-2-ONNX`、コミット `daa72c5`)の `fp32` / `q8` / `q4` を Ryzen 7 5700X(WSL2、16 論理 CPU、ONNX Runtime 1.32.0)で PyTorch FP32 と比較(2026-11-21)。`fp32` + 画像パディング除去 + 12 スレッド構成が全モダリティで PyTorch FP32 とコサイン類似度 `1.000000`(最大絶対差 `3.73e-07` 以下・検索スコア差 0)を保ちつつ、テキスト 64.1 → 28.1 ms(2.28 倍)、動画 2 フレーム窓 7.41 → 4.86 秒(1.52 倍)、ピーク RSS 4.71 → 3.85 GB に改善した。`q8` は AVX-512 VNNI 非搭載 CPU で `fp32` より遅く、`q4` は類似度が 0.971〜0.993 まで落ちるため、`:cpu` の既定を ONNX Runtime `fp32` に決定(`bench/README.md`)
 - [x] sentence-transformers 6.1.0 で text / image / audio / video(`(T,H,W,3)` 配列)/ 構造化メッセージ(順序つき混在入力)が 1 ベクトルを返す
 - [x] 時刻ラベルを挟んだ交互配置(TAV)は、構造化メッセージで再現できる
 - [x] `transformers` は、正式版 5.23.0(PyPI)で `embedding_gemma2` を使える。以前に使っていた git のコミット `cb33194` を含み、RTX 3060 で text / image / audio / 窓 / tav のベクトルが完全に一致(差 0。高速化あり・なしの両方)、速度も同じ(2026-11-20)。`torchvision` も必須
@@ -103,7 +103,8 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 - [ ] 速い GPU(L40 など)での `INGEST_WORKERS` の効果(復号・前処理が律速になる場合に、どこまで GPU を埋められるか)
 - [ ] 推論の高速化(torch.compile・CUDA Graph)の AMD / Intel の GPU での効果と品質(現在は NVIDIA の GPU だけで有効)
 - [ ] 音声側の torch.compile で、float32 の結果から離れ、起動ごとに結果が変わる原因(合成のサイン波で確認。音声側は compile の対象から外した。2026-11-20)
-- [ ] ONNX Runtime / OpenVINO / TensorRT へ変換したときのベクトル一致度と速度(フェーズ 2)
+- [ ] OpenVINO / TensorRT へ変換したときのベクトル一致度と速度(フェーズ 2。CPU 向け ONNX Runtime は確認・既定化済み)
+- [ ] ONNX Runtime 既定化後の CI ビルド版 `:cpu` イメージの圧縮・展開容量とエンドツーエンドのベンチマーク再計測
 - [ ] 実際の録画映像での検索精度
 - [ ] 実際の業務文書(長い PDF・表の多い Word・縦書き)での文書検索の精度と、文字の取り出しの崩れの有無
 - [ ] リリース時の SBOM・脆弱性検査ワークフロー(`security.yml`)のタグ契機での実行とリリースへの添付(手動実行では 5 イメージの SBOM 作成・検査・集計まで成功を確認済み)
@@ -131,7 +132,7 @@ Google の **EmbeddingGemma 2** を使った、録画映像・音声のマルチ
 │   ├── streams.py         RTSP のストリームの受信と取り込み
 │   ├── media.py           ffmpeg / ffprobe
 │   ├── config.py          環境変数とプリセット
-│   ├── embedders/         Embedder インターフェースと local / remote / dummy、accel.py(推論の高速化。NVIDIA)
+│   ├── embedders/         Embedder インターフェースと local / onnx(CPU 既定) / remote / dummy、accel.py(推論の高速化。NVIDIA)
 │   └── web/index.html     開発用 WebUI
 ├── tests/                 pytest(実モデルのテストは RUN_MODEL_TESTS=1 のときだけ)
 ├── bench/                 ベンチマーク(速度・資源の使用率・ボトルネックの診断。イメージには含めない。bench/README.md)
