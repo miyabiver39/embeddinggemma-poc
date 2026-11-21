@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420" font-family="sans-serif" font-size="12">
+<rect width="720" height="420" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 速さと、基準(fp32・448px・768 次元)との cos 類似度(平均)</text>
+<line x1="70" y1="370.0" x2="690" y2="370.0" stroke="#e5e7eb"/>
+<text x="64" y="374.0" text-anchor="end" fill="#374151">0.9926</text>
+<text x="70.0" y="388" text-anchor="middle" fill="#374151">0</text>
+<line x1="70" y1="303.2" x2="690" y2="303.2" stroke="#e5e7eb"/>
+<text x="64" y="307.2" text-anchor="end" fill="#374151">0.9942</text>
+<text x="194.0" y="388" text-anchor="middle" fill="#374151">0.2</text>
+<line x1="70" y1="236.4" x2="690" y2="236.4" stroke="#e5e7eb"/>
+<text x="64" y="240.4" text-anchor="end" fill="#374151">0.9958</text>
+<text x="318.0" y="388" text-anchor="middle" fill="#374151">0.4</text>
+<line x1="70" y1="169.6" x2="690" y2="169.6" stroke="#e5e7eb"/>
+<text x="64" y="173.6" text-anchor="end" fill="#374151">0.9974</text>
+<text x="442.0" y="388" text-anchor="middle" fill="#374151">0.6</text>
+<line x1="70" y1="102.8" x2="690" y2="102.8" stroke="#e5e7eb"/>
+<text x="64" y="106.8" text-anchor="end" fill="#374151">0.9991</text>
+<text x="566.0" y="388" text-anchor="middle" fill="#374151">0.8</text>
+<line x1="70" y1="36.0" x2="690" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">1.001</text>
+<text x="690.0" y="388" text-anchor="middle" fill="#374151">1</text>
+<text x="380.0" y="410" text-anchor="middle" fill="#111">1 窓あたりの時間(秒。同時数 1)</text>
+<text x="16" y="203.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 203.0)">cos 類似度(平均)</text>
+<circle cx="177.1" cy="64.7" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・768次元: 0.1728, 0.99998</title></circle>
+<circle cx="177.1" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・256次元: 0.1727, 0.99999</title></circle>
+<circle cx="177.2" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・128次元: 0.1729, 0.99999</title></circle>
+<circle cx="177.2" cy="64.7" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・336px・768次元: 0.1729, 0.99998</title></circle>
+<circle cx="177.0" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・336px・256次元: 0.1726, 0.99999</title></circle>
+<circle cx="177.2" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・336px・128次元: 0.1729, 0.99999</title></circle>
+<circle cx="177.0" cy="64.7" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・224px・768次元: 0.1726, 0.99998</title></circle>
+<circle cx="176.9" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・224px・256次元: 0.1725, 0.99999</title></circle>
+<circle cx="176.9" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・224px・128次元: 0.1725, 0.99999</title></circle>
+<circle cx="132.1" cy="252.3" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・768次元・上限 140 トークン: 0.1002, 0.99543</title></circle>
+<circle cx="124.2" cy="342.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・768次元・上限 70 トークン: 0.0875, 0.99325</title></circle>
+<circle cx="177.8" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・448px・768次元: 0.1738, 1</title></circle>
+<circle cx="177.6" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・448px・256次元: 0.1736, 1</title></circle>
+<circle cx="177.9" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・448px・128次元: 0.174, 1</title></circle>
+<circle cx="177.9" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・336px・768次元: 0.1741, 1</title></circle>
+<circle cx="177.8" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・336px・256次元: 0.1738, 1</title></circle>
+<circle cx="178.4" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・336px・128次元: 0.1748, 1</title></circle>
+<circle cx="177.4" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・224px・768次元: 0.1732, 1</title></circle>
+<circle cx="177.3" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・224px・256次元: 0.1731, 1</title></circle>
+<circle cx="177.3" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・224px・128次元: 0.1731, 1</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・448px・768次元: 0.5641, 1</title></circle>
+<circle cx="419.8" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・448px・256次元: 0.5642, 1</title></circle>
+<circle cx="420.2" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・448px・128次元: 0.5649, 1</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・336px・768次元: 0.5641, 1</title></circle>
+<circle cx="420.0" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・336px・256次元: 0.5645, 1</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・336px・128次元: 0.564, 1</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・224px・768次元: 0.564, 1</title></circle>
+<circle cx="419.9" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・224px・256次元: 0.5643, 1</title></circle>
+<circle cx="419.8" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・224px・128次元: 0.5642, 1</title></circle>
+<text x="131.2" y="345.2" font-size="9" fill="#374151">bf16・448px・768次元・上限 70 トークン</text>
+<text x="139.1" y="255.3" font-size="9" fill="#374151">bf16・448px・768次元・上限 140 トークン</text>
+<text x="183.9" y="67.2" font-size="9" fill="#374151">bf16・224px・256次元 ほか 17 件</text>
+<text x="426.7" y="66.8" font-size="9" fill="#374151">fp32・336px・128次元 ほか 8 件</text>
+</svg>

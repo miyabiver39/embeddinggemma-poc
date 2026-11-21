@@ -1,0 +1,866 @@
+<!doctype html><html lang='ja'><head><meta charset='utf-8'><title>共通ベンチマークの結果(rtx3060)</title>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<style>body{font-family:sans-serif;margin:16px;background:#fff;color:#111}table{border-collapse:collapse;font-size:12px;margin:8px 0 24px}td,th{border:1px solid #d1d5db;padding:3px 6px;text-align:right}th{background:#f3f4f6}svg{max-width:100%;height:auto}.wrap{overflow-x:auto}</style></head><body>
+<h1>共通ベンチマークの結果(rtx3060)</h1>
+<h2>機器</h2><table><thead><tr><th>machine</th><th>gpu</th><th>cpu</th><th>cpu_count</th><th>mem_gb</th><th>os</th><th>docker</th><th>image</th><th>image_revision</th><th>image_digest</th><th>docker_args</th><th>started_at</th><th>notes</th></tr></thead><tbody><tr><td>rtx3060</td><td>NVIDIA GeForce RTX 3060, 12288 MiB, 595.99.02</td><td>Intel(R) Core(TM) i7-6700K CPU @ 4.00GHz</td><td>8</td><td>22.2</td><td>Linux-7.0.0-43-generic-x86_64-with-glibc2.43</td><td>29.9.2</td><td>ghcr.io/miyabiver39/embeddinggemma-poc:cuda</td><td>529cb3209ed7f195c1993606b64e9a42b96439a7</td><td>ghcr.io/miyabiver39/embeddinggemma-poc@sha256:1eac1a878eb6821a2308b9fb9b5494c0ada9fac706b958620d3702302db1e20e</td><td>--gpus all(2026-11-21 01:19 の再開から --gpus all --memory 8g --memory-swap 8g、同日 06:30 頃の再開から --memory 12g --memory-swap 12g)</td><td>2026-11-21T00:23:02</td><td>Ubuntu 26.04.1、Core i7-6700K。同じマシンで ComfyUI のコンテナ 2 つ(待機中、GPU メモリ計約 340MB)と、そのほかのサービスのコンテナが動いている状態で計測(以前の計測と同じ条件)。 01:19 に、INGEST_WORKERS=2・窓 6 秒のウォームアップの途中で、マシン全体のメモリ不足(ほかのサービスでスワップがほぼ満杯)によりサーバーが OS に強制終了された(サーバーのメモリ: 通常 約 3.0GB + GPU 転送用の固定メモリ 約 4.1GB)。ほかのサービスを守るため、再開からはコンテナのメモリの上限を 8GB(スワップなし)にした。上限に達した条件は失敗として記録している。 2026-11-21 05:45 に失敗した条件だけを同じ 8GB の上限でやり直したところ、8 本・同時数 2・窓 6 秒、4 本・同時数 4・窓 2 秒、8 本・同時数 8・窓 4 秒でコンテナが上限に達して止まった(OOMKilled)。空きのメモリが約 14GB に増えたため、以後は上限を 12GB(スワップなし)にして、残りの条件と実験 3 を計測した。 計測の途中(2026-11-21 04:06)に、同じマシンの watchtower(コンテナの自動更新)が :cuda タグを 47f1668 のイメージ(digest sha256:f476299036432146b6c7579e475df0f7ec184b42d207f1a5f0b5f9cb3e104b29)に更新した。計測中のコンテナは止められず(watchtower の記録では再作成されていない)、それ以後に起動したコンテナ(実験 2 の float32・336px 以降、05:45 以降のやり直し、実験 3)は 47f1668 で動いている。529cb32 から 47f1668 までの src の差は、RX 9060 XT だけで有効になる処理、RTSP、取り込みごとの skip_static の指定(既定は無効)で、この計測(NVIDIA・ファイルの取り込み・skip_static なし)の処理は変わらない。float32 の 1 窓の時間も前後で同じ(448px 0.564 秒、336px・224px 0.564 秒)。 8 本・同時数 8・窓 2 秒の 1 回目(265.1 秒)は、マシン全体のメモリ不足でスワップが埋まり、サーバーが止められる直前の値。</td></tr></tbody></table>
+<h2>分割数ごとの完了時間と同時数(窓 1 秒)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 480 秒の取り込みの完了時間(窓 1 秒)</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">10</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">20</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">30</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">40</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">50</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">同時数 INGEST_WORKERS</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">完了時間(秒)</text>
+<circle cx="70.0" cy="113.6" r="3.5" fill="#2563eb"><title>1 本に分割 / 1: 37.651</title></circle>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">1 本に分割</text>
+<circle cx="70.0" cy="108.6" r="3.5" fill="#dc2626"><title>2 本に分割 / 1: 38.436</title></circle>
+<circle cx="230.0" cy="111.6" r="3.5" fill="#dc2626"><title>2 本に分割 / 2: 37.959</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="70.0,108.6 230.0,111.6"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">2 本に分割</text>
+<circle cx="70.0" cy="101.8" r="3.5" fill="#16a34a"><title>4 本に分割 / 1: 39.524</title></circle>
+<circle cx="230.0" cy="110.3" r="3.5" fill="#16a34a"><title>4 本に分割 / 2: 38.164</title></circle>
+<circle cx="390.0" cy="108.1" r="3.5" fill="#16a34a"><title>4 本に分割 / 4: 38.526</title></circle>
+<polyline fill="none" stroke="#16a34a" stroke-width="2" points="70.0,101.8 230.0,110.3 390.0,108.1"/>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">4 本に分割</text>
+<circle cx="70.0" cy="87.4" r="3.5" fill="#d97706"><title>8 本に分割 / 1: 41.816</title></circle>
+<circle cx="230.0" cy="110.3" r="3.5" fill="#d97706"><title>8 本に分割 / 2: 38.164</title></circle>
+<circle cx="390.0" cy="104.1" r="3.5" fill="#d97706"><title>8 本に分割 / 4: 39.159</title></circle>
+<circle cx="550.0" cy="107.2" r="3.5" fill="#d97706"><title>8 本に分割 / 8: 38.667</title></circle>
+<polyline fill="none" stroke="#d97706" stroke-width="2" points="70.0,87.4 230.0,110.3 390.0,104.1 550.0,107.2"/>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">8 本に分割</text>
+</svg></div><p><small>c1_completion_win1.svg</small></p>
+<h2>分割数ごとの完了時間と同時数(窓 2 秒)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 480 秒の取り込みの完了時間(窓 2 秒)</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">10</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">20</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">30</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">40</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">50</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">同時数 INGEST_WORKERS</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">完了時間(秒)</text>
+<circle cx="70.0" cy="121.5" r="3.5" fill="#2563eb"><title>1 本に分割 / 1: 36.386</title></circle>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">1 本に分割</text>
+<circle cx="70.0" cy="116.0" r="3.5" fill="#dc2626"><title>2 本に分割 / 1: 37.254</title></circle>
+<circle cx="230.0" cy="119.4" r="3.5" fill="#dc2626"><title>2 本に分割 / 2: 36.719</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="70.0,116.0 230.0,119.4"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">2 本に分割</text>
+<circle cx="70.0" cy="107.3" r="3.5" fill="#16a34a"><title>4 本に分割 / 1: 38.653</title></circle>
+<circle cx="230.0" cy="118.2" r="3.5" fill="#16a34a"><title>4 本に分割 / 2: 36.907</title></circle>
+<circle cx="390.0" cy="114.3" r="3.5" fill="#16a34a"><title>4 本に分割 / 4: 37.524</title></circle>
+<polyline fill="none" stroke="#16a34a" stroke-width="2" points="70.0,107.3 230.0,118.2 390.0,114.3"/>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">4 本に分割</text>
+<circle cx="70.0" cy="89.6" r="3.5" fill="#d97706"><title>8 本に分割 / 1: 41.463</title></circle>
+<circle cx="230.0" cy="116.8" r="3.5" fill="#d97706"><title>8 本に分割 / 2: 37.139</title></circle>
+<circle cx="390.0" cy="116.5" r="3.5" fill="#d97706"><title>8 本に分割 / 4: 37.181</title></circle>
+<circle cx="550.0" cy="43.8" r="3.5" fill="#d97706"><title>8 本に分割 / 8: 48.758</title></circle>
+<polyline fill="none" stroke="#d97706" stroke-width="2" points="70.0,89.6 230.0,116.8 390.0,116.5 550.0,43.8"/>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">8 本に分割</text>
+</svg></div><p><small>c1_completion_win2.svg</small></p>
+<h2>分割数ごとの完了時間と同時数(窓 4 秒)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 480 秒の取り込みの完了時間(窓 4 秒)</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">10</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">20</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">30</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">40</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">50</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">同時数 INGEST_WORKERS</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">完了時間(秒)</text>
+<circle cx="70.0" cy="116.1" r="3.5" fill="#2563eb"><title>1 本に分割 / 1: 37.248</title></circle>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">1 本に分割</text>
+<circle cx="70.0" cy="108.2" r="3.5" fill="#dc2626"><title>2 本に分割 / 1: 38.507</title></circle>
+<circle cx="230.0" cy="112.8" r="3.5" fill="#dc2626"><title>2 本に分割 / 2: 37.763</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="70.0,108.2 230.0,112.8"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">2 本に分割</text>
+<circle cx="70.0" cy="96.3" r="3.5" fill="#16a34a"><title>4 本に分割 / 1: 40.403</title></circle>
+<circle cx="230.0" cy="110.1" r="3.5" fill="#16a34a"><title>4 本に分割 / 2: 38.206</title></circle>
+<circle cx="390.0" cy="107.1" r="3.5" fill="#16a34a"><title>4 本に分割 / 4: 38.676</title></circle>
+<polyline fill="none" stroke="#16a34a" stroke-width="2" points="70.0,96.3 230.0,110.1 390.0,107.1"/>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">4 本に分割</text>
+<circle cx="70.0" cy="69.7" r="3.5" fill="#d97706"><title>8 本に分割 / 1: 44.635</title></circle>
+<circle cx="230.0" cy="109.8" r="3.5" fill="#d97706"><title>8 本に分割 / 2: 38.244</title></circle>
+<circle cx="390.0" cy="106.4" r="3.5" fill="#d97706"><title>8 本に分割 / 4: 38.789</title></circle>
+<polyline fill="none" stroke="#d97706" stroke-width="2" points="70.0,69.7 230.0,109.8 390.0,106.4"/>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">8 本に分割</text>
+</svg></div><p><small>c1_completion_win4.svg</small></p>
+<h2>分割数ごとの完了時間と同時数(窓 6 秒)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 480 秒の取り込みの完了時間(窓 6 秒)</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">10</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">20</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">30</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">40</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">50</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">同時数 INGEST_WORKERS</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">完了時間(秒)</text>
+<circle cx="70.0" cy="109.0" r="3.5" fill="#2563eb"><title>1 本に分割 / 1: 38.383</title></circle>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">1 本に分割</text>
+<circle cx="70.0" cy="99.1" r="3.5" fill="#dc2626"><title>2 本に分割 / 1: 39.954</title></circle>
+<circle cx="230.0" cy="102.6" r="3.5" fill="#dc2626"><title>2 本に分割 / 2: 39.396</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="70.0,99.1 230.0,102.6"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">2 本に分割</text>
+<circle cx="70.0" cy="83.5" r="3.5" fill="#16a34a"><title>4 本に分割 / 1: 42.433</title></circle>
+<circle cx="230.0" cy="103.8" r="3.5" fill="#16a34a"><title>4 本に分割 / 2: 39.201</title></circle>
+<polyline fill="none" stroke="#16a34a" stroke-width="2" points="70.0,83.5 230.0,103.8"/>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">4 本に分割</text>
+<circle cx="70.0" cy="51.2" r="3.5" fill="#d97706"><title>8 本に分割 / 1: 47.577</title></circle>
+<circle cx="230.0" cy="95.1" r="3.5" fill="#d97706"><title>8 本に分割 / 2: 40.591</title></circle>
+<polyline fill="none" stroke="#d97706" stroke-width="2" points="70.0,51.2 230.0,95.1"/>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">8 本に分割</text>
+</svg></div><p><small>c1_completion_win6.svg</small></p>
+<h2>8 本の取り込み: 1 本ずつとの差</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 8 本を同時に取り込んだときの、1 本ずつとの差</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">-20</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">-12</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">-4</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">4</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">12</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">20</text>
+<line x1="70" y1="193.0" x2="550" y2="193.0" stroke="#6b7280"/>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">同時数 INGEST_WORKERS</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">1 本ずつとの差(%)。負なら短い</text>
+<circle cx="70.0" cy="193.0" r="3.5" fill="#2563eb"><title>窓 1 秒 / 1: 0</title></circle>
+<circle cx="230.0" cy="261.3" r="3.5" fill="#2563eb"><title>窓 1 秒 / 2: -8.7</title></circle>
+<circle cx="390.0" cy="243.2" r="3.5" fill="#2563eb"><title>窓 1 秒 / 4: -6.4</title></circle>
+<circle cx="550.0" cy="251.9" r="3.5" fill="#2563eb"><title>窓 1 秒 / 8: -7.5</title></circle>
+<polyline fill="none" stroke="#2563eb" stroke-width="2" points="70.0,193.0 230.0,261.3 390.0,243.2 550.0,251.9"/>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">窓 1 秒</text>
+<circle cx="70.0" cy="193.0" r="3.5" fill="#dc2626"><title>窓 2 秒 / 1: 0</title></circle>
+<circle cx="230.0" cy="274.6" r="3.5" fill="#dc2626"><title>窓 2 秒 / 2: -10.4</title></circle>
+<circle cx="390.0" cy="273.9" r="3.5" fill="#dc2626"><title>窓 2 秒 / 4: -10.3</title></circle>
+<circle cx="550.0" cy="54.8" r="3.5" fill="#dc2626"><title>窓 2 秒 / 8: 17.6</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="70.0,193.0 230.0,274.6 390.0,273.9 550.0,54.8"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">窓 2 秒</text>
+<circle cx="70.0" cy="193.0" r="3.5" fill="#16a34a"><title>窓 4 秒 / 1: 0</title></circle>
+<circle cx="230.0" cy="305.3" r="3.5" fill="#16a34a"><title>窓 4 秒 / 2: -14.3</title></circle>
+<circle cx="390.0" cy="295.8" r="3.5" fill="#16a34a"><title>窓 4 秒 / 4: -13.1</title></circle>
+<polyline fill="none" stroke="#16a34a" stroke-width="2" points="70.0,193.0 230.0,305.3 390.0,295.8"/>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">窓 4 秒</text>
+<circle cx="70.0" cy="193.0" r="3.5" fill="#d97706"><title>窓 6 秒 / 1: 0</title></circle>
+<circle cx="230.0" cy="308.4" r="3.5" fill="#d97706"><title>窓 6 秒 / 2: -14.7</title></circle>
+<polyline fill="none" stroke="#d97706" stroke-width="2" points="70.0,193.0 230.0,308.4"/>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">窓 6 秒</text>
+</svg></div><p><small>c2_k8_speedup.svg</small></p>
+<h2>分けて全部同時に取り込んだとき(k = w)と、1 本のまま(k=1)の比較</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 分けて全部同時(k = w)の完了時間</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">10</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">20</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">30</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">40</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">50</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">分割数 = 同時数</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">完了時間(秒)</text>
+<circle cx="70.0" cy="113.6" r="3.5" fill="#2563eb"><title>窓 1 秒 / 1: 37.651</title></circle>
+<circle cx="230.0" cy="111.6" r="3.5" fill="#2563eb"><title>窓 1 秒 / 2: 37.959</title></circle>
+<circle cx="390.0" cy="108.1" r="3.5" fill="#2563eb"><title>窓 1 秒 / 4: 38.526</title></circle>
+<circle cx="550.0" cy="107.2" r="3.5" fill="#2563eb"><title>窓 1 秒 / 8: 38.667</title></circle>
+<polyline fill="none" stroke="#2563eb" stroke-width="2" points="70.0,113.6 230.0,111.6 390.0,108.1 550.0,107.2"/>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">窓 1 秒</text>
+<circle cx="70.0" cy="121.5" r="3.5" fill="#dc2626"><title>窓 2 秒 / 1: 36.386</title></circle>
+<circle cx="230.0" cy="119.4" r="3.5" fill="#dc2626"><title>窓 2 秒 / 2: 36.719</title></circle>
+<circle cx="390.0" cy="114.3" r="3.5" fill="#dc2626"><title>窓 2 秒 / 4: 37.524</title></circle>
+<circle cx="550.0" cy="43.8" r="3.5" fill="#dc2626"><title>窓 2 秒 / 8: 48.758</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="70.0,121.5 230.0,119.4 390.0,114.3 550.0,43.8"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">窓 2 秒</text>
+<circle cx="70.0" cy="116.1" r="3.5" fill="#16a34a"><title>窓 4 秒 / 1: 37.248</title></circle>
+<circle cx="230.0" cy="112.8" r="3.5" fill="#16a34a"><title>窓 4 秒 / 2: 37.763</title></circle>
+<circle cx="390.0" cy="107.1" r="3.5" fill="#16a34a"><title>窓 4 秒 / 4: 38.676</title></circle>
+<polyline fill="none" stroke="#16a34a" stroke-width="2" points="70.0,116.1 230.0,112.8 390.0,107.1"/>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">窓 4 秒</text>
+<circle cx="70.0" cy="109.0" r="3.5" fill="#d97706"><title>窓 6 秒 / 1: 38.383</title></circle>
+<circle cx="230.0" cy="102.6" r="3.5" fill="#d97706"><title>窓 6 秒 / 2: 39.396</title></circle>
+<polyline fill="none" stroke="#d97706" stroke-width="2" points="70.0,109.0 230.0,102.6"/>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">窓 6 秒</text>
+</svg></div><p><small>c3_split_diag.svg</small></p>
+<h2>分けただけ(同時数 1)の影響</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 分けて 1 本ずつ取り込んだときの完了時間</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">10</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">20</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">30</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">40</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">50</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">分割数(同時数 1)</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">完了時間(秒)</text>
+<circle cx="70.0" cy="113.6" r="3.5" fill="#2563eb"><title>窓 1 秒 / 1: 37.651</title></circle>
+<circle cx="230.0" cy="108.6" r="3.5" fill="#2563eb"><title>窓 1 秒 / 2: 38.436</title></circle>
+<circle cx="390.0" cy="101.8" r="3.5" fill="#2563eb"><title>窓 1 秒 / 4: 39.524</title></circle>
+<circle cx="550.0" cy="87.4" r="3.5" fill="#2563eb"><title>窓 1 秒 / 8: 41.816</title></circle>
+<polyline fill="none" stroke="#2563eb" stroke-width="2" points="70.0,113.6 230.0,108.6 390.0,101.8 550.0,87.4"/>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">窓 1 秒</text>
+<circle cx="70.0" cy="121.5" r="3.5" fill="#dc2626"><title>窓 2 秒 / 1: 36.386</title></circle>
+<circle cx="230.0" cy="116.0" r="3.5" fill="#dc2626"><title>窓 2 秒 / 2: 37.254</title></circle>
+<circle cx="390.0" cy="107.3" r="3.5" fill="#dc2626"><title>窓 2 秒 / 4: 38.653</title></circle>
+<circle cx="550.0" cy="89.6" r="3.5" fill="#dc2626"><title>窓 2 秒 / 8: 41.463</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="70.0,121.5 230.0,116.0 390.0,107.3 550.0,89.6"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">窓 2 秒</text>
+<circle cx="70.0" cy="116.1" r="3.5" fill="#16a34a"><title>窓 4 秒 / 1: 37.248</title></circle>
+<circle cx="230.0" cy="108.2" r="3.5" fill="#16a34a"><title>窓 4 秒 / 2: 38.507</title></circle>
+<circle cx="390.0" cy="96.3" r="3.5" fill="#16a34a"><title>窓 4 秒 / 4: 40.403</title></circle>
+<circle cx="550.0" cy="69.7" r="3.5" fill="#16a34a"><title>窓 4 秒 / 8: 44.635</title></circle>
+<polyline fill="none" stroke="#16a34a" stroke-width="2" points="70.0,116.1 230.0,108.2 390.0,96.3 550.0,69.7"/>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">窓 4 秒</text>
+<circle cx="70.0" cy="109.0" r="3.5" fill="#d97706"><title>窓 6 秒 / 1: 38.383</title></circle>
+<circle cx="230.0" cy="99.1" r="3.5" fill="#d97706"><title>窓 6 秒 / 2: 39.954</title></circle>
+<circle cx="390.0" cy="83.5" r="3.5" fill="#d97706"><title>窓 6 秒 / 4: 42.433</title></circle>
+<circle cx="550.0" cy="51.2" r="3.5" fill="#d97706"><title>窓 6 秒 / 8: 47.577</title></circle>
+<polyline fill="none" stroke="#d97706" stroke-width="2" points="70.0,109.0 230.0,99.1 390.0,83.5 550.0,51.2"/>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">窓 6 秒</text>
+</svg></div><p><small>c4_split_w1.svg</small></p>
+<h2>窓の大きさと完了時間(1 本・同時数 1)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 窓の大きさと、480 秒の取り込みの完了時間(1 本・同時数 1)</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">10</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">20</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">30</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">40</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">50</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">6</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">窓(秒。1 秒 1 枚)</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">完了時間(秒)</text>
+<circle cx="70.0" cy="113.6" r="3.5" fill="#2563eb"><title>完了時間 / 1: 37.651</title></circle>
+<circle cx="230.0" cy="121.5" r="3.5" fill="#2563eb"><title>完了時間 / 2: 36.386</title></circle>
+<circle cx="390.0" cy="116.1" r="3.5" fill="#2563eb"><title>完了時間 / 4: 37.248</title></circle>
+<circle cx="550.0" cy="109.0" r="3.5" fill="#2563eb"><title>完了時間 / 6: 38.383</title></circle>
+<polyline fill="none" stroke="#2563eb" stroke-width="2" points="70.0,113.6 230.0,121.5 390.0,116.1 550.0,109.0"/>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">完了時間</text>
+</svg></div><p><small>c5_window.svg</small></p>
+<h2>推論の稼働率と同時数(8 本)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 推論の稼働率(8 本の取り込み)</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">20</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">40</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">60</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">80</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">100</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">同時数 INGEST_WORKERS</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">推論の稼働率(%)</text>
+<circle cx="70.0" cy="85.7" r="3.5" fill="#2563eb"><title>窓 1 秒 / 1: 84.18</title></circle>
+<circle cx="230.0" cy="57.9" r="3.5" fill="#2563eb"><title>窓 1 秒 / 2: 93.01</title></circle>
+<circle cx="390.0" cy="64.2" r="3.5" fill="#2563eb"><title>窓 1 秒 / 4: 91.01</title></circle>
+<circle cx="550.0" cy="58.3" r="3.5" fill="#2563eb"><title>窓 1 秒 / 8: 92.89</title></circle>
+<polyline fill="none" stroke="#2563eb" stroke-width="2" points="70.0,85.7 230.0,57.9 390.0,64.2 550.0,58.3"/>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">窓 1 秒</text>
+<circle cx="70.0" cy="89.9" r="3.5" fill="#dc2626"><title>窓 2 秒 / 1: 82.83</title></circle>
+<circle cx="230.0" cy="61.4" r="3.5" fill="#dc2626"><title>窓 2 秒 / 2: 91.9</title></circle>
+<circle cx="390.0" cy="62.3" r="3.5" fill="#dc2626"><title>窓 2 秒 / 4: 91.62</title></circle>
+<circle cx="550.0" cy="63.3" r="3.5" fill="#dc2626"><title>窓 2 秒 / 8: 91.32</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="70.0,89.9 230.0,61.4 390.0,62.3 550.0,63.3"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">窓 2 秒</text>
+<circle cx="70.0" cy="108.3" r="3.5" fill="#16a34a"><title>窓 4 秒 / 1: 76.99</title></circle>
+<circle cx="230.0" cy="66.3" r="3.5" fill="#16a34a"><title>窓 4 秒 / 2: 90.35</title></circle>
+<circle cx="390.0" cy="74.0" r="3.5" fill="#16a34a"><title>窓 4 秒 / 4: 87.89</title></circle>
+<polyline fill="none" stroke="#16a34a" stroke-width="2" points="70.0,108.3 230.0,66.3 390.0,74.0"/>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">窓 4 秒</text>
+<circle cx="70.0" cy="122.4" r="3.5" fill="#d97706"><title>窓 6 秒 / 1: 72.49</title></circle>
+<circle cx="230.0" cy="77.3" r="3.5" fill="#d97706"><title>窓 6 秒 / 2: 86.86</title></circle>
+<polyline fill="none" stroke="#d97706" stroke-width="2" points="70.0,122.4 230.0,77.3"/>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">窓 6 秒</text>
+</svg></div><p><small>c6_infer_util.svg</small></p>
+<h2>GPU メモリ(最大)と同時数(8 本)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: GPU メモリの最大(8 本の取り込み)</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">2000</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">4000</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">6000</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">8000</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">10000</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">同時数 INGEST_WORKERS</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">GPU メモリ(MB)</text>
+<circle cx="70.0" cy="248.5" r="3.5" fill="#2563eb"><title>窓 1 秒 / 1: 3233</title></circle>
+<circle cx="230.0" cy="241.5" r="3.5" fill="#2563eb"><title>窓 1 秒 / 2: 3456</title></circle>
+<circle cx="390.0" cy="184.1" r="3.5" fill="#2563eb"><title>窓 1 秒 / 4: 5285</title></circle>
+<circle cx="550.0" cy="189.4" r="3.5" fill="#2563eb"><title>窓 1 秒 / 8: 5115</title></circle>
+<polyline fill="none" stroke="#2563eb" stroke-width="2" points="70.0,248.5 230.0,241.5 390.0,184.1 550.0,189.4"/>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">窓 1 秒</text>
+<circle cx="70.0" cy="236.0" r="3.5" fill="#dc2626"><title>窓 2 秒 / 1: 3631</title></circle>
+<circle cx="230.0" cy="229.0" r="3.5" fill="#dc2626"><title>窓 2 秒 / 2: 3852</title></circle>
+<circle cx="390.0" cy="217.3" r="3.5" fill="#dc2626"><title>窓 2 秒 / 4: 4225</title></circle>
+<circle cx="550.0" cy="185.8" r="3.5" fill="#dc2626"><title>窓 2 秒 / 8: 5229</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="70.0,236.0 230.0,229.0 390.0,217.3 550.0,185.8"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">窓 2 秒</text>
+<circle cx="70.0" cy="211.1" r="3.5" fill="#16a34a"><title>窓 4 秒 / 1: 4423</title></circle>
+<circle cx="230.0" cy="204.1" r="3.5" fill="#16a34a"><title>窓 4 秒 / 2: 4646</title></circle>
+<circle cx="390.0" cy="192.3" r="3.5" fill="#16a34a"><title>窓 4 秒 / 4: 5021</title></circle>
+<polyline fill="none" stroke="#16a34a" stroke-width="2" points="70.0,211.1 230.0,204.1 390.0,192.3"/>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">窓 4 秒</text>
+<circle cx="70.0" cy="190.0" r="3.5" fill="#d97706"><title>窓 6 秒 / 1: 5097</title></circle>
+<circle cx="230.0" cy="189.3" r="3.5" fill="#d97706"><title>窓 6 秒 / 2: 5118</title></circle>
+<polyline fill="none" stroke="#d97706" stroke-width="2" points="70.0,190.0 230.0,189.3"/>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">窓 6 秒</text>
+</svg></div><p><small>c7_gpu_mem.svg</small></p>
+<h2>サーバーのメモリ(最大)と同時数(8 本)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="400" viewBox="0 0 720 400" font-family="sans-serif" font-size="12">
+<rect width="720" height="400" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: サーバーのメモリの最大(8 本の取り込み)</text>
+<line x1="70" y1="350.0" x2="550" y2="350.0" stroke="#e5e7eb"/>
+<text x="64" y="354.0" text-anchor="end" fill="#374151">0</text>
+<line x1="70" y1="287.2" x2="550" y2="287.2" stroke="#e5e7eb"/>
+<text x="64" y="291.2" text-anchor="end" fill="#374151">2000</text>
+<line x1="70" y1="224.4" x2="550" y2="224.4" stroke="#e5e7eb"/>
+<text x="64" y="228.4" text-anchor="end" fill="#374151">4000</text>
+<line x1="70" y1="161.6" x2="550" y2="161.6" stroke="#e5e7eb"/>
+<text x="64" y="165.6" text-anchor="end" fill="#374151">6000</text>
+<line x1="70" y1="98.8" x2="550" y2="98.8" stroke="#e5e7eb"/>
+<text x="64" y="102.8" text-anchor="end" fill="#374151">8000</text>
+<line x1="70" y1="36.0" x2="550" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">10000</text>
+<text x="70.0" y="368" text-anchor="middle" fill="#374151">1</text>
+<text x="230.0" y="368" text-anchor="middle" fill="#374151">2</text>
+<text x="390.0" y="368" text-anchor="middle" fill="#374151">4</text>
+<text x="550.0" y="368" text-anchor="middle" fill="#374151">8</text>
+<text x="310.0" y="390" text-anchor="middle" fill="#111">同時数 INGEST_WORKERS</text>
+<text x="16" y="193.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 193.0)">メモリ(MB)</text>
+<circle cx="390.0" cy="228.0" r="3.5" fill="#2563eb"><title>窓 1 秒 / 4: 3885.3</title></circle>
+<circle cx="550.0" cy="222.1" r="3.5" fill="#2563eb"><title>窓 1 秒 / 8: 4074.5</title></circle>
+<polyline fill="none" stroke="#2563eb" stroke-width="2" points="390.0,228.0 550.0,222.1"/>
+<rect x="564" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="582" y="48" fill="#111">窓 1 秒</text>
+<circle cx="390.0" cy="222.3" r="3.5" fill="#dc2626"><title>窓 2 秒 / 4: 4066.8</title></circle>
+<circle cx="550.0" cy="213.2" r="3.5" fill="#dc2626"><title>窓 2 秒 / 8: 4357.3</title></circle>
+<polyline fill="none" stroke="#dc2626" stroke-width="2" points="390.0,222.3 550.0,213.2"/>
+<rect x="564" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="582" y="66" fill="#111">窓 2 秒</text>
+<circle cx="390.0" cy="201.3" r="3.5" fill="#16a34a"><title>窓 4 秒 / 4: 4734.7</title></circle>
+<rect x="564" y="74" width="12" height="12" fill="#16a34a"/>
+<text x="582" y="84" fill="#111">窓 4 秒</text>
+<circle cx="230.0" cy="179.6" r="3.5" fill="#d97706"><title>窓 6 秒 / 2: 5426.6</title></circle>
+<rect x="564" y="92" width="12" height="12" fill="#d97706"/>
+<text x="582" y="102" fill="#111">窓 6 秒</text>
+</svg></div><p><small>c8_host_mem.svg</small></p>
+<h2>精度の条件ごとの 1 窓あたりの時間(8 本・窓 2 秒)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="827" height="888" viewBox="0 0 827 888" font-family="sans-serif" font-size="12">
+<rect width="827" height="888" fill="#ffffff"/>
+<text x="413.5" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 精度の条件ごとの 1 窓あたりの時間(8 本・窓 2 秒)</text>
+<line x1="267.0" y1="36" x2="267.0" y2="848" stroke="#e5e7eb"/>
+<text x="267.0" y="864" text-anchor="middle" fill="#374151">0</text>
+<line x1="349.0" y1="36" x2="349.0" y2="848" stroke="#e5e7eb"/>
+<text x="349.0" y="864" text-anchor="middle" fill="#374151">0.2</text>
+<line x1="431.0" y1="36" x2="431.0" y2="848" stroke="#e5e7eb"/>
+<text x="431.0" y="864" text-anchor="middle" fill="#374151">0.4</text>
+<line x1="513.0" y1="36" x2="513.0" y2="848" stroke="#e5e7eb"/>
+<text x="513.0" y="864" text-anchor="middle" fill="#374151">0.6</text>
+<line x1="595.0" y1="36" x2="595.0" y2="848" stroke="#e5e7eb"/>
+<text x="595.0" y="864" text-anchor="middle" fill="#374151">0.8</text>
+<line x1="677.0" y1="36" x2="677.0" y2="848" stroke="#e5e7eb"/>
+<text x="677.0" y="864" text-anchor="middle" fill="#374151">1</text>
+<text x="472.0" y="880" text-anchor="middle" fill="#111">1 窓あたりの時間(秒)</text>
+<text x="261" y="50.0" text-anchor="end" fill="#111">bf16・448px・768次元</text>
+<rect x="267" y="36" width="70.8" height="9" fill="#2563eb"><title>bf16・448px・768次元 / 同時数 1: 0.1728</title></rect>
+<text x="341.8" y="44" font-size="10" fill="#374151">0.1728</text>
+<rect x="267" y="46" width="63.6" height="9" fill="#dc2626"><title>bf16・448px・768次元 / 同時数 4: 0.1551</title></rect>
+<text x="334.6" y="54" font-size="10" fill="#374151">0.1551</text>
+<text x="261" y="78.0" text-anchor="end" fill="#111">bf16・448px・256次元</text>
+<rect x="267" y="64" width="70.8" height="9" fill="#2563eb"><title>bf16・448px・256次元 / 同時数 1: 0.1727</title></rect>
+<text x="341.8" y="72" font-size="10" fill="#374151">0.1727</text>
+<rect x="267" y="74" width="63.6" height="9" fill="#dc2626"><title>bf16・448px・256次元 / 同時数 4: 0.1552</title></rect>
+<text x="334.6" y="82" font-size="10" fill="#374151">0.1552</text>
+<text x="261" y="106.0" text-anchor="end" fill="#111">bf16・448px・128次元</text>
+<rect x="267" y="92" width="70.9" height="9" fill="#2563eb"><title>bf16・448px・128次元 / 同時数 1: 0.1729</title></rect>
+<text x="341.9" y="100" font-size="10" fill="#374151">0.1729</text>
+<rect x="267" y="102" width="63.3" height="9" fill="#dc2626"><title>bf16・448px・128次元 / 同時数 4: 0.1544</title></rect>
+<text x="334.3" y="110" font-size="10" fill="#374151">0.1544</text>
+<text x="261" y="134.0" text-anchor="end" fill="#111">bf16・336px・768次元</text>
+<rect x="267" y="120" width="70.9" height="9" fill="#2563eb"><title>bf16・336px・768次元 / 同時数 1: 0.1729</title></rect>
+<text x="341.9" y="128" font-size="10" fill="#374151">0.1729</text>
+<rect x="267" y="130" width="63.4" height="9" fill="#dc2626"><title>bf16・336px・768次元 / 同時数 4: 0.1547</title></rect>
+<text x="334.4" y="138" font-size="10" fill="#374151">0.1547</text>
+<text x="261" y="162.0" text-anchor="end" fill="#111">bf16・336px・256次元</text>
+<rect x="267" y="148" width="70.8" height="9" fill="#2563eb"><title>bf16・336px・256次元 / 同時数 1: 0.1726</title></rect>
+<text x="341.8" y="156" font-size="10" fill="#374151">0.1726</text>
+<rect x="267" y="158" width="63.3" height="9" fill="#dc2626"><title>bf16・336px・256次元 / 同時数 4: 0.1545</title></rect>
+<text x="334.3" y="166" font-size="10" fill="#374151">0.1545</text>
+<text x="261" y="190.0" text-anchor="end" fill="#111">bf16・336px・128次元</text>
+<rect x="267" y="176" width="70.9" height="9" fill="#2563eb"><title>bf16・336px・128次元 / 同時数 1: 0.1729</title></rect>
+<text x="341.9" y="184" font-size="10" fill="#374151">0.1729</text>
+<rect x="267" y="186" width="63.5" height="9" fill="#dc2626"><title>bf16・336px・128次元 / 同時数 4: 0.1548</title></rect>
+<text x="334.5" y="194" font-size="10" fill="#374151">0.1548</text>
+<text x="261" y="218.0" text-anchor="end" fill="#111">bf16・224px・768次元</text>
+<rect x="267" y="204" width="70.8" height="9" fill="#2563eb"><title>bf16・224px・768次元 / 同時数 1: 0.1726</title></rect>
+<text x="341.8" y="212" font-size="10" fill="#374151">0.1726</text>
+<rect x="267" y="214" width="63.5" height="9" fill="#dc2626"><title>bf16・224px・768次元 / 同時数 4: 0.1548</title></rect>
+<text x="334.5" y="222" font-size="10" fill="#374151">0.1548</text>
+<text x="261" y="246.0" text-anchor="end" fill="#111">bf16・224px・256次元</text>
+<rect x="267" y="232" width="70.7" height="9" fill="#2563eb"><title>bf16・224px・256次元 / 同時数 1: 0.1725</title></rect>
+<text x="341.7" y="240" font-size="10" fill="#374151">0.1725</text>
+<rect x="267" y="242" width="64.1" height="9" fill="#dc2626"><title>bf16・224px・256次元 / 同時数 4: 0.1563</title></rect>
+<text x="335.1" y="250" font-size="10" fill="#374151">0.1563</text>
+<text x="261" y="274.0" text-anchor="end" fill="#111">bf16・224px・128次元</text>
+<rect x="267" y="260" width="70.7" height="9" fill="#2563eb"><title>bf16・224px・128次元 / 同時数 1: 0.1725</title></rect>
+<text x="341.7" y="268" font-size="10" fill="#374151">0.1725</text>
+<rect x="267" y="270" width="63.5" height="9" fill="#dc2626"><title>bf16・224px・128次元 / 同時数 4: 0.1548</title></rect>
+<text x="334.5" y="278" font-size="10" fill="#374151">0.1548</text>
+<text x="261" y="302.0" text-anchor="end" fill="#111">bf16・448px・768次元・上限 140 トークン</text>
+<rect x="267" y="288" width="41.1" height="9" fill="#2563eb"><title>bf16・448px・768次元・上限 140 トークン / 同時数 1: 0.1002</title></rect>
+<text x="312.1" y="296" font-size="10" fill="#374151">0.1002</text>
+<rect x="267" y="298" width="32.0" height="9" fill="#dc2626"><title>bf16・448px・768次元・上限 140 トークン / 同時数 4: 0.078</title></rect>
+<text x="303.0" y="306" font-size="10" fill="#374151">0.078</text>
+<text x="261" y="330.0" text-anchor="end" fill="#111">bf16・448px・768次元・上限 70 トークン</text>
+<rect x="267" y="316" width="35.9" height="9" fill="#2563eb"><title>bf16・448px・768次元・上限 70 トークン / 同時数 1: 0.0875</title></rect>
+<text x="306.9" y="324" font-size="10" fill="#374151">0.0875</text>
+<rect x="267" y="326" width="28.5" height="9" fill="#dc2626"><title>bf16・448px・768次元・上限 70 トークン / 同時数 4: 0.0695</title></rect>
+<text x="299.5" y="334" font-size="10" fill="#374151">0.0695</text>
+<text x="261" y="358.0" text-anchor="end" fill="#111">fp16・448px・768次元</text>
+<rect x="267" y="344" width="71.3" height="9" fill="#2563eb"><title>fp16・448px・768次元 / 同時数 1: 0.1738</title></rect>
+<text x="342.3" y="352" font-size="10" fill="#374151">0.1738</text>
+<rect x="267" y="354" width="63.9" height="9" fill="#dc2626"><title>fp16・448px・768次元 / 同時数 4: 0.1558</title></rect>
+<text x="334.9" y="362" font-size="10" fill="#374151">0.1558</text>
+<text x="261" y="386.0" text-anchor="end" fill="#111">fp16・448px・256次元</text>
+<rect x="267" y="372" width="71.2" height="9" fill="#2563eb"><title>fp16・448px・256次元 / 同時数 1: 0.1736</title></rect>
+<text x="342.2" y="380" font-size="10" fill="#374151">0.1736</text>
+<rect x="267" y="382" width="64.5" height="9" fill="#dc2626"><title>fp16・448px・256次元 / 同時数 4: 0.1572</title></rect>
+<text x="335.5" y="390" font-size="10" fill="#374151">0.1572</text>
+<text x="261" y="414.0" text-anchor="end" fill="#111">fp16・448px・128次元</text>
+<rect x="267" y="400" width="71.3" height="9" fill="#2563eb"><title>fp16・448px・128次元 / 同時数 1: 0.174</title></rect>
+<text x="342.3" y="408" font-size="10" fill="#374151">0.174</text>
+<rect x="267" y="410" width="63.5" height="9" fill="#dc2626"><title>fp16・448px・128次元 / 同時数 4: 0.155</title></rect>
+<text x="334.6" y="418" font-size="10" fill="#374151">0.155</text>
+<text x="261" y="442.0" text-anchor="end" fill="#111">fp16・336px・768次元</text>
+<rect x="267" y="428" width="71.4" height="9" fill="#2563eb"><title>fp16・336px・768次元 / 同時数 1: 0.1741</title></rect>
+<text x="342.4" y="436" font-size="10" fill="#374151">0.1741</text>
+<rect x="267" y="438" width="64.0" height="9" fill="#dc2626"><title>fp16・336px・768次元 / 同時数 4: 0.156</title></rect>
+<text x="335.0" y="446" font-size="10" fill="#374151">0.156</text>
+<text x="261" y="470.0" text-anchor="end" fill="#111">fp16・336px・256次元</text>
+<rect x="267" y="456" width="71.3" height="9" fill="#2563eb"><title>fp16・336px・256次元 / 同時数 1: 0.1738</title></rect>
+<text x="342.3" y="464" font-size="10" fill="#374151">0.1738</text>
+<rect x="267" y="466" width="64.2" height="9" fill="#dc2626"><title>fp16・336px・256次元 / 同時数 4: 0.1565</title></rect>
+<text x="335.2" y="474" font-size="10" fill="#374151">0.1565</text>
+<text x="261" y="498.0" text-anchor="end" fill="#111">fp16・336px・128次元</text>
+<rect x="267" y="484" width="71.7" height="9" fill="#2563eb"><title>fp16・336px・128次元 / 同時数 1: 0.1748</title></rect>
+<text x="342.7" y="492" font-size="10" fill="#374151">0.1748</text>
+<rect x="267" y="494" width="64.0" height="9" fill="#dc2626"><title>fp16・336px・128次元 / 同時数 4: 0.1562</title></rect>
+<text x="335.0" y="502" font-size="10" fill="#374151">0.1562</text>
+<text x="261" y="526.0" text-anchor="end" fill="#111">fp16・224px・768次元</text>
+<rect x="267" y="512" width="71.0" height="9" fill="#2563eb"><title>fp16・224px・768次元 / 同時数 1: 0.1732</title></rect>
+<text x="342.0" y="520" font-size="10" fill="#374151">0.1732</text>
+<rect x="267" y="522" width="64.0" height="9" fill="#dc2626"><title>fp16・224px・768次元 / 同時数 4: 0.156</title></rect>
+<text x="335.0" y="530" font-size="10" fill="#374151">0.156</text>
+<text x="261" y="554.0" text-anchor="end" fill="#111">fp16・224px・256次元</text>
+<rect x="267" y="540" width="71.0" height="9" fill="#2563eb"><title>fp16・224px・256次元 / 同時数 1: 0.1731</title></rect>
+<text x="342.0" y="548" font-size="10" fill="#374151">0.1731</text>
+<rect x="267" y="550" width="63.5" height="9" fill="#dc2626"><title>fp16・224px・256次元 / 同時数 4: 0.1548</title></rect>
+<text x="334.5" y="558" font-size="10" fill="#374151">0.1548</text>
+<text x="261" y="582.0" text-anchor="end" fill="#111">fp16・224px・128次元</text>
+<rect x="267" y="568" width="71.0" height="9" fill="#2563eb"><title>fp16・224px・128次元 / 同時数 1: 0.1731</title></rect>
+<text x="342.0" y="576" font-size="10" fill="#374151">0.1731</text>
+<rect x="267" y="578" width="63.6" height="9" fill="#dc2626"><title>fp16・224px・128次元 / 同時数 4: 0.1552</title></rect>
+<text x="334.6" y="586" font-size="10" fill="#374151">0.1552</text>
+<text x="261" y="610.0" text-anchor="end" fill="#111">fp32・448px・768次元</text>
+<rect x="267" y="596" width="231.3" height="9" fill="#2563eb"><title>fp32・448px・768次元 / 同時数 1: 0.5641</title></rect>
+<text x="502.3" y="604" font-size="10" fill="#374151">0.5641</text>
+<rect x="267" y="606" width="223.6" height="9" fill="#dc2626"><title>fp32・448px・768次元 / 同時数 4: 0.5453</title></rect>
+<text x="494.6" y="614" font-size="10" fill="#374151">0.5453</text>
+<text x="261" y="638.0" text-anchor="end" fill="#111">fp32・448px・256次元</text>
+<rect x="267" y="624" width="231.3" height="9" fill="#2563eb"><title>fp32・448px・256次元 / 同時数 1: 0.5642</title></rect>
+<text x="502.3" y="632" font-size="10" fill="#374151">0.5642</text>
+<rect x="267" y="634" width="223.9" height="9" fill="#dc2626"><title>fp32・448px・256次元 / 同時数 4: 0.546</title></rect>
+<text x="494.9" y="642" font-size="10" fill="#374151">0.546</text>
+<text x="261" y="666.0" text-anchor="end" fill="#111">fp32・448px・128次元</text>
+<rect x="267" y="652" width="231.6" height="9" fill="#2563eb"><title>fp32・448px・128次元 / 同時数 1: 0.5649</title></rect>
+<text x="502.6" y="660" font-size="10" fill="#374151">0.5649</text>
+<rect x="267" y="662" width="224.2" height="9" fill="#dc2626"><title>fp32・448px・128次元 / 同時数 4: 0.5468</title></rect>
+<text x="495.2" y="670" font-size="10" fill="#374151">0.5468</text>
+<text x="261" y="694.0" text-anchor="end" fill="#111">fp32・336px・768次元</text>
+<rect x="267" y="680" width="231.3" height="9" fill="#2563eb"><title>fp32・336px・768次元 / 同時数 1: 0.5641</title></rect>
+<text x="502.3" y="688" font-size="10" fill="#374151">0.5641</text>
+<rect x="267" y="690" width="223.9" height="9" fill="#dc2626"><title>fp32・336px・768次元 / 同時数 4: 0.546</title></rect>
+<text x="494.9" y="698" font-size="10" fill="#374151">0.546</text>
+<text x="261" y="722.0" text-anchor="end" fill="#111">fp32・336px・256次元</text>
+<rect x="267" y="708" width="231.4" height="9" fill="#2563eb"><title>fp32・336px・256次元 / 同時数 1: 0.5645</title></rect>
+<text x="502.4" y="716" font-size="10" fill="#374151">0.5645</text>
+<rect x="267" y="718" width="223.9" height="9" fill="#dc2626"><title>fp32・336px・256次元 / 同時数 4: 0.5462</title></rect>
+<text x="494.9" y="726" font-size="10" fill="#374151">0.5462</text>
+<text x="261" y="750.0" text-anchor="end" fill="#111">fp32・336px・128次元</text>
+<rect x="267" y="736" width="231.2" height="9" fill="#2563eb"><title>fp32・336px・128次元 / 同時数 1: 0.564</title></rect>
+<text x="502.2" y="744" font-size="10" fill="#374151">0.564</text>
+<rect x="267" y="746" width="223.9" height="9" fill="#dc2626"><title>fp32・336px・128次元 / 同時数 4: 0.546</title></rect>
+<text x="494.9" y="754" font-size="10" fill="#374151">0.546</text>
+<text x="261" y="778.0" text-anchor="end" fill="#111">fp32・224px・768次元</text>
+<rect x="267" y="764" width="231.2" height="9" fill="#2563eb"><title>fp32・224px・768次元 / 同時数 1: 0.564</title></rect>
+<text x="502.2" y="772" font-size="10" fill="#374151">0.564</text>
+<rect x="267" y="774" width="224.1" height="9" fill="#dc2626"><title>fp32・224px・768次元 / 同時数 4: 0.5466</title></rect>
+<text x="495.1" y="782" font-size="10" fill="#374151">0.5466</text>
+<text x="261" y="806.0" text-anchor="end" fill="#111">fp32・224px・256次元</text>
+<rect x="267" y="792" width="231.4" height="9" fill="#2563eb"><title>fp32・224px・256次元 / 同時数 1: 0.5643</title></rect>
+<text x="502.4" y="800" font-size="10" fill="#374151">0.5643</text>
+<rect x="267" y="802" width="223.9" height="9" fill="#dc2626"><title>fp32・224px・256次元 / 同時数 4: 0.5462</title></rect>
+<text x="494.9" y="810" font-size="10" fill="#374151">0.5462</text>
+<text x="261" y="834.0" text-anchor="end" fill="#111">fp32・224px・128次元</text>
+<rect x="267" y="820" width="231.3" height="9" fill="#2563eb"><title>fp32・224px・128次元 / 同時数 1: 0.5642</title></rect>
+<text x="502.3" y="828" font-size="10" fill="#374151">0.5642</text>
+<rect x="267" y="830" width="223.6" height="9" fill="#dc2626"><title>fp32・224px・128次元 / 同時数 4: 0.5454</title></rect>
+<text x="494.6" y="838" font-size="10" fill="#374151">0.5454</text>
+<rect x="717" y="38" width="12" height="12" fill="#2563eb"/>
+<text x="735" y="48" fill="#111">同時数 1</text>
+<rect x="717" y="56" width="12" height="12" fill="#dc2626"/>
+<text x="735" y="66" fill="#111">同時数 4</text>
+</svg></div><p><small>p1_speed.svg</small></p>
+<h2>精度の条件ごとの検索の処理量(並行 4)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="827" height="714" viewBox="0 0 827 714" font-family="sans-serif" font-size="12">
+<rect width="827" height="714" fill="#ffffff"/>
+<text x="413.5" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 検索の処理量(並行 4・15 秒)</text>
+<line x1="267.0" y1="36" x2="267.0" y2="674" stroke="#e5e7eb"/>
+<text x="267.0" y="690" text-anchor="middle" fill="#374151">0</text>
+<line x1="349.0" y1="36" x2="349.0" y2="674" stroke="#e5e7eb"/>
+<text x="349.0" y="690" text-anchor="middle" fill="#374151">50</text>
+<line x1="431.0" y1="36" x2="431.0" y2="674" stroke="#e5e7eb"/>
+<text x="431.0" y="690" text-anchor="middle" fill="#374151">100</text>
+<line x1="513.0" y1="36" x2="513.0" y2="674" stroke="#e5e7eb"/>
+<text x="513.0" y="690" text-anchor="middle" fill="#374151">150</text>
+<line x1="595.0" y1="36" x2="595.0" y2="674" stroke="#e5e7eb"/>
+<text x="595.0" y="690" text-anchor="middle" fill="#374151">200</text>
+<line x1="677.0" y1="36" x2="677.0" y2="674" stroke="#e5e7eb"/>
+<text x="677.0" y="690" text-anchor="middle" fill="#374151">250</text>
+<text x="472.0" y="706" text-anchor="middle" fill="#111">件/秒</text>
+<text x="261" y="47.0" text-anchor="end" fill="#111">bf16・448px・768次元</text>
+<rect x="267" y="36" width="288.2" height="13" fill="#2563eb"><title>bf16・448px・768次元 / 検索: 175.73</title></rect>
+<text x="559.2" y="48" font-size="10" fill="#374151">175.73</text>
+<text x="261" y="69.0" text-anchor="end" fill="#111">bf16・448px・256次元</text>
+<rect x="267" y="58" width="303.8" height="13" fill="#2563eb"><title>bf16・448px・256次元 / 検索: 185.27</title></rect>
+<text x="574.8" y="70" font-size="10" fill="#374151">185.27</text>
+<text x="261" y="91.0" text-anchor="end" fill="#111">bf16・448px・128次元</text>
+<rect x="267" y="80" width="274.4" height="13" fill="#2563eb"><title>bf16・448px・128次元 / 検索: 167.33</title></rect>
+<text x="545.4" y="92" font-size="10" fill="#374151">167.33</text>
+<text x="261" y="113.0" text-anchor="end" fill="#111">bf16・336px・768次元</text>
+<rect x="267" y="102" width="307.7" height="13" fill="#2563eb"><title>bf16・336px・768次元 / 検索: 187.6</title></rect>
+<text x="578.7" y="114" font-size="10" fill="#374151">187.6</text>
+<text x="261" y="135.0" text-anchor="end" fill="#111">bf16・336px・256次元</text>
+<rect x="267" y="124" width="284.6" height="13" fill="#2563eb"><title>bf16・336px・256次元 / 検索: 173.53</title></rect>
+<text x="555.6" y="136" font-size="10" fill="#374151">173.53</text>
+<text x="261" y="157.0" text-anchor="end" fill="#111">bf16・336px・128次元</text>
+<rect x="267" y="146" width="342.5" height="13" fill="#2563eb"><title>bf16・336px・128次元 / 検索: 208.87</title></rect>
+<text x="613.5" y="158" font-size="10" fill="#374151">208.87</text>
+<text x="261" y="179.0" text-anchor="end" fill="#111">bf16・224px・768次元</text>
+<rect x="267" y="168" width="296.7" height="13" fill="#2563eb"><title>bf16・224px・768次元 / 検索: 180.93</title></rect>
+<text x="567.7" y="180" font-size="10" fill="#374151">180.93</text>
+<text x="261" y="201.0" text-anchor="end" fill="#111">bf16・224px・256次元</text>
+<rect x="267" y="190" width="308.4" height="13" fill="#2563eb"><title>bf16・224px・256次元 / 検索: 188.07</title></rect>
+<text x="579.4" y="202" font-size="10" fill="#374151">188.07</text>
+<text x="261" y="223.0" text-anchor="end" fill="#111">bf16・224px・128次元</text>
+<rect x="267" y="212" width="341.7" height="13" fill="#2563eb"><title>bf16・224px・128次元 / 検索: 208.33</title></rect>
+<text x="612.7" y="224" font-size="10" fill="#374151">208.33</text>
+<text x="261" y="245.0" text-anchor="end" fill="#111">bf16・448px・768次元・上限 140 トークン</text>
+<rect x="267" y="234" width="299.9" height="13" fill="#2563eb"><title>bf16・448px・768次元・上限 140 トークン / 検索: 182.87</title></rect>
+<text x="570.9" y="246" font-size="10" fill="#374151">182.87</text>
+<text x="261" y="267.0" text-anchor="end" fill="#111">bf16・448px・768次元・上限 70 トークン</text>
+<rect x="267" y="256" width="304.6" height="13" fill="#2563eb"><title>bf16・448px・768次元・上限 70 トークン / 検索: 185.73</title></rect>
+<text x="575.6" y="268" font-size="10" fill="#374151">185.73</text>
+<text x="261" y="289.0" text-anchor="end" fill="#111">fp16・448px・768次元</text>
+<rect x="267" y="278" width="299.3" height="13" fill="#2563eb"><title>fp16・448px・768次元 / 検索: 182.53</title></rect>
+<text x="570.3" y="290" font-size="10" fill="#374151">182.53</text>
+<text x="261" y="311.0" text-anchor="end" fill="#111">fp16・448px・256次元</text>
+<rect x="267" y="300" width="303.3" height="13" fill="#2563eb"><title>fp16・448px・256次元 / 検索: 184.93</title></rect>
+<text x="574.3" y="312" font-size="10" fill="#374151">184.93</text>
+<text x="261" y="333.0" text-anchor="end" fill="#111">fp16・448px・128次元</text>
+<rect x="267" y="322" width="366.7" height="13" fill="#2563eb"><title>fp16・448px・128次元 / 検索: 223.6</title></rect>
+<text x="637.7" y="334" font-size="10" fill="#374151">223.6</text>
+<text x="261" y="355.0" text-anchor="end" fill="#111">fp16・336px・768次元</text>
+<rect x="267" y="344" width="307.5" height="13" fill="#2563eb"><title>fp16・336px・768次元 / 検索: 187.47</title></rect>
+<text x="578.5" y="356" font-size="10" fill="#374151">187.47</text>
+<text x="261" y="377.0" text-anchor="end" fill="#111">fp16・336px・256次元</text>
+<rect x="267" y="366" width="294.1" height="13" fill="#2563eb"><title>fp16・336px・256次元 / 検索: 179.33</title></rect>
+<text x="565.1" y="378" font-size="10" fill="#374151">179.33</text>
+<text x="261" y="399.0" text-anchor="end" fill="#111">fp16・336px・128次元</text>
+<rect x="267" y="388" width="352.9" height="13" fill="#2563eb"><title>fp16・336px・128次元 / 検索: 215.2</title></rect>
+<text x="623.9" y="400" font-size="10" fill="#374151">215.2</text>
+<text x="261" y="421.0" text-anchor="end" fill="#111">fp16・224px・768次元</text>
+<rect x="267" y="410" width="300.9" height="13" fill="#2563eb"><title>fp16・224px・768次元 / 検索: 183.47</title></rect>
+<text x="571.9" y="422" font-size="10" fill="#374151">183.47</text>
+<text x="261" y="443.0" text-anchor="end" fill="#111">fp16・224px・256次元</text>
+<rect x="267" y="432" width="351.1" height="13" fill="#2563eb"><title>fp16・224px・256次元 / 検索: 214.07</title></rect>
+<text x="622.1" y="444" font-size="10" fill="#374151">214.07</text>
+<text x="261" y="465.0" text-anchor="end" fill="#111">fp16・224px・128次元</text>
+<rect x="267" y="454" width="336.6" height="13" fill="#2563eb"><title>fp16・224px・128次元 / 検索: 205.27</title></rect>
+<text x="607.6" y="466" font-size="10" fill="#374151">205.27</text>
+<text x="261" y="487.0" text-anchor="end" fill="#111">fp32・448px・768次元</text>
+<rect x="267" y="476" width="228.6" height="13" fill="#2563eb"><title>fp32・448px・768次元 / 検索: 139.4</title></rect>
+<text x="499.6" y="488" font-size="10" fill="#374151">139.4</text>
+<text x="261" y="509.0" text-anchor="end" fill="#111">fp32・448px・256次元</text>
+<rect x="267" y="498" width="260.5" height="13" fill="#2563eb"><title>fp32・448px・256次元 / 検索: 158.87</title></rect>
+<text x="531.5" y="510" font-size="10" fill="#374151">158.87</text>
+<text x="261" y="531.0" text-anchor="end" fill="#111">fp32・448px・128次元</text>
+<rect x="267" y="520" width="264.5" height="13" fill="#2563eb"><title>fp32・448px・128次元 / 検索: 161.27</title></rect>
+<text x="535.5" y="532" font-size="10" fill="#374151">161.27</text>
+<text x="261" y="553.0" text-anchor="end" fill="#111">fp32・336px・768次元</text>
+<rect x="267" y="542" width="232.3" height="13" fill="#2563eb"><title>fp32・336px・768次元 / 検索: 141.67</title></rect>
+<text x="503.3" y="554" font-size="10" fill="#374151">141.67</text>
+<text x="261" y="575.0" text-anchor="end" fill="#111">fp32・336px・256次元</text>
+<rect x="267" y="564" width="279.2" height="13" fill="#2563eb"><title>fp32・336px・256次元 / 検索: 170.27</title></rect>
+<text x="550.2" y="576" font-size="10" fill="#374151">170.27</text>
+<text x="261" y="597.0" text-anchor="end" fill="#111">fp32・336px・128次元</text>
+<rect x="267" y="586" width="246.3" height="13" fill="#2563eb"><title>fp32・336px・128次元 / 検索: 150.2</title></rect>
+<text x="517.3" y="598" font-size="10" fill="#374151">150.2</text>
+<text x="261" y="619.0" text-anchor="end" fill="#111">fp32・224px・768次元</text>
+<rect x="267" y="608" width="246.2" height="13" fill="#2563eb"><title>fp32・224px・768次元 / 検索: 150.13</title></rect>
+<text x="517.2" y="620" font-size="10" fill="#374151">150.13</text>
+<text x="261" y="641.0" text-anchor="end" fill="#111">fp32・224px・256次元</text>
+<rect x="267" y="630" width="255.7" height="13" fill="#2563eb"><title>fp32・224px・256次元 / 検索: 155.93</title></rect>
+<text x="526.7" y="642" font-size="10" fill="#374151">155.93</text>
+<text x="261" y="663.0" text-anchor="end" fill="#111">fp32・224px・128次元</text>
+<rect x="267" y="652" width="259.3" height="13" fill="#2563eb"><title>fp32・224px・128次元 / 検索: 158.13</title></rect>
+<text x="530.3" y="664" font-size="10" fill="#374151">158.13</text>
+</svg></div><p><small>p2_search.svg</small></p>
+<h2>速さと品質(基準との cos 類似度)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420" font-family="sans-serif" font-size="12">
+<rect width="720" height="420" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 速さと、基準(fp32・448px・768 次元)との cos 類似度(平均)</text>
+<line x1="70" y1="370.0" x2="690" y2="370.0" stroke="#e5e7eb"/>
+<text x="64" y="374.0" text-anchor="end" fill="#374151">0.9926</text>
+<text x="70.0" y="388" text-anchor="middle" fill="#374151">0</text>
+<line x1="70" y1="303.2" x2="690" y2="303.2" stroke="#e5e7eb"/>
+<text x="64" y="307.2" text-anchor="end" fill="#374151">0.9942</text>
+<text x="194.0" y="388" text-anchor="middle" fill="#374151">0.2</text>
+<line x1="70" y1="236.4" x2="690" y2="236.4" stroke="#e5e7eb"/>
+<text x="64" y="240.4" text-anchor="end" fill="#374151">0.9958</text>
+<text x="318.0" y="388" text-anchor="middle" fill="#374151">0.4</text>
+<line x1="70" y1="169.6" x2="690" y2="169.6" stroke="#e5e7eb"/>
+<text x="64" y="173.6" text-anchor="end" fill="#374151">0.9974</text>
+<text x="442.0" y="388" text-anchor="middle" fill="#374151">0.6</text>
+<line x1="70" y1="102.8" x2="690" y2="102.8" stroke="#e5e7eb"/>
+<text x="64" y="106.8" text-anchor="end" fill="#374151">0.9991</text>
+<text x="566.0" y="388" text-anchor="middle" fill="#374151">0.8</text>
+<line x1="70" y1="36.0" x2="690" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">1.001</text>
+<text x="690.0" y="388" text-anchor="middle" fill="#374151">1</text>
+<text x="380.0" y="410" text-anchor="middle" fill="#111">1 窓あたりの時間(秒。同時数 1)</text>
+<text x="16" y="203.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 203.0)">cos 類似度(平均)</text>
+<circle cx="177.1" cy="64.7" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・768次元: 0.1728, 0.99998</title></circle>
+<circle cx="177.1" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・256次元: 0.1727, 0.99999</title></circle>
+<circle cx="177.2" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・128次元: 0.1729, 0.99999</title></circle>
+<circle cx="177.2" cy="64.7" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・336px・768次元: 0.1729, 0.99998</title></circle>
+<circle cx="177.0" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・336px・256次元: 0.1726, 0.99999</title></circle>
+<circle cx="177.2" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・336px・128次元: 0.1729, 0.99999</title></circle>
+<circle cx="177.0" cy="64.7" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・224px・768次元: 0.1726, 0.99998</title></circle>
+<circle cx="176.9" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・224px・256次元: 0.1725, 0.99999</title></circle>
+<circle cx="176.9" cy="64.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・224px・128次元: 0.1725, 0.99999</title></circle>
+<circle cx="132.1" cy="252.3" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・768次元・上限 140 トークン: 0.1002, 0.99543</title></circle>
+<circle cx="124.2" cy="342.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・768次元・上限 70 トークン: 0.0875, 0.99325</title></circle>
+<circle cx="177.8" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・448px・768次元: 0.1738, 1</title></circle>
+<circle cx="177.6" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・448px・256次元: 0.1736, 1</title></circle>
+<circle cx="177.9" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・448px・128次元: 0.174, 1</title></circle>
+<circle cx="177.9" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・336px・768次元: 0.1741, 1</title></circle>
+<circle cx="177.8" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・336px・256次元: 0.1738, 1</title></circle>
+<circle cx="178.4" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・336px・128次元: 0.1748, 1</title></circle>
+<circle cx="177.4" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・224px・768次元: 0.1732, 1</title></circle>
+<circle cx="177.3" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・224px・256次元: 0.1731, 1</title></circle>
+<circle cx="177.3" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・224px・128次元: 0.1731, 1</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・448px・768次元: 0.5641, 1</title></circle>
+<circle cx="419.8" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・448px・256次元: 0.5642, 1</title></circle>
+<circle cx="420.2" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・448px・128次元: 0.5649, 1</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・336px・768次元: 0.5641, 1</title></circle>
+<circle cx="420.0" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・336px・256次元: 0.5645, 1</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・336px・128次元: 0.564, 1</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・224px・768次元: 0.564, 1</title></circle>
+<circle cx="419.9" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・224px・256次元: 0.5643, 1</title></circle>
+<circle cx="419.8" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・224px・128次元: 0.5642, 1</title></circle>
+<text x="131.2" y="345.2" font-size="9" fill="#374151">bf16・448px・768次元・上限 70 トークン</text>
+<text x="139.1" y="255.3" font-size="9" fill="#374151">bf16・448px・768次元・上限 140 トークン</text>
+<text x="183.9" y="67.2" font-size="9" fill="#374151">bf16・224px・256次元 ほか 17 件</text>
+<text x="426.7" y="66.8" font-size="9" fill="#374151">fp32・336px・128次元 ほか 8 件</text>
+</svg></div><p><small>p3_speed_vs_cos.svg</small></p>
+<h2>速さと品質(文章から画像を探した 1 位の正解率)</h2><div class='wrap'><svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420" font-family="sans-serif" font-size="12">
+<rect width="720" height="420" fill="#ffffff"/>
+<text x="360.0" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#111">rtx3060: 速さと、文章から画像を探した 1 位の正解率</text>
+<line x1="70" y1="370.0" x2="690" y2="370.0" stroke="#e5e7eb"/>
+<text x="64" y="374.0" text-anchor="end" fill="#374151">0.9084</text>
+<text x="70.0" y="388" text-anchor="middle" fill="#374151">0</text>
+<line x1="70" y1="303.2" x2="690" y2="303.2" stroke="#e5e7eb"/>
+<text x="64" y="307.2" text-anchor="end" fill="#374151">0.9284</text>
+<text x="194.0" y="388" text-anchor="middle" fill="#374151">0.2</text>
+<line x1="70" y1="236.4" x2="690" y2="236.4" stroke="#e5e7eb"/>
+<text x="64" y="240.4" text-anchor="end" fill="#374151">0.9484</text>
+<text x="318.0" y="388" text-anchor="middle" fill="#374151">0.4</text>
+<line x1="70" y1="169.6" x2="690" y2="169.6" stroke="#e5e7eb"/>
+<text x="64" y="173.6" text-anchor="end" fill="#374151">0.9683</text>
+<text x="442.0" y="388" text-anchor="middle" fill="#374151">0.6</text>
+<line x1="70" y1="102.8" x2="690" y2="102.8" stroke="#e5e7eb"/>
+<text x="64" y="106.8" text-anchor="end" fill="#374151">0.9883</text>
+<text x="566.0" y="388" text-anchor="middle" fill="#374151">0.8</text>
+<line x1="70" y1="36.0" x2="690" y2="36.0" stroke="#e5e7eb"/>
+<text x="64" y="40.0" text-anchor="end" fill="#374151">1.008</text>
+<text x="690.0" y="388" text-anchor="middle" fill="#374151">1</text>
+<text x="380.0" y="410" text-anchor="middle" fill="#111">1 窓あたりの時間(秒。同時数 1)</text>
+<text x="16" y="203.0" text-anchor="middle" fill="#111" transform="rotate(-90 16 203.0)">1 位の正解率</text>
+<circle cx="177.1" cy="63.8" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・768次元: 0.1728, 1</title></circle>
+<circle cx="177.1" cy="63.8" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・256次元: 0.1727, 1</title></circle>
+<circle cx="177.2" cy="342.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・128次元: 0.1729, 0.9167</title></circle>
+<circle cx="177.2" cy="63.8" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・336px・768次元: 0.1729, 1</title></circle>
+<circle cx="177.0" cy="63.8" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・336px・256次元: 0.1726, 1</title></circle>
+<circle cx="177.2" cy="342.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・336px・128次元: 0.1729, 0.9167</title></circle>
+<circle cx="177.0" cy="63.8" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・224px・768次元: 0.1726, 1</title></circle>
+<circle cx="176.9" cy="63.8" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・224px・256次元: 0.1725, 1</title></circle>
+<circle cx="176.9" cy="342.2" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・224px・128次元: 0.1725, 0.9167</title></circle>
+<circle cx="132.1" cy="63.8" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・768次元・上限 140 トークン: 0.1002, 1</title></circle>
+<circle cx="124.2" cy="63.8" r="5" fill="#2563eb" fill-opacity="0.8"><title>bf16・448px・768次元・上限 70 トークン: 0.0875, 1</title></circle>
+<circle cx="177.8" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・448px・768次元: 0.1738, 1</title></circle>
+<circle cx="177.6" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・448px・256次元: 0.1736, 1</title></circle>
+<circle cx="177.9" cy="342.2" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・448px・128次元: 0.174, 0.9167</title></circle>
+<circle cx="177.9" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・336px・768次元: 0.1741, 1</title></circle>
+<circle cx="177.8" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・336px・256次元: 0.1738, 1</title></circle>
+<circle cx="178.4" cy="342.2" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・336px・128次元: 0.1748, 0.9167</title></circle>
+<circle cx="177.4" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・224px・768次元: 0.1732, 1</title></circle>
+<circle cx="177.3" cy="63.8" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・224px・256次元: 0.1731, 1</title></circle>
+<circle cx="177.3" cy="342.2" r="5" fill="#dc2626" fill-opacity="0.8"><title>fp16・224px・128次元: 0.1731, 0.9167</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・448px・768次元: 0.5641, 1</title></circle>
+<circle cx="419.8" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・448px・256次元: 0.5642, 1</title></circle>
+<circle cx="420.2" cy="342.2" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・448px・128次元: 0.5649, 0.9167</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・336px・768次元: 0.5641, 1</title></circle>
+<circle cx="420.0" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・336px・256次元: 0.5645, 1</title></circle>
+<circle cx="419.7" cy="342.2" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・336px・128次元: 0.564, 0.9167</title></circle>
+<circle cx="419.7" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・224px・768次元: 0.564, 1</title></circle>
+<circle cx="419.9" cy="63.8" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・224px・256次元: 0.5643, 1</title></circle>
+<circle cx="419.8" cy="342.2" r="5" fill="#16a34a" fill-opacity="0.8"><title>fp32・224px・128次元: 0.5642, 0.9167</title></circle>
+<text x="131.2" y="66.8" font-size="9" fill="#374151">bf16・448px・768次元・上限 70 トークン ほか 13 件</text>
+<text x="183.9" y="345.2" font-size="9" fill="#374151">bf16・224px・128次元 ほか 5 件</text>
+<text x="426.7" y="345.2" font-size="9" fill="#374151">fp32・336px・128次元 ほか 2 件</text>
+<text x="426.7" y="66.8" font-size="9" fill="#374151">fp32・224px・768次元 ほか 5 件</text>
+</svg></div><p><small>p4_speed_vs_top1.svg</small></p>
+<h2>セルごとの中央値</h2><div class='wrap'><table><thead><tr><th>experiment</th><th>dtype</th><th>image_max_side</th><th>dims</th><th>image_max_tokens</th><th>k</th><th>w</th><th>win</th><th>n</th><th>failed</th><th>completion_sec</th><th>completion_min</th><th>completion_max</th><th>vs_w1_pct</th><th>vs_k1_pct</th><th>windows</th><th>sec_per_window</th><th>realtime_factor</th><th>infer_util</th><th>gpu_util</th><th>gpu_mem_max_mb</th><th>cpu_util</th><th>mem_max_mb</th><th>mem_total_max_mb</th><th>error</th></tr></thead><tbody><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>1</td><td>1</td><td>1</td><td>3</td><td>0</td><td>37.651</td><td>37.647</td><td>37.682</td><td>0.0</td><td>0.0</td><td>480</td><td>0.0784</td><td>12.749</td><td>95.33</td><td>96.74</td><td>3233.0</td><td>25.09</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>1</td><td>1</td><td>2</td><td>3</td><td>0</td><td>36.386</td><td>36.335</td><td>36.453</td><td>0.0</td><td>0.0</td><td>240</td><td>0.1516</td><td>13.192</td><td>94.25</td><td>96.34</td><td>3645.0</td><td>24.81</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>1</td><td>1</td><td>4</td><td>3</td><td>0</td><td>37.248</td><td>37.223</td><td>37.256</td><td>0.0</td><td>0.0</td><td>120</td><td>0.3104</td><td>12.887</td><td>92.92</td><td>93.69</td><td>4423.0</td><td>24.45</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>1</td><td>1</td><td>6</td><td>3</td><td>0</td><td>38.383</td><td>38.335</td><td>38.522</td><td>0.0</td><td>0.0</td><td>80</td><td>0.4798</td><td>12.506</td><td>92.48</td><td>94.95</td><td>5097.0</td><td>24.43</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>2</td><td>1</td><td>1</td><td>3</td><td>0</td><td>38.436</td><td>38.38</td><td>38.453</td><td>0.0</td><td>2.1</td><td>480</td><td>0.0801</td><td>12.488</td><td>93.44</td><td>92.47</td><td>3233.0</td><td>24.93</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>2</td><td>1</td><td>2</td><td>3</td><td>0</td><td>37.254</td><td>37.221</td><td>37.257</td><td>0.0</td><td>2.4</td><td>240</td><td>0.1552</td><td>12.885</td><td>92.13</td><td>95.82</td><td>3631.0</td><td>24.41</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>2</td><td>1</td><td>4</td><td>3</td><td>0</td><td>38.507</td><td>38.46</td><td>38.614</td><td>0.0</td><td>3.4</td><td>120</td><td>0.3209</td><td>12.465</td><td>90.84</td><td>93.15</td><td>4423.0</td><td>24.11</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>2</td><td>1</td><td>6</td><td>3</td><td>0</td><td>39.954</td><td>39.767</td><td>40.267</td><td>0.0</td><td>4.1</td><td>80</td><td>0.4994</td><td>12.014</td><td>87.51</td><td>93.86</td><td>5097.0</td><td>24.47</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>2</td><td>2</td><td>1</td><td>3</td><td>0</td><td>37.959</td><td>37.928</td><td>39.128</td><td>-1.2</td><td>0.8</td><td>480</td><td>0.0791</td><td>12.645</td><td>92.67</td><td>95.05</td><td>3456.0</td><td>20.82</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>2</td><td>2</td><td>2</td><td>3</td><td>0</td><td>36.719</td><td>36.704</td><td>36.746</td><td>-1.4</td><td>0.9</td><td>240</td><td>0.153</td><td>13.072</td><td>93.63</td><td>97.53</td><td>3852.0</td><td>22.1</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>2</td><td>2</td><td>4</td><td>3</td><td>0</td><td>37.763</td><td>37.742</td><td>38.035</td><td>-1.9</td><td>1.4</td><td>120</td><td>0.3147</td><td>12.711</td><td>90.28</td><td>93.74</td><td>4646.0</td><td>22.41</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>2</td><td>2</td><td>6</td><td>3</td><td>2</td><td>39.396</td><td>39.101</td><td>40.82</td><td>-1.4</td><td>2.6</td><td>80</td><td>0.4925</td><td>12.184</td><td>90.14</td><td>93.41</td><td>5118.0</td><td>21.96</td><td>4759.1</td><td></td><td>http://127.0.0.1:18000 との接続が切れました: RemoteDisconnected(&#x27;Remote end closed connection without response&#x27;)</td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>1</td><td>1</td><td>3</td><td>0</td><td>39.524</td><td>39.487</td><td>39.533</td><td>0.0</td><td>5.0</td><td>480</td><td>0.0823</td><td>12.145</td><td>90.83</td><td>93.98</td><td>3233.0</td><td>24.67</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>1</td><td>2</td><td>3</td><td>0</td><td>38.653</td><td>38.579</td><td>38.748</td><td>0.0</td><td>6.2</td><td>240</td><td>0.1611</td><td>12.418</td><td>88.95</td><td>92.7</td><td>3631.0</td><td>24.09</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>1</td><td>4</td><td>3</td><td>0</td><td>40.403</td><td>40.393</td><td>41.12</td><td>0.0</td><td>8.5</td><td>120</td><td>0.3367</td><td>11.88</td><td>85.83</td><td>88.76</td><td>4423.0</td><td>23.1</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>1</td><td>6</td><td>3</td><td>0</td><td>42.433</td><td>42.375</td><td>42.622</td><td>0.0</td><td>10.6</td><td>80</td><td>0.5304</td><td>11.312</td><td>83.05</td><td>87.11</td><td>5097.0</td><td>22.35</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>2</td><td>1</td><td>3</td><td>0</td><td>38.164</td><td>38.115</td><td>38.183</td><td>-3.4</td><td>1.4</td><td>480</td><td>0.0795</td><td>12.577</td><td>93.05</td><td>94.83</td><td>3456.0</td><td>22.2</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>2</td><td>2</td><td>3</td><td>0</td><td>36.907</td><td>36.883</td><td>36.952</td><td>-4.5</td><td>1.4</td><td>240</td><td>0.1538</td><td>13.006</td><td>90.61</td><td>95.03</td><td>3852.0</td><td>22.96</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>2</td><td>4</td><td>3</td><td>0</td><td>38.206</td><td>38.199</td><td>38.272</td><td>-5.4</td><td>2.6</td><td>120</td><td>0.3184</td><td>12.563</td><td>89.91</td><td>96.22</td><td>4646.0</td><td>23.01</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>2</td><td>6</td><td>3</td><td>2</td><td>39.201</td><td>39.095</td><td>41.195</td><td>-7.6</td><td>2.1</td><td>80</td><td>0.49</td><td>12.245</td><td>88.98</td><td>89.32</td><td>5118.0</td><td>23.26</td><td>5141.1</td><td></td><td>http://127.0.0.1:18000 との接続が切れました: ConnectionResetError(104, &#x27;Connection reset by peer&#x27;)</td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>4</td><td>1</td><td>3</td><td>0</td><td>38.526</td><td>38.434</td><td>38.715</td><td>-2.5</td><td>2.3</td><td>480</td><td>0.0803</td><td>12.459</td><td>92.73</td><td>94.56</td><td>5285.0</td><td>22.35</td><td>3859.2</td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>4</td><td>2</td><td>3</td><td>4</td><td>37.524</td><td>36.916</td><td>37.647</td><td>-2.9</td><td>3.1</td><td>240</td><td>0.1563</td><td>12.792</td><td>91.08</td><td>95.28</td><td>4225.0</td><td>23.19</td><td>3845.5</td><td></td><td>http://127.0.0.1:18000 との接続が切れました: RemoteDisconnected(&#x27;Remote end closed connection without response&#x27;)</td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>4</td><td>4</td><td>3</td><td>0</td><td>38.676</td><td>38.496</td><td>38.8</td><td>-4.3</td><td>3.8</td><td>120</td><td>0.3223</td><td>12.411</td><td>88.77</td><td>91.22</td><td>5021.0</td><td>24.08</td><td>4673.7</td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>4</td><td>4</td><td>6</td><td>0</td><td>1</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>サーバーが終了しました(OOMKilled・終了コード: true 137): http://127.0.0.1:18000 との接続が切れました: RemoteDisconnected(&#x27;Remote end closed connection without response&#x27;)</td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>1</td><td>1</td><td>3</td><td>0</td><td>41.816</td><td>41.705</td><td>43.507</td><td>0.0</td><td>11.1</td><td>480</td><td>0.0871</td><td>11.479</td><td>84.18</td><td>86.45</td><td>3233.0</td><td>23.8</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.463</td><td>41.45</td><td>41.632</td><td>0.0</td><td>14.0</td><td>240</td><td>0.1728</td><td>11.577</td><td>82.83</td><td>86.33</td><td>3631.0</td><td>23.56</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>1</td><td>4</td><td>3</td><td>0</td><td>44.635</td><td>44.316</td><td>44.762</td><td>0.0</td><td>19.8</td><td>120</td><td>0.372</td><td>10.754</td><td>76.99</td><td>82.59</td><td>4423.0</td><td>22.07</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>1</td><td>6</td><td>3</td><td>0</td><td>47.577</td><td>47.574</td><td>47.868</td><td>0.0</td><td>24.0</td><td>80</td><td>0.5947</td><td>10.089</td><td>72.49</td><td>82.47</td><td>5097.0</td><td>20.97</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>2</td><td>1</td><td>3</td><td>0</td><td>38.164</td><td>38.133</td><td>38.207</td><td>-8.7</td><td>1.4</td><td>480</td><td>0.0795</td><td>12.577</td><td>93.01</td><td>95.25</td><td>3456.0</td><td>23.7</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>2</td><td>2</td><td>3</td><td>0</td><td>37.139</td><td>37.123</td><td>37.216</td><td>-10.4</td><td>2.1</td><td>240</td><td>0.1547</td><td>12.924</td><td>91.9</td><td>95.38</td><td>3852.0</td><td>24.34</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>2</td><td>4</td><td>3</td><td>0</td><td>38.244</td><td>38.2</td><td>38.327</td><td>-14.3</td><td>2.7</td><td>120</td><td>0.3187</td><td>12.551</td><td>90.35</td><td>95.78</td><td>4646.0</td><td>24.7</td><td></td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>2</td><td>6</td><td>3</td><td>3</td><td>40.591</td><td>40.083</td><td>42.08</td><td>-14.7</td><td>5.8</td><td>80</td><td>0.5074</td><td>11.825</td><td>86.86</td><td>90.33</td><td>5118.0</td><td>23.78</td><td>5426.6</td><td></td><td>http://127.0.0.1:18000 との接続が切れました: ConnectionResetError(104, &#x27;Connection reset by peer&#x27;)</td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>4</td><td>1</td><td>3</td><td>0</td><td>39.159</td><td>38.832</td><td>39.164</td><td>-6.4</td><td>4.0</td><td>480</td><td>0.0816</td><td>12.258</td><td>91.01</td><td>91.56</td><td>5285.0</td><td>23.88</td><td>3885.3</td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>2</td><td>37.181</td><td>37.07</td><td>37.322</td><td>-10.3</td><td>2.2</td><td>240</td><td>0.1549</td><td>12.91</td><td>91.62</td><td>94.77</td><td>4225.0</td><td>24.57</td><td>4066.8</td><td></td><td>http://127.0.0.1:18000 との接続が切れました: ConnectionResetError(104, &#x27;Connection reset by peer&#x27;)</td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>4</td><td>4</td><td>3</td><td>0</td><td>38.789</td><td>38.555</td><td>39.42</td><td>-13.1</td><td>4.1</td><td>120</td><td>0.3232</td><td>12.375</td><td>87.89</td><td>91.63</td><td>5021.0</td><td>25.13</td><td>4734.7</td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>8</td><td>1</td><td>3</td><td>0</td><td>38.667</td><td>38.226</td><td>38.975</td><td>-7.5</td><td>2.7</td><td>480</td><td>0.0806</td><td>12.414</td><td>92.89</td><td>94.9</td><td>5115.0</td><td>25.43</td><td>4074.5</td><td></td><td></td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>8</td><td>2</td><td>3</td><td>2</td><td>48.758</td><td>36.894</td><td>265.062</td><td>17.6</td><td>34.0</td><td>240</td><td>0.2032</td><td>9.845</td><td>91.32</td><td>95.05</td><td>5229.0</td><td>23.08</td><td>4357.3</td><td></td><td>http://127.0.0.1:18000 との接続が切れました: RemoteDisconnected(&#x27;Remote end closed connection without response&#x27;)</td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>8</td><td>4</td><td>0</td><td>5</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>http://127.0.0.1:18000 との接続が切れました: ConnectionResetError(104, &#x27;Connection reset by peer&#x27;)</td></tr><tr><td>concurrency</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>8</td><td>6</td><td>0</td><td>3</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>http://127.0.0.1:18000 との接続が切れました: ConnectionResetError(104, &#x27;Connection reset by peer&#x27;)</td></tr><tr><td>precision</td><td>bfloat16</td><td>224</td><td>128</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.391</td><td>41.358</td><td>41.428</td><td>0.0</td><td></td><td>240</td><td>0.1725</td><td>11.597</td><td>83.04</td><td>87.3</td><td>3583.0</td><td>22.9</td><td>2873.3</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>224</td><td>128</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.157</td><td>36.933</td><td>37.252</td><td>-10.2</td><td></td><td>240</td><td>0.1548</td><td>12.918</td><td>91.33</td><td>95.49</td><td>4223.0</td><td>24.28</td><td>3766.3</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>224</td><td>256</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.397</td><td>41.338</td><td>42.794</td><td>0.0</td><td></td><td>240</td><td>0.1725</td><td>11.595</td><td>82.56</td><td>86.14</td><td>3583.0</td><td>22.43</td><td>2876.9</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>224</td><td>256</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.507</td><td>37.195</td><td>38.798</td><td>-9.4</td><td></td><td>240</td><td>0.1563</td><td>12.798</td><td>91.19</td><td>93.05</td><td>4225.0</td><td>24.07</td><td>3595.2</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>224</td><td>768</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.422</td><td>41.271</td><td>41.666</td><td>0.0</td><td></td><td>240</td><td>0.1726</td><td>11.588</td><td>82.72</td><td>85.35</td><td>3583.0</td><td>22.73</td><td>2873.4</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>224</td><td>768</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.159</td><td>37.124</td><td>37.507</td><td>-10.3</td><td></td><td>240</td><td>0.1548</td><td>12.918</td><td>91.36</td><td>94.92</td><td>4225.0</td><td>24.47</td><td>3488.4</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>336</td><td>128</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.486</td><td>41.255</td><td>41.515</td><td>0.0</td><td></td><td>240</td><td>0.1729</td><td>11.57</td><td>82.73</td><td>86.49</td><td>3583.0</td><td>22.67</td><td>2806.6</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>336</td><td>128</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.156</td><td>37.03</td><td>37.695</td><td>-10.4</td><td></td><td>240</td><td>0.1548</td><td>12.919</td><td>91.41</td><td>95.0</td><td>4225.0</td><td>25.01</td><td>3567.0</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>336</td><td>256</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.422</td><td>41.375</td><td>41.528</td><td>0.0</td><td></td><td>240</td><td>0.1726</td><td>11.588</td><td>82.74</td><td>86.56</td><td>3583.0</td><td>21.49</td><td>2803.0</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>336</td><td>256</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.069</td><td>36.846</td><td>37.317</td><td>-10.5</td><td></td><td>240</td><td>0.1545</td><td>12.949</td><td>91.05</td><td>93.51</td><td>4223.0</td><td>24.2</td><td>3627.8</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>336</td><td>768</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.491</td><td>41.373</td><td>41.513</td><td>0.0</td><td></td><td>240</td><td>0.1729</td><td>11.569</td><td>82.76</td><td>84.07</td><td>3583.0</td><td>22.81</td><td>2792.2</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>336</td><td>768</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.123</td><td>36.953</td><td>37.17</td><td>-10.5</td><td></td><td>240</td><td>0.1547</td><td>12.93</td><td>91.39</td><td>95.08</td><td>4223.0</td><td>24.42</td><td>3526.6</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>448</td><td>128</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.507</td><td>41.289</td><td>41.895</td><td>0.0</td><td></td><td>240</td><td>0.1729</td><td>11.564</td><td>82.73</td><td>87.33</td><td>3583.0</td><td>22.97</td><td>2907.9</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>448</td><td>128</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.058</td><td>37.04</td><td>37.426</td><td>-10.7</td><td></td><td>240</td><td>0.1544</td><td>12.953</td><td>91.02</td><td>95.23</td><td>4223.0</td><td>24.44</td><td>3724.9</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>448</td><td>256</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.453</td><td>41.407</td><td>41.947</td><td>0.0</td><td></td><td>240</td><td>0.1727</td><td>11.579</td><td>82.61</td><td>84.0</td><td>3583.0</td><td>23.13</td><td>3097.8</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>448</td><td>256</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.237</td><td>37.209</td><td>37.539</td><td>-10.2</td><td></td><td>240</td><td>0.1552</td><td>12.89</td><td>91.82</td><td>97.18</td><td>4225.0</td><td>24.77</td><td>3684.5</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>448</td><td>768</td><td>70</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>21.003</td><td>20.97</td><td>21.005</td><td>0.0</td><td></td><td>240</td><td>0.0875</td><td>22.853</td><td>37.64</td><td>47.91</td><td>3099.0</td><td>16.77</td><td>3077.8</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>448</td><td>768</td><td>70</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>16.682</td><td>16.582</td><td>17.118</td><td>-20.6</td><td></td><td>240</td><td>0.0695</td><td>28.774</td><td>50.61</td><td>51.17</td><td>3735.0</td><td>24.66</td><td>3584.9</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>448</td><td>768</td><td>140</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>24.047</td><td>23.949</td><td>24.071</td><td>0.0</td><td></td><td>240</td><td>0.1002</td><td>19.961</td><td>61.09</td><td>71.65</td><td>3705.0</td><td>21.91</td><td>3041.4</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>448</td><td>768</td><td>140</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>18.724</td><td>18.67</td><td>19.009</td><td>-22.1</td><td></td><td>240</td><td>0.078</td><td>25.635</td><td>81.35</td><td>86.6</td><td>3931.0</td><td>28.13</td><td>3535.0</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.479</td><td>41.477</td><td>41.655</td><td>0.0</td><td></td><td>240</td><td>0.1728</td><td>11.572</td><td>82.71</td><td>84.26</td><td>3583.0</td><td>22.24</td><td>2932.0</td><td></td><td></td></tr><tr><td>precision</td><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.215</td><td>37.187</td><td>37.558</td><td>-10.3</td><td></td><td>240</td><td>0.1551</td><td>12.898</td><td>91.44</td><td>94.31</td><td>4225.0</td><td>24.67</td><td>3615.8</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>224</td><td>128</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.546</td><td>41.451</td><td>41.735</td><td>0.0</td><td></td><td>240</td><td>0.1731</td><td>11.554</td><td>83.29</td><td>87.16</td><td>3583.0</td><td>22.35</td><td>3079.6</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>224</td><td>128</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.258</td><td>37.238</td><td>37.427</td><td>-10.3</td><td></td><td>240</td><td>0.1552</td><td>12.883</td><td>91.85</td><td>94.31</td><td>4225.0</td><td>24.41</td><td>3728.5</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>224</td><td>256</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.552</td><td>41.511</td><td>41.678</td><td>0.0</td><td></td><td>240</td><td>0.1731</td><td>11.552</td><td>83.31</td><td>87.63</td><td>3583.0</td><td>21.22</td><td>3168.0</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>224</td><td>256</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.153</td><td>37.139</td><td>37.375</td><td>-10.6</td><td></td><td>240</td><td>0.1548</td><td>12.919</td><td>92.42</td><td>97.44</td><td>4225.0</td><td>24.32</td><td>3789.1</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>224</td><td>768</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.559</td><td>41.543</td><td>41.6</td><td>0.0</td><td></td><td>240</td><td>0.1732</td><td>11.55</td><td>83.08</td><td>87.95</td><td>3583.0</td><td>20.97</td><td>3176.9</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>224</td><td>768</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.429</td><td>37.143</td><td>37.574</td><td>-9.9</td><td></td><td>240</td><td>0.156</td><td>12.824</td><td>92.21</td><td>95.26</td><td>4225.0</td><td>24.23</td><td>3902.8</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>336</td><td>128</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.942</td><td>41.669</td><td>42.715</td><td>0.0</td><td></td><td>240</td><td>0.1748</td><td>11.444</td><td>80.9</td><td>82.47</td><td>3583.0</td><td>22.54</td><td>3110.8</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>336</td><td>128</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.483</td><td>37.208</td><td>37.711</td><td>-10.6</td><td></td><td>240</td><td>0.1562</td><td>12.806</td><td>91.65</td><td>94.9</td><td>4225.0</td><td>24.53</td><td>3743.5</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>336</td><td>256</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.7</td><td>41.641</td><td>41.824</td><td>0.0</td><td></td><td>240</td><td>0.1738</td><td>11.511</td><td>82.72</td><td>87.84</td><td>3583.0</td><td>23.23</td><td>3146.4</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>336</td><td>256</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.552</td><td>37.489</td><td>37.978</td><td>-9.9</td><td></td><td>240</td><td>0.1565</td><td>12.782</td><td>91.73</td><td>93.78</td><td>4225.0</td><td>25.36</td><td>3596.1</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>336</td><td>768</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.775</td><td>41.645</td><td>41.903</td><td>0.0</td><td></td><td>240</td><td>0.1741</td><td>11.49</td><td>82.86</td><td>86.68</td><td>3583.0</td><td>21.06</td><td>3054.0</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>336</td><td>768</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.444</td><td>37.23</td><td>37.743</td><td>-10.4</td><td></td><td>240</td><td>0.156</td><td>12.819</td><td>91.66</td><td>95.54</td><td>4225.0</td><td>24.73</td><td>3747.5</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>448</td><td>128</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.763</td><td>41.632</td><td>42.296</td><td>0.0</td><td></td><td>240</td><td>0.174</td><td>11.493</td><td>82.91</td><td>85.45</td><td>3583.0</td><td>23.42</td><td>3140.5</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>448</td><td>128</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.198</td><td>37.191</td><td>37.713</td><td>-10.9</td><td></td><td>240</td><td>0.155</td><td>12.904</td><td>92.55</td><td>96.08</td><td>4223.0</td><td>24.91</td><td>4035.4</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>448</td><td>256</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.653</td><td>41.634</td><td>41.724</td><td>0.0</td><td></td><td>240</td><td>0.1736</td><td>11.524</td><td>82.98</td><td>84.05</td><td>3583.0</td><td>23.03</td><td>3121.1</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>448</td><td>256</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.732</td><td>37.376</td><td>37.934</td><td>-9.4</td><td></td><td>240</td><td>0.1572</td><td>12.721</td><td>91.29</td><td>94.95</td><td>4225.0</td><td>24.95</td><td>4114.0</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>41.723</td><td>41.505</td><td>41.735</td><td>0.0</td><td></td><td>240</td><td>0.1738</td><td>11.505</td><td>82.98</td><td>85.88</td><td>3583.0</td><td>20.14</td><td>3348.9</td><td></td><td></td></tr><tr><td>precision</td><td>float16</td><td>448</td><td>768</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>37.388</td><td>37.161</td><td>37.493</td><td>-10.4</td><td></td><td>240</td><td>0.1558</td><td>12.838</td><td>92.02</td><td>95.51</td><td>4225.0</td><td>24.83</td><td>3948.6</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>224</td><td>128</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>135.404</td><td>135.305</td><td>135.416</td><td>0.0</td><td></td><td>240</td><td>0.5642</td><td>3.545</td><td>94.41</td><td>96.01</td><td>5495.0</td><td>15.95</td><td>2767.9</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>224</td><td>128</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>130.896</td><td>130.673</td><td>131.153</td><td>-3.3</td><td></td><td>240</td><td>0.5454</td><td>3.667</td><td>97.49</td><td>98.73</td><td>6183.0</td><td>16.05</td><td>3410.9</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>224</td><td>256</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>135.429</td><td>135.299</td><td>135.433</td><td>0.0</td><td></td><td>240</td><td>0.5643</td><td>3.544</td><td>94.42</td><td>95.67</td><td>5495.0</td><td>15.88</td><td>2782.6</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>224</td><td>256</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>131.083</td><td>130.941</td><td>131.198</td><td>-3.2</td><td></td><td>240</td><td>0.5462</td><td>3.662</td><td>97.17</td><td>98.58</td><td>6183.0</td><td>16.09</td><td>3573.1</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>224</td><td>768</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>135.361</td><td>135.307</td><td>135.404</td><td>0.0</td><td></td><td>240</td><td>0.564</td><td>3.546</td><td>94.57</td><td>96.52</td><td>5495.0</td><td>15.92</td><td>2769.4</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>224</td><td>768</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>131.194</td><td>131.167</td><td>131.466</td><td>-3.1</td><td></td><td>240</td><td>0.5466</td><td>3.659</td><td>97.35</td><td>97.91</td><td>6183.0</td><td>16.16</td><td>3530.1</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>336</td><td>128</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>135.362</td><td>135.354</td><td>135.381</td><td>0.0</td><td></td><td>240</td><td>0.564</td><td>3.546</td><td>94.53</td><td>95.98</td><td>5495.0</td><td>16.09</td><td>2717.5</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>336</td><td>128</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>131.035</td><td>130.965</td><td>131.118</td><td>-3.2</td><td></td><td>240</td><td>0.546</td><td>3.663</td><td>97.38</td><td>98.84</td><td>6183.0</td><td>16.1</td><td>3495.6</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>336</td><td>256</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>135.488</td><td>135.461</td><td>135.492</td><td>0.0</td><td></td><td>240</td><td>0.5645</td><td>3.543</td><td>94.45</td><td>96.02</td><td>5495.0</td><td>16.05</td><td>2683.3</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>336</td><td>256</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>131.087</td><td>131.014</td><td>131.154</td><td>-3.2</td><td></td><td>240</td><td>0.5462</td><td>3.662</td><td>97.26</td><td>98.56</td><td>6183.0</td><td>16.11</td><td>3240.9</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>336</td><td>768</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>135.395</td><td>135.393</td><td>135.399</td><td>0.0</td><td></td><td>240</td><td>0.5641</td><td>3.545</td><td>94.63</td><td>96.66</td><td>5495.0</td><td>15.97</td><td>2696.9</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>336</td><td>768</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>131.047</td><td>130.875</td><td>131.112</td><td>-3.2</td><td></td><td>240</td><td>0.546</td><td>3.663</td><td>97.47</td><td>98.57</td><td>6183.0</td><td>16.21</td><td>3527.0</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>448</td><td>128</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>135.581</td><td>135.421</td><td>135.603</td><td>0.0</td><td></td><td>240</td><td>0.5649</td><td>3.54</td><td>94.42</td><td>95.71</td><td>5495.0</td><td>16.14</td><td>2823.2</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>448</td><td>128</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>131.222</td><td>130.833</td><td>131.373</td><td>-3.2</td><td></td><td>240</td><td>0.5468</td><td>3.658</td><td>97.33</td><td>98.29</td><td>6183.0</td><td>16.52</td><td>3509.7</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>448</td><td>256</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>135.416</td><td>135.407</td><td>135.454</td><td>0.0</td><td></td><td>240</td><td>0.5642</td><td>3.545</td><td>94.43</td><td>95.79</td><td>5495.0</td><td>16.04</td><td>2768.0</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>448</td><td>256</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>131.031</td><td>131.009</td><td>131.205</td><td>-3.2</td><td></td><td>240</td><td>0.546</td><td>3.663</td><td>97.32</td><td>98.77</td><td>6183.0</td><td>16.18</td><td>3605.9</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>448</td><td>768</td><td>280</td><td>8</td><td>1</td><td>2</td><td>3</td><td>0</td><td>135.384</td><td>135.357</td><td>135.5</td><td>0.0</td><td></td><td>240</td><td>0.5641</td><td>3.545</td><td>94.42</td><td>96.04</td><td>5525.0</td><td>16.16</td><td>2739.3</td><td></td><td></td></tr><tr><td>precision</td><td>float32</td><td>448</td><td>768</td><td>280</td><td>8</td><td>4</td><td>2</td><td>3</td><td>0</td><td>130.88</td><td>130.769</td><td>130.916</td><td>-3.3</td><td></td><td>240</td><td>0.5453</td><td>3.667</td><td>97.17</td><td>98.92</td><td>6183.0</td><td>16.3</td><td>3373.4</td><td></td><td></td></tr></tbody></table></div>
+<h2>精度の条件ごと</h2><div class='wrap'><table><thead><tr><th>dtype</th><th>image_max_side</th><th>dims</th><th>image_max_tokens</th><th>completion_w1</th><th>sec_per_window_w1</th><th>completion_w4</th><th>sec_per_window_w4</th><th>qps</th><th>search_p50_ms</th><th>search_p95_ms</th><th>cos_mean</th><th>cos_min</th><th>top1_acc</th><th>margin</th><th>nan</th><th>quality_error</th></tr></thead><tbody><tr><td>bfloat16</td><td>448</td><td>768</td><td>280</td><td>41.479</td><td>0.1728</td><td>37.215</td><td>0.1551</td><td>175.73</td><td>20.8</td><td>37.7</td><td>0.99998</td><td>0.99997</td><td>1.0</td><td>0.0592</td><td>False</td><td></td></tr><tr><td>bfloat16</td><td>448</td><td>256</td><td>280</td><td>41.453</td><td>0.1727</td><td>37.237</td><td>0.1552</td><td>185.27</td><td>19.2</td><td>38.3</td><td>0.99999</td><td>0.99997</td><td>1.0</td><td>0.05795</td><td>False</td><td></td></tr><tr><td>bfloat16</td><td>448</td><td>128</td><td>280</td><td>41.507</td><td>0.1729</td><td>37.058</td><td>0.1544</td><td>167.33</td><td>21.4</td><td>40.7</td><td>0.99999</td><td>0.99997</td><td>0.9167</td><td>0.03159</td><td>False</td><td></td></tr><tr><td>bfloat16</td><td>336</td><td>768</td><td>280</td><td>41.491</td><td>0.1729</td><td>37.123</td><td>0.1547</td><td>187.6</td><td>20.2</td><td>31.0</td><td>0.99998</td><td>0.99997</td><td>1.0</td><td>0.0592</td><td>False</td><td></td></tr><tr><td>bfloat16</td><td>336</td><td>256</td><td>280</td><td>41.422</td><td>0.1726</td><td>37.069</td><td>0.1545</td><td>173.53</td><td>19.9</td><td>41.0</td><td>0.99999</td><td>0.99997</td><td>1.0</td><td>0.05795</td><td>False</td><td></td></tr><tr><td>bfloat16</td><td>336</td><td>128</td><td>280</td><td>41.486</td><td>0.1729</td><td>37.156</td><td>0.1548</td><td>208.87</td><td>17.6</td><td>30.8</td><td>0.99999</td><td>0.99997</td><td>0.9167</td><td>0.03159</td><td>False</td><td></td></tr><tr><td>bfloat16</td><td>224</td><td>768</td><td>280</td><td>41.422</td><td>0.1726</td><td>37.159</td><td>0.1548</td><td>180.93</td><td>20.5</td><td>34.5</td><td>0.99998</td><td>0.99997</td><td>1.0</td><td>0.0592</td><td>False</td><td></td></tr><tr><td>bfloat16</td><td>224</td><td>256</td><td>280</td><td>41.397</td><td>0.1725</td><td>37.507</td><td>0.1563</td><td>188.07</td><td>18.7</td><td>36.3</td><td>0.99999</td><td>0.99997</td><td>1.0</td><td>0.05795</td><td>False</td><td></td></tr><tr><td>bfloat16</td><td>224</td><td>128</td><td>280</td><td>41.391</td><td>0.1725</td><td>37.157</td><td>0.1548</td><td>208.33</td><td>17.7</td><td>28.9</td><td>0.99999</td><td>0.99997</td><td>0.9167</td><td>0.03159</td><td>False</td><td></td></tr><tr><td>bfloat16</td><td>448</td><td>768</td><td>140</td><td>24.047</td><td>0.1002</td><td>18.724</td><td>0.078</td><td>182.87</td><td>21.4</td><td>27.1</td><td>0.99543</td><td>0.97227</td><td>1.0</td><td>0.06132</td><td>False</td><td></td></tr><tr><td>bfloat16</td><td>448</td><td>768</td><td>70</td><td>21.003</td><td>0.0875</td><td>16.682</td><td>0.0695</td><td>185.73</td><td>21.3</td><td>25.9</td><td>0.99325</td><td>0.95474</td><td>1.0</td><td>0.0637</td><td>False</td><td></td></tr><tr><td>float16</td><td>448</td><td>768</td><td>280</td><td>41.723</td><td>0.1738</td><td>37.388</td><td>0.1558</td><td>182.53</td><td>20.2</td><td>36.3</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05919</td><td>False</td><td></td></tr><tr><td>float16</td><td>448</td><td>256</td><td>280</td><td>41.653</td><td>0.1736</td><td>37.732</td><td>0.1572</td><td>184.93</td><td>19.0</td><td>37.6</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05795</td><td>False</td><td></td></tr><tr><td>float16</td><td>448</td><td>128</td><td>280</td><td>41.763</td><td>0.174</td><td>37.198</td><td>0.155</td><td>223.6</td><td>17.1</td><td>23.9</td><td>1.0</td><td>1.0</td><td>0.9167</td><td>0.03169</td><td>False</td><td></td></tr><tr><td>float16</td><td>336</td><td>768</td><td>280</td><td>41.775</td><td>0.1741</td><td>37.444</td><td>0.156</td><td>187.47</td><td>19.9</td><td>32.6</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05919</td><td>False</td><td></td></tr><tr><td>float16</td><td>336</td><td>256</td><td>280</td><td>41.7</td><td>0.1738</td><td>37.552</td><td>0.1565</td><td>179.33</td><td>19.6</td><td>40.5</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05795</td><td>False</td><td></td></tr><tr><td>float16</td><td>336</td><td>128</td><td>280</td><td>41.942</td><td>0.1748</td><td>37.483</td><td>0.1562</td><td>215.2</td><td>17.2</td><td>29.0</td><td>1.0</td><td>1.0</td><td>0.9167</td><td>0.03169</td><td>False</td><td></td></tr><tr><td>float16</td><td>224</td><td>768</td><td>280</td><td>41.559</td><td>0.1732</td><td>37.429</td><td>0.156</td><td>183.47</td><td>20.4</td><td>33.4</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05919</td><td>False</td><td></td></tr><tr><td>float16</td><td>224</td><td>256</td><td>280</td><td>41.552</td><td>0.1731</td><td>37.153</td><td>0.1548</td><td>214.07</td><td>17.2</td><td>32.4</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05795</td><td>False</td><td></td></tr><tr><td>float16</td><td>224</td><td>128</td><td>280</td><td>41.546</td><td>0.1731</td><td>37.258</td><td>0.1552</td><td>205.27</td><td>17.7</td><td>31.9</td><td>1.0</td><td>1.0</td><td>0.9167</td><td>0.03169</td><td>False</td><td></td></tr><tr><td>float32</td><td>448</td><td>768</td><td>280</td><td>135.384</td><td>0.5641</td><td>130.88</td><td>0.5453</td><td>139.4</td><td>28.6</td><td>39.5</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05919</td><td>False</td><td></td></tr><tr><td>float32</td><td>448</td><td>256</td><td>280</td><td>135.416</td><td>0.5642</td><td>131.031</td><td>0.546</td><td>158.87</td><td>22.7</td><td>39.6</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05795</td><td>False</td><td></td></tr><tr><td>float32</td><td>448</td><td>128</td><td>280</td><td>135.581</td><td>0.5649</td><td>131.222</td><td>0.5468</td><td>161.27</td><td>22.8</td><td>37.5</td><td>1.0</td><td>1.0</td><td>0.9167</td><td>0.0317</td><td>False</td><td></td></tr><tr><td>float32</td><td>336</td><td>768</td><td>280</td><td>135.395</td><td>0.5641</td><td>131.047</td><td>0.546</td><td>141.67</td><td>28.1</td><td>39.5</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05919</td><td>False</td><td></td></tr><tr><td>float32</td><td>336</td><td>256</td><td>280</td><td>135.488</td><td>0.5645</td><td>131.087</td><td>0.5462</td><td>170.27</td><td>22.1</td><td>33.8</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05795</td><td>False</td><td></td></tr><tr><td>float32</td><td>336</td><td>128</td><td>280</td><td>135.362</td><td>0.564</td><td>131.035</td><td>0.546</td><td>150.2</td><td>24.3</td><td>41.5</td><td>1.0</td><td>1.0</td><td>0.9167</td><td>0.0317</td><td>False</td><td></td></tr><tr><td>float32</td><td>224</td><td>768</td><td>280</td><td>135.361</td><td>0.564</td><td>131.194</td><td>0.5466</td><td>150.13</td><td>25.7</td><td>36.0</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05919</td><td>False</td><td></td></tr><tr><td>float32</td><td>224</td><td>256</td><td>280</td><td>135.429</td><td>0.5643</td><td>131.083</td><td>0.5462</td><td>155.93</td><td>23.3</td><td>40.4</td><td>1.0</td><td>1.0</td><td>1.0</td><td>0.05795</td><td>False</td><td></td></tr><tr><td>float32</td><td>224</td><td>128</td><td>280</td><td>135.404</td><td>0.5642</td><td>130.896</td><td>0.5454</td><td>158.13</td><td>23.1</td><td>39.0</td><td>1.0</td><td>1.0</td><td>0.9167</td><td>0.0317</td><td>False</td><td></td></tr></tbody></table></div>
+</body></html>
