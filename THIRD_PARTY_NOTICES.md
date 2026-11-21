@@ -29,7 +29,9 @@
 
 | ソフトウェア | 用途 | ライセンス |
 |---|---|---|
-| [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2)(Google) | 埋め込みモデル(イメージに同梱。版は `docker/Dockerfile` の `MODEL_REVISION`) | Apache-2.0(モデルカードの記載による) |
+| [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2)(Google) | 埋め込みモデル(`cuda` / `rocm` / `intel` に同梱。版は `docker/Dockerfile` の `MODEL_REVISION`) | Apache-2.0(モデルカードの記載による) |
+| [EmbeddingGemma 2 ONNX](https://huggingface.co/onnx-community/embeddinggemma-2-ONNX)(onnx-community) | CPU 向け ONNX 変換済みモデル(`cpu` イメージに同梱。版は `docker/Dockerfile` の `ONNX_MODEL_REVISION`) | Apache-2.0(元のモデルと同じ) |
+| ONNX Runtime(`onnxruntime`) | CPU 推論エンジン(`cpu` イメージに同梱) | MIT |
 | PyTorch | 推論 | Apache-2.0 ほか(パッケージのメタデータによる。同梱ライブラリのライセンスはパッケージ内の記載を参照) |
 | torchvision | 画像の前処理 | BSD-3-Clause |
 | Transformers(Hugging Face。版は `docker/Dockerfile` の `TRANSFORMERS_VERSION`) | モデルの実装 | Apache-2.0 |

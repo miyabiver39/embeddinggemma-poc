@@ -154,6 +154,14 @@ class Settings:
     doc_chunk_chars: int = 800  # 1 つのベクトルにする文字数の目安
     doc_overlap_chars: int = 100  # 前の塊の終わりを、次の塊の頭に重ねる文字数
 
+    # --- CPU 向け ONNX Runtime 推論(embedders/onnx.py) ---
+    embedding_runtime: str = "auto"  # auto / pytorch / onnx。auto は CPU で ONNX モデルがあるときに onnx を使う
+    onnx_model_id: str = "onnx-community/embeddinggemma-2-ONNX"
+    onnx_model_revision: str = ""  # ONNX モデルの版(Hugging Face のコミット)。イメージでは同梱した版に固定
+    onnx_model_dir: str = ""  # 同梱済み ONNX モデルのディレクトリ(空なら Hugging Face キャッシュから読む)
+    onnx_precision: str = "fp32"  # fp32 / q8 / q4 / fp16。既定は GPU と互換・動画最速の fp32
+    onnx_threads: int = 0  # ONNX Runtime のスレッド数(0 は自動)
+
     @classmethod
     def from_env(cls) -> Settings:
         role = _env("ROLE", "all")
@@ -190,6 +198,29 @@ class Settings:
         torch_compile = _env("TORCH_COMPILE", "auto").lower()
         if torch_compile not in ("auto", "on", "off"):
             raise ValueError(f"TORCH_COMPILE は auto / on / off のいずれかにしてください: {torch_compile!r}")
+
+        embedding_runtime = _env("EMBEDDING_RUNTIME", "auto").lower()
+        if embedding_runtime not in ("auto", "pytorch", "onnx"):
+            raise ValueError(
+                f"EMBEDDING_RUNTIME は auto / pytorch / onnx のいずれかにしてください: {embedding_runtime!r}"
+            )
+
+        onnx_precision = _env("ONNX_PRECISION", "fp32").lower()
+        if onnx_precision not in ("fp32", "q8", "q4", "fp16"):
+            raise ValueError(
+                f"ONNX_PRECISION は fp32 / q8 / q4 / fp16 のいずれかにしてください: {onnx_precision!r}"
+            )
+
+        if "ONNX_MODEL_DIR" in os.environ:
+            onnx_model_dir = os.environ["ONNX_MODEL_DIR"].strip()
+        else:
+            onnx_model_dir = ""
+            marker = Path("/etc/mediasearch_onnx_dir")
+            if marker.is_file():
+                try:
+                    onnx_model_dir = marker.read_text(encoding="utf-8").strip()
+                except OSError:
+                    onnx_model_dir = ""
 
         return cls(
             role=role,
@@ -253,4 +284,10 @@ class Settings:
             static_threshold=_env_float("STATIC_THRESHOLD", 4.0),
             doc_chunk_chars=_env_int("DOC_CHUNK_CHARS", 800),
             doc_overlap_chars=_env_int("DOC_OVERLAP_CHARS", 100),
+            embedding_runtime=embedding_runtime,
+            onnx_model_id=_env("ONNX_MODEL_ID", "onnx-community/embeddinggemma-2-ONNX"),
+            onnx_model_revision=_env("ONNX_MODEL_REVISION", ""),
+            onnx_model_dir=onnx_model_dir,
+            onnx_precision=onnx_precision,
+            onnx_threads=max(_env_int("ONNX_THREADS", 0), 0),
         )

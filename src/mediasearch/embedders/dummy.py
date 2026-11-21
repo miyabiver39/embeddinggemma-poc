@@ -68,6 +68,7 @@ class DummyEmbedder(Embedder):
             accelerator="dummy",
             modalities=["text", "image", "audio", "video", "message"],
             batch_size=self._batch,
+            runtime="dummy",
         )
 
     def embed_texts(self, texts: Sequence[str], kind: str = "query") -> np.ndarray:

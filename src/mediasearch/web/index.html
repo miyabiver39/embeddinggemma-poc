@@ -209,7 +209,7 @@ async function loadInfo() {
     $("info").textContent = JSON.stringify(INFO, null, 2);
     const e = INFO.embedder || {}, v = INFO.version || {};
     $("hdr").textContent = (e.error ? "埋め込み: 接続エラー" :
-      `${e.backend} / ${e.model_id} / ${e.dims}次元 / ${e.accelerator} (${e.device}, ${e.dtype}) / 窓 ${INFO.index.windows ?? "-"}`) +
+      `${e.backend} / ${e.model_id} / ${e.dims}次元 / ${e.accelerator} (${e.device}, ${e.dtype}${e.runtime ? ", " + e.runtime : ""}) / 窓 ${INFO.index.windows ?? "-"}`) +
       ` / v${v.app} ${v.variant || ""} ${(v.revision || "").slice(0, 7)}`;
     const w = INFO.watch || {};
     $("w-summary").textContent = !w.enabled ? "監視フォルダは設定されていません(環境変数 WATCH_DIRS で設定できます)。" :

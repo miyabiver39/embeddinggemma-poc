@@ -54,8 +54,9 @@ Windows アプリ(将来)のために守ること:
 
 ### Embedder インターフェース(`src/mediasearch/embedders/`)
 
-`embed_texts / embed_images / embed_audio / embed_parts`。実装は `LocalEmbedder`(sentence-transformers)、`RemoteEmbedder`(HTTP)、`DummyEmbedder`(テスト用)。
+`embed_texts / embed_images / embed_audio / embed_parts`。実装は `LocalEmbedder`(PyTorch / sentence-transformers)、`OnnxEmbedder`(ONNX Runtime。CPU の既定)、`RemoteEmbedder`(HTTP)、`DummyEmbedder`(テスト用)。
 `embed_parts` は「ラベル文字・音声・画像」を**順序を保ったまま 1 つのベクトルに**する(動画+音声の窓に使う)。
+`EMBEDDING_RUNTIME=auto`(既定)は、CPU 環境で `onnxruntime` と ONNX モデル(同梱または指定フォルダ)が使えるときに `OnnxEmbedder` を選び、GPU 環境や条件を満たさない環境では `LocalEmbedder` を選ぶ。
 
 ## 3. ベクトルの設計
 
@@ -237,6 +238,19 @@ Windows アプリ(将来)のために守ること:
 - 1,024 文字以下の単独のテキスト検索について、同じ文字列のベクトルをモデルのインスタンスごとに最大 256 件保持する。
   キャッシュから返す配列はコピーする。順位・スコア・絞り込みは要求ごとにその時点の索引から計算する。
 
+### CPU 向け ONNX Runtime 推論(`embedders/onnx.py`、`EMBEDDING_RUNTIME`)
+
+CPU での検索応答と動画取り込みを速くするため、`:cpu` イメージでは [onnx-community/embeddinggemma-2-ONNX](https://huggingface.co/onnx-community/embeddinggemma-2-ONNX) の `fp32` 版(`model.onnx` / `vision_encoder.onnx` / `audio_encoder.onnx`)を `/opt/onnx` に同梱し、`EMBEDDING_RUNTIME=auto` の既定として `OnnxEmbedder`(ONNX Runtime `CPUExecutionProvider`)で推論する。
+
+- **既定を `ONNX_PRECISION=fp32` にした理由**: Ryzen 7 5700X(8 コア / 16 スレッド)で `fp32` / `q8` / `q4` と PyTorch FP32 を比較した結果、`fp32` + 画像パディング除去 + 12 スレッド構成が、動画 1 窓 4.86 秒(PyTorch 7.41 秒比 1.52 倍)、テキスト検索 28.1 ms(同 64.1 ms 比 2.28 倍)、ピーク RSS 3.85 GB(同 4.71 GB より 0.86 GB 減)と速度・メモリの両面で優れ、かつ **PyTorch FP32 とのコサイン類似度が全モダリティで 1.000000**(検索スコア差 0)であることを確認した。GPU(BF16)で作成したベクトル DB とも再インデックスなしでそのまま互換性を保てる。
+  - `q8`(`_quantized`)は AVX-512 VNNI を持たない CPU(Zen 3 等)ではテキスト検索(82.4 ms)・音声(1,025 ms)・動画(5.95〜6.47 秒)のいずれも `fp32` より遅かった。
+  - `q4`(`_q4`)は容量(473 MB)・メモリ(2.01 GB)・テキスト検索(19.7 ms)に優れる一方、動画の速度は `fp32` に及ばず、PyTorch FP32 とのコサイン類似度が 0.971〜0.993(検索スコア差最大 0.032)まで低下するため既定には採らなかった。
+- **画像の詰め物パッチ除去(`trim_vision_padding`)**: `embedders/accel.py` の `trim_image_padding` と同じ条件で、同じ大きさの画像だけのときに末尾の詰め物パッチ(`(-1, -1)`)を外してから `vision_encoder` に渡す。数値誤差 0(最大絶対差 `0.00e+00`)のまま、16:9 画像(2520 → 2376 パッチ)で `vision_encoder` の時間を約 9% 削減する。
+- **スレッド数の自動最適化(`ONNX_THREADS=0`)**: 利用可能な論理 CPU 数(cgroup 上限を考慮)が 4 以下なら全コア、5 以上なら 75% を `intra_op_num_threads` に割り当てる(`OMP_NUM_THREADS` / `ONNX_THREADS` の明示指定を優先)。Ryzen 7 5700X(16 論理 CPU)では 8 スレッド(5.59 秒/窓)・16 スレッド(5.06 秒/窓)より 12 スレッド(4.86 秒/窓)が最速で、残り 25% を ffmpeg 復号や API 処理へ残せる。
+- **単一同梱の方針と注意事項**: `:cpu` イメージは容量肥大を防ぐため ONNX `fp32` モデル(約 2.93 GB)のみを同梱し、PyTorch の safetensors 重み(約 1.49 GB)は同梱しない(前処理 `Gemma4ImageProcessor` が `torch` / `torchvision` を参照するため、CPU 版 PyTorch パッケージ自体は残す)。そのため `:cpu` は以前よりイメージ容量が増え、起動時のモデル読み込みに約 17〜20 秒かかる。PyTorch 推論に戻したい場合は `-e EMBEDDING_RUNTIME=pytorch -e HF_HUB_OFFLINE=0` で重みを取得するか、GPU イメージを GPU なしで起動する。
+- **量子化版(`q8` / `q4`)の扱い**: イメージには同梱しない。`HF_HUB_OFFLINE=0` と `ONNX_PRECISION=q8`(または `q4`)を指定すると Hugging Face から取得して試せるが、FP32 / GPU(BF16)とのベクトルに差が生じるため、起動時に警告ログを出し、同じ DB への混在を避ける運用とする。`EmbedderInfo.model_id` は GPU と同じ `google/embeddinggemma-2` を返し、`runtime="onnx"` で実行基盤を区別する。
+- **排他・パイプライン**: `LocalEmbedder` と同じ `PriorityGate` と `prepare_parts_batch` / `embed_prepared_parts` を実装し、検索の優先割り込みと動画取り込みの前処理・推論オーバーラップを維持する。
+
 ### 検索の DB 側(`store.get_sources`、`vectors.VectorIndex._exact_filtered`)
 
 - 検索結果に取り込み元の情報を付けるとき、取り込み元を 1 回の問い合わせでまとめて読む(結果 1 件ずつ読むと、同時に検索が来た
@@ -412,18 +426,17 @@ Windows アプリ(将来)のために守ること:
 
 ## 7. デバイスと「ネイティブ化」
 
-| 対象 | イメージ | PyTorch | 備考 |
+| 対象 | イメージ | 推論基盤 | 備考 |
 |---|---|---|---|
-| CPU | `cpu` | 2.14.1+cpu | fp32 |
-| NVIDIA (RTX 3060 12GB 等) | `cuda` | 2.14.1+cu126 | bf16。ドライバは Docker の `--gpus all` |
-| AMD (RX 9060 XT 16GB 等) | `rocm` | 2.14.1+rocm7.2 | PyTorch 上は `cuda` として見える。Linux は `/dev/kfd` と `/dev/dri`、Windows(WSL2)は `/dev/dxg` と `/usr/lib/wsl`(同梱の librocdxg が橋渡し) |
-| Intel (Arc / Core Ultra 内蔵) | `intel` | 2.14.1+xpu | `xpu`。古い内蔵 GPU (Iris Xe) は未対応の可能性が高い |
+| CPU | `cpu` | ONNX Runtime(既定、`fp32`) / PyTorch 2.14.1+cpu | ONNX `fp32` を `/opt/onnx` に同梱。前処理・切替用に PyTorch CPU 版も同梱 |
+| NVIDIA (RTX 3060 12GB 等) | `cuda` | PyTorch 2.14.1+cu126 | bf16。ドライバは Docker の `--gpus all` |
+| AMD (RX 9060 XT 16GB 等) | `rocm` | PyTorch 2.14.1+rocm7.2 | PyTorch 上は `cuda` として見える。Linux は `/dev/kfd` と `/dev/dri`、Windows(WSL2)は `/dev/dxg` と `/usr/lib/wsl`(同梱の librocdxg が橋渡し) |
+| Intel (Arc / Core Ultra 内蔵) | `intel` | PyTorch 2.14.1+xpu | `xpu`。古い内蔵 GPU (Iris Xe) は未対応の可能性が高い |
 
-「コンテナ提供時にネイティブに変換」は **フェーズ 2** として設計のみ(未実装):
+ネイティブ化のうち、**CPU 向けの ONNX Runtime 対応は実装済み**(`:cpu` の既定。上の「CPU 向け ONNX Runtime 推論」)。OpenVINO / TensorRT への変換・キャッシュは引き続き **フェーズ 2**(未実装):
 
-- 初回起動時に PyTorch モデルを ONNX Runtime / OpenVINO / TensorRT 向けに変換し、`/data/native-cache/<model>/<device>/` に保存。2 回目以降はキャッシュを読む。
-- 素材: `onnx-community/embeddinggemma-2-ONNX` に `model.onnx`(テキスト)、`vision_encoder.onnx`、`audio_encoder.onnx` があり、fp32/fp16/q4/q4f16/quantized の各版が公開されている(内容は確認済み、変換・精度比較は未実施)。
-- 実装時の注意: 画像・音声エンコーダと LLM 本体が別ファイルなので、トークン埋め込みの合成部分を自前で再現する必要がある。**PyTorch 版との出力一致(コサイン類似度)を受け入れ条件**にすること。
+- 素材: `onnx-community/embeddinggemma-2-ONNX` の `model.onnx`(テキスト)、`vision_encoder.onnx`、`audio_encoder.onnx` は CPU 上で全モダリティ(`fp32` / `q8` / `q4`)の動作と PyTorch との一致度を実測済み(`fp32` で類似度 1.000000、`bench/README.md`)。
+- OpenVINO / TensorRT を追加する場合も、**PyTorch 版との出力一致(コサイン類似度)を受け入れ条件**にする。
 - Nuitka 等による Python コードのネイティブコンパイルは優先度が低い(ボトルネックは推論側)。
 
 ## 8. 検証状況(重要)

@@ -30,6 +30,12 @@ model = [
   "soundfile>=0.12",
   "transformers>=5.23.0",  # EmbeddingGemma 2 を収録した最初の正式版。イメージでは 5.23.0 に固定(docker/Dockerfile)
 ]
+# CPU 向けの ONNX Runtime 推論(embedders/onnx.py)。cpu イメージでは既定で同梱する
+onnx = [
+  "onnxruntime>=1.22,<2",
+  "soundfile>=0.12",
+  "transformers>=5.23.0",
+]
 dev = [
   "pytest>=8.0",
   "pytest-cov>=5.0",

@@ -90,6 +90,7 @@ class RemoteEmbedder(Embedder):
                 modalities=data["modalities"],
                 # compute 側でまとめて推論する件数。同時に送れば、compute がまとめる(Embedder.embed_parts_many)
                 batch_size=int(data.get("batch_size") or 1),
+                runtime=str(data.get("runtime") or "pytorch"),
             )
         return self._info
 

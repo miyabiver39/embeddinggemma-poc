@@ -260,12 +260,21 @@ class LocalEmbedder(Embedder):
             self._accelerator,
             str(self._torch_dtype).replace("torch.", ""),
         )
-        self._model = SentenceTransformer(
-            settings.model_id,
-            revision=settings.model_revision or None,
-            device=self._device,
-            model_kwargs={"dtype": self._torch_dtype},
-        )
+        try:
+            self._model = SentenceTransformer(
+                settings.model_id,
+                revision=settings.model_revision or None,
+                device=self._device,
+                model_kwargs={"dtype": self._torch_dtype},
+            )
+        except Exception as exc:
+            if os.environ.get("HF_HUB_OFFLINE", "0") == "1":
+                raise RuntimeError(
+                    f"PyTorch モデル({settings.model_id})をオフラインキャッシュから読み込めませんでした: {exc}。"
+                    "cpu イメージは ONNX モデルのみ同梱しているため、PyTorch で動かす場合は HF_HUB_OFFLINE=0 で"
+                    "オンライン取得するか、GPU イメージ(cuda / rocm / intel)を使用してください。"
+                ) from exc
+            raise
         # encode() は呼び出しごとに self.to(device) と self.eval() を全モジュールに実行するため、
         # 起動時に 1 回だけ設定して毎回の走査オーバーヘッドを省く。
         self._target_device = torch.device(self._device)

@@ -5333,6 +5333,12 @@
             "title": "Batch Size",
             "description": "まとめて推論する最大の件数(EMBED_BATCH)",
             "default": 1
+          },
+          "runtime": {
+            "type": "string",
+            "title": "Runtime",
+            "description": "推論エンジン(pytorch / onnx / dummy)",
+            "default": "pytorch"
           }
         },
         "additionalProperties": true,
@@ -5589,6 +5595,18 @@
               }
             ],
             "title": "Modalities"
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime",
+            "description": "推論エンジン(pytorch / onnx / dummy)"
           },
           "error": {
             "anyOf": [

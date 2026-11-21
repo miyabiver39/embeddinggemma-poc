@@ -29,6 +29,7 @@ class EmbedderInfo:
     accelerator: str  # cpu / nvidia-cuda / amd-rocm / intel-xpu / dummy
     modalities: list[str]
     batch_size: int = 1  # まとめて推論する最大の件数(EMBED_BATCH。1 ならまとめない)
+    runtime: str = "pytorch"  # pytorch / onnx / dummy
 
 
 @dataclass

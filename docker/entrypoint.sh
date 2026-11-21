@@ -10,6 +10,11 @@ set -e
 : "${ROLE:=$(cat /etc/mediasearch_role)}"
 export ROLE
 
+if [ -f /etc/mediasearch_onnx_dir ] && [ -z "${ONNX_MODEL_DIR+x}" ]; then
+  ONNX_MODEL_DIR="$(cat /etc/mediasearch_onnx_dir)"
+  export ONNX_MODEL_DIR
+fi
+
 # DEVICE の既定は auto。GPU を渡していなければ CPU で動きます
 echo "[mediasearch] VARIANT=${VARIANT:-?} ROLE=${ROLE} DEVICE=${DEVICE:-auto} DATA_DIR=${DATA_DIR}"
 

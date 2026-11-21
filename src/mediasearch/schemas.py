@@ -70,6 +70,7 @@ class EmbedderStatus(_Open):
     device: str | None = None
     accelerator: str | None = Field(None, description="cpu / nvidia-cuda / amd-rocm / intel-xpu / dummy")
     modalities: list[str] | None = None
+    runtime: str | None = Field(None, description="推論エンジン(pytorch / onnx / dummy)")
     error: str | None = Field(None, description="推論側に接続できない場合の理由")
 
 
@@ -538,3 +539,4 @@ class ComputeInfo(_Open):
     modalities: list[str]
     backend: str
     batch_size: int = Field(1, description="まとめて推論する最大の件数(EMBED_BATCH)")
+    runtime: str = Field("pytorch", description="推論エンジン(pytorch / onnx / dummy)")

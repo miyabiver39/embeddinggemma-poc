@@ -70,6 +70,7 @@ def build_compute_router(embedder: Embedder) -> APIRouter:
             "modalities": i.modalities,
             "backend": i.backend,
             "batch_size": i.batch_size,
+            "runtime": i.runtime,
         }
 
     @router.post("/embed/texts", summary="文章をベクトルにする", response_model=Vectors, responses=errors(400, 401))
