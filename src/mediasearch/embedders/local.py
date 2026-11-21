@@ -274,6 +274,9 @@ class LocalEmbedder(Embedder):
         self._processor_lock = Lock() if rx9060xt else nullcontext()
         self._query_cache = lru_cache(maxsize=256)(self._encode_query) if rx9060xt else None
         self._use_pin_memory = bool(self._target_device.type == "cuda" and torch.cuda.is_available())
+        if not getattr(settings, "pin_memory", True):
+            # 固定のメモリを使わない。RTX 3060 では取り込みの速さが変わらなかった(docs/operations.md)
+            self._use_pin_memory = False
         self._modalities = list(getattr(self._model, "modalities", []) or [])
         self._apply_image_token_limit(settings.image_max_tokens)
         self._resolved_prompts: dict[str | None, str | None] = {
@@ -468,6 +471,19 @@ class LocalEmbedder(Embedder):
             modalities=self._modalities,
             batch_size=self._batch,
         )
+
+    def release_cache(self) -> None:
+        """使っていない固定のメモリ(pin_memory)を OS へ返します。
+
+        PyTorch は、一度確保した固定のメモリを、再利用のため解放せずに持ち続けます(大きさは 2 のべき乗に切り上げ)。
+        同時に取り込んだ後は数 GB になり、取り込みが終わっても減らないため、取り込みが空になったときに返します。
+        使用中のテンソルの領域は返さないため、検索と同時に呼んでも安全です。
+        """
+        if not self._use_pin_memory:
+            return
+        empty = getattr(self._torch._C, "_host_emptyCache", None)
+        if empty is not None:
+            empty()
 
     def warmup(self) -> dict[str, Any]:
         """起動時のウォームアップ。NVIDIA の高速化初期化で既に済ませていれば重複実行を省きます。"""

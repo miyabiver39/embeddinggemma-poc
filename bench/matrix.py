@@ -277,6 +277,8 @@ def ingest_once(c: Client, paths: list[str], win: int, video_sec: float = TOTAL_
         # コンテナ(cgroup)の使用量で、ページキャッシュも含む。mem_max_mb(anon)には、GPU へ渡す前の
         # 固定のメモリ(shmem)が入らないため、あわせて記録する
         "mem_total_max_mb": metric("mem_mb", "max"),
+        # GPU への転送用の固定のメモリの最大(2026-11-21 の #26 の修正より前のイメージでは記録されない)
+        "pinned_max_mb": metric("pinned_mb", "max"),
         "cpu_by_thread": summary.get("cpu_by_thread"),
         "jobs": [{k: j.get(k) for k in ("id", "status", "created_at", "started_at", "finished_at", "timings")}
                  for j in jobs],  # fmt: skip

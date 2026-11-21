@@ -137,6 +137,10 @@ class Embedder(ABC):
         elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
         return {"ok": True, "skipped": False, "modalities": ran, "elapsed_ms": elapsed_ms}
 
+    def release_cache(self) -> None:
+        """取り込みが空になったときに呼ばれます。使っていない一時的なメモリを OS へ返す実装は、これを上書きします。"""
+        return None  # 既定では何もしない
+
     def metrics(self) -> dict:
         """推論の使用状況(GET /api/metrics の inference)。順番待ちの制御を持つ実装は、その積算値を返します。"""
         gate = getattr(self, "_gate", None)
