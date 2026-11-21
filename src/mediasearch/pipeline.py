@@ -361,6 +361,29 @@ def _put_bounded(q: queue.Queue, item: object, stop: threading.Event) -> bool:
     return False
 
 
+class _Lease:
+    """前処理済みの入力の枠(サーバー全体で数を制限する)を 1 つ持ちます。release() は何度呼んでも 1 回だけ返します。"""
+
+    def __init__(self, sem: threading.Semaphore) -> None:
+        self._sem = sem
+        self._lock = threading.Lock()
+        self._held = True
+
+    def release(self) -> None:
+        with self._lock:
+            if self._held:
+                self._held = False
+                self._sem.release()
+
+
+def _acquire_lease(sem: threading.Semaphore, stop: threading.Event) -> _Lease | None:
+    """枠が空くまで待ちます。停止を求められたら None を返します。"""
+    while not stop.is_set():
+        if sem.acquire(timeout=0.1):
+            return _Lease(sem)
+    return None
+
+
 class _Interrupted(Exception):
     """停止の要求で、取り込みを途中で止めた。"""
 
@@ -396,6 +419,12 @@ class Ingestor:
         self._cancel: set[int] = set()  # 取り消しを求められた実行中のジョブ
         self._busy_sources: set[int] = set()  # 実行中のジョブの取り込み元
         self._busy_cond = threading.Condition()
+        # 前処理済みの入力(GPU へ渡す固定のメモリに置いたもの)の数の上限を、サーバー全体で「先読み + 2」にする。
+        # 1 回分は EMBED_BATCH 件の窓(GPU の既定は 4 窓。6 秒窓なら 24 枚で約 177MB、固定のメモリでは 256MB)。
+        # 推論は 1 回ずつなので、本数ぶん先読みを持っても速くならず、メモリだけが本数に比例して増えていた(#26)。
+        # 1 本のときの数(先読み + 前処理中 1 + 推論中 1)と同じにし、同時数を増やしてもこれ以上は持たない
+        self._prepared_limit = max(int(getattr(settings, "ingest_prefetch", 2) or 2), 1) + 2
+        self._prepared_slots = threading.BoundedSemaphore(self._prepared_limit)
 
     # ------------------------------------------------------------------ 起動・停止
     def start(self) -> None:
@@ -555,6 +584,15 @@ class Ingestor:
                         self._run_job(other)
             except _Interrupted:  # 停止中に、同じ取り込み元の空きを待っていた(ジョブは queued のまま残る)
                 return
+            self._release_if_idle()
+
+    def _release_if_idle(self) -> None:
+        """取り込みが空になったら、推論で使った一時的なメモリ(固定のメモリなど)を OS へ返します。"""
+        if self._queue.qsize() == 0 and not self._running and not self._stopping.is_set():
+            try:
+                self._embedder.release_cache()
+            except Exception:  # 解放の失敗で取り込みを止めない
+                log.debug("一時的なメモリを返せませんでした", exc_info=True)
 
     def _is_image_job(self, job_id: int) -> bool:
         job = self._store.get_job(job_id)
@@ -710,6 +748,23 @@ class Ingestor:
             done = object()
             stop = threading.Event()
 
+            def emit(ready: list[dict], audio_sec: float) -> bool:
+                """窓をまとめて前処理し、有界キューへ積みます。前処理の前に、サーバー全体の枠を 1 つ取ります。"""
+                lease = _acquire_lease(self._prepared_slots, stop)
+                if lease is None:
+                    return False
+                try:
+                    t_prep = time.perf_counter()
+                    prepared = self._embedder.prepare_parts_batch([w["parts"] for w in ready])
+                    prep_sec = time.perf_counter() - t_prep
+                except BaseException:
+                    lease.release()
+                    raise
+                if not _put_bounded(work_q, (ready, prepared, audio_sec, prep_sec, lease), stop):
+                    lease.release()
+                    return False
+                return True
+
             def produce() -> None:
                 it = iter(reader)
                 frames: dict[int, np.ndarray] = {}
@@ -757,21 +812,14 @@ class Ingestor:
                             for k in [k for k in frames if k < keep]:
                                 del frames[k]
                             if ready and (len(ready) >= batch or pending == len(plans)):
-                                t_prep = time.perf_counter()
-                                prepared = self._embedder.prepare_parts_batch([w["parts"] for w in ready])
-                                prep_sec = time.perf_counter() - t_prep
-                                packet = (ready, prepared, batch_audio_sec, prep_sec)
-                                if not _put_bounded(work_q, packet, stop):
+                                if not emit(ready, batch_audio_sec):
                                     return
                                 ready = []
                                 batch_audio_sec = 0.0
                         if item is None:
                             break
                     if ready and not stop.is_set():
-                        t_prep = time.perf_counter()
-                        prepared = self._embedder.prepare_parts_batch([w["parts"] for w in ready])
-                        prep_sec = time.perf_counter() - t_prep
-                        if not _put_bounded(work_q, (ready, prepared, batch_audio_sec, prep_sec), stop):
+                        if not emit(ready, batch_audio_sec):
                             return
                     _put_bounded(work_q, done, stop)
                 except BaseException as exc:  # Consumer 側で同じ例外を送出する
@@ -805,16 +853,23 @@ class Ingestor:
                         stored += 1
                         self._store.update_job(job_id, progress=stored)
                         continue
-                    ready, prepared, audio_sec, prep_sec = packet
+                    ready, prepared, audio_sec, prep_sec, lease = packet
                     if audio_sec > 0:
                         timer.add("audio", audio_sec)
                     if prep_sec > 0:
                         timer.add("preprocess", prep_sec)
-                    self._check_stop()
-                    check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
-                    submitted = (ready, embed_pool.submit(self._embed_windows, ready, prepared, timer))
+                    try:
+                        self._check_stop()
+                        check_disk(self._settings.data_dir, self._settings.min_free_disk_mb)
+                        future = embed_pool.submit(self._embed_windows, ready, prepared, timer, lease)
+                    except BaseException:
+                        lease.release()
+                        raise
+                    submitted = (ready, future, lease)
+                    # 推論が終わった入力(固定のメモリ)を、次の回まで持ち続けない
+                    packet = prepared = None
                     if inflight is not None:
-                        prev_ready, prev_fut = inflight
+                        prev_ready, prev_fut, _ = inflight
                         inflight = submitted
                         stored += self._save_windows(source, prev_ready, prev_fut.result(), timer)
                         skipped_static += sum(w.get("skipped", 0) for w in prev_ready)
@@ -822,7 +877,7 @@ class Ingestor:
                     else:
                         inflight = submitted
                 if inflight is not None:
-                    prev_ready, prev_fut = inflight
+                    prev_ready, prev_fut, _ = inflight
                     inflight = None
                     stored += self._save_windows(source, prev_ready, prev_fut.result(), timer)
                     skipped_static += sum(w.get("skipped", 0) for w in prev_ready)
@@ -832,12 +887,24 @@ class Ingestor:
                 if inflight is not None:  # 途中で止めた場合も、推論中の回が終わるのを待ってから片付ける
                     inflight[1].cancel()
                 embed_pool.shutdown(wait=True)
+                if inflight is not None:  # 取り消して推論しなかった回の枠を返す(推論した回は返済済み。二重には返さない)
+                    inflight[2].release()
+
+                def discard(item: object) -> None:
+                    if isinstance(item, tuple) and len(item) == 5:
+                        item[4].release()
+
                 while producer.is_alive():  # 生成側が put で止まっていれば、取り出して終わらせる
                     try:
-                        work_q.get(timeout=0.1)
+                        discard(work_q.get(timeout=0.1))
                     except queue.Empty:
                         pass
                 producer.join()
+                while True:  # キューに残った回の枠を返す
+                    try:
+                        discard(work_q.get_nowait())
+                    except queue.Empty:
+                        break
                 if audio is not None:
                     audio.close()
         timer.extra.update(
@@ -876,12 +943,21 @@ class Ingestor:
         win = {"plan": plan, "parts": build_window_parts(picked, times, slices), "thumb": picked[len(picked) // 2]}
         return win, audio_sec
 
-    def _embed_windows(self, ready: list[dict], prepared, timer: StageTimer) -> list[np.ndarray]:
-        """前処理済みの窓をまとめて推論します(EMBED_BATCH が 1 なら 1 件ずつ推論する)。推論のスレッドで動く。"""
-        with timer.overlapping("embed"):
-            if prepared is not None:
-                return self._embedder.embed_prepared_parts(prepared, high=False)
-            return self._embedder.embed_parts_many([w["parts"] for w in ready], high=False)
+    def _embed_windows(
+        self, ready: list[dict], prepared, timer: StageTimer, lease: _Lease | None = None
+    ) -> list[np.ndarray]:
+        """前処理済みの窓をまとめて推論します(EMBED_BATCH が 1 なら 1 件ずつ推論する)。推論のスレッドで動く。
+
+        推論が終わったら(失敗しても)、前処理済みの入力の枠を返します。
+        """
+        try:
+            with timer.overlapping("embed"):
+                if prepared is not None:
+                    return self._embedder.embed_prepared_parts(prepared, high=False)
+                return self._embedder.embed_parts_many([w["parts"] for w in ready], high=False)
+        finally:
+            if lease is not None:
+                lease.release()
 
     def _save_windows(self, source: dict, ready: list[dict], vecs: list[np.ndarray], timer: StageTimer) -> int:
         """推論した窓を保存し、処理した窓の数を返します(DB への書き込みは、取り込みのスレッドだけで行う)。
