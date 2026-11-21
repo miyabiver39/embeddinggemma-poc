@@ -4999,6 +4999,18 @@
             ],
             "title": "Store Media",
             "description": "false にすると、ファイルを取り込み後に削除し、サムネイルも作らない(検索結果は情報だけ)。省略時は STORE_MEDIA"
+          },
+          "skip_static": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skip Static",
+            "description": "true にすると、前に推論した窓と映像が変わらない窓を推論せず、前の窓の終わりを延ばす(映像のみの窓だけ。省略時はサーバの SKIP_STATIC)"
           }
         },
         "type": "object",
@@ -5974,6 +5986,18 @@
             "title": "Include Audio",
             "description": "動画の音声も同じベクトルに含める"
           },
+          "skip_static": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skip Static",
+            "description": "true にすると、前に推論した窓と映像が変わらない窓を推論せず、前の窓の終わりを延ばす(映像のみの窓だけ。省略時はサーバの SKIP_STATIC)"
+          },
           "store_media": {
             "anyOf": [
               {
@@ -6120,6 +6144,18 @@
             ],
             "title": "Include Audio",
             "description": "動画の音声も同じベクトルに含める"
+          },
+          "skip_static": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skip Static",
+            "description": "true にすると、前に推論した窓と映像が変わらない窓を推論せず、前の窓の終わりを延ばす(映像のみの窓だけ。省略時はサーバの SKIP_STATIC)"
           },
           "store_media": {
             "anyOf": [
@@ -7417,6 +7453,18 @@
             ],
             "title": "Include Audio",
             "description": "動画の音声も同じベクトルに含める"
+          },
+          "skip_static": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skip Static",
+            "description": "true にすると、前に推論した窓と映像が変わらない窓を推論せず、前の窓の終わりを延ばす(映像のみの窓だけ。省略時はサーバの SKIP_STATIC)"
           },
           "store_media": {
             "anyOf": [

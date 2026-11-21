@@ -17,15 +17,21 @@ pytestmark = [pytest.mark.model, needs_ffmpeg]
 
 def test_real_model_text_to_video(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("INGEST_ROOTS", str(tmp_path))
     monkeypatch.setenv("EMBEDDING_BACKEND", "local")
     monkeypatch.setenv("ROLE", "all")
     monkeypatch.setenv("DIMS", os.environ.get("DIMS", "256"))
     with TestClient(create_app(Settings.from_env())) as c:
+        query = {"query": "a solid blue screen", "top_k": 3}
+        before = c.post("/api/search/text", json=query)
+        assert before.is_success
+        assert before.json()["results"] == []
         for color in ("red", "blue", "green"):
             p = tmp_path / f"{color}.mp4"
             make_video(p, color, seconds=4)
             r = c.post("/api/ingest/path", json={"path": str(p), "group_id": color})
+            assert r.is_success, r.text
             assert wait_done(c, r.json()["job_id"], timeout=600)["status"] == "done"
-        res = c.post("/api/search/text", json={"query": "a solid blue screen", "top_k": 3}).json()
+        res = c.post("/api/search/text", json=query).json()
         print([(h["group_id"], round(h["score"], 3)) for h in res["results"]])
         assert res["results"][0]["group_id"] == "blue"

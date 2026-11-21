@@ -123,3 +123,78 @@ def test_slow_inference_drops_old_windows_instead_of_piling_up(settings, tmp_pat
         assert state["frames"] >= 9, state  # 10 秒・1 秒ごと
         assert state["dropped_windows"] >= 1 and state["windows"] >= 1, state
         c.post(f"/api/streams/{stream_id}/stop")
+
+
+def _run_file_stream(c, video, params: IngestParams, name: str) -> dict:
+    """ファイルをストリームとして最後まで受信させ、受信の状態を返す。"""
+    manager = c.app.state.ctx.streams
+    store = manager._store
+    source_id = store.add_source(kind="stream", path=None, name=name, group_id=name, location=None,
+                                 start_ts=time.time(), params=params.to_dict(), status="running")  # fmt: skip
+    stream_id = store.add_stream(name=name, url=f"file:{video}", group_id=name, location=None,
+                                 params=params.to_dict(), source_id=source_id)  # fmt: skip
+    manager._start_worker(store.get_stream(stream_id))
+    deadline = time.time() + 40
+    state = {}
+    while time.time() < deadline:
+        state = c.get(f"/api/streams/{stream_id}").json()["state"]
+        if state["status"] == "retrying":  # ファイルの終わりまで受信した
+            break
+        time.sleep(0.2)
+    c.post(f"/api/streams/{stream_id}/stop")
+    return state
+
+
+def _stream_windows(c, group):
+    body = {"query": "x", "top_k": 100, "merge": False, "kind": "all", "min_score": -1, "group_id": group}
+    return sorted((h["start_ms"], h["end_ms"]) for h in c.post("/api/search/text", json=body).json()["results"])
+
+
+@needs_ffmpeg
+def test_stream_skips_static_windows(settings, tmp_path, monkeypatch):
+    monkeypatch.setattr(streams, "PROTOCOL_WHITELIST", streams.PROTOCOL_WHITELIST + ",file")
+    video = tmp_path / "still.mp4"
+    make_video(video, "gray", seconds=8)
+    params = IngestParams(2, 2, 0, False, skip_static=True)
+    with TestClient(create_app(settings)) as c:
+        state = _run_file_stream(c, video, params, "still")
+        assert state["windows"] == 1 and state["skipped_static"] >= 2, state
+        wins = _stream_windows(c, "still")
+        assert len(wins) == 1, wins  # 推論した 1 窓が、省略した窓の分まで延びている
+        assert wins[0][1] - wins[0][0] >= 2000 * (1 + state["skipped_static"]) - 1, (wins, state)
+
+
+@needs_ffmpeg
+def test_stream_does_not_skip_moving_video(settings, tmp_path, monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(streams, "PROTOCOL_WHITELIST", streams.PROTOCOL_WHITELIST + ",file")
+    video = tmp_path / "moving.mp4"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=320x240:r=10:d=8",
+         "-f", "lavfi", "-i", "color=c=white:s=16x16:r=10:d=8",
+         "-filter_complex", "[0][1]overlay=x='mod(t*25,300)':y=110", "-pix_fmt", "yuv420p", str(video)],
+        check=True,
+    )  # fmt: skip
+    with TestClient(create_app(settings)) as c:
+        state = _run_file_stream(c, video, IngestParams(2, 2, 0, False, skip_static=True), "moving")
+        assert state["skipped_static"] == 0 and state["windows"] >= 3, state
+
+
+@needs_ffmpeg
+def test_stream_with_audio_is_not_skipped(settings, tmp_path, monkeypatch):
+    monkeypatch.setattr(streams, "PROTOCOL_WHITELIST", streams.PROTOCOL_WHITELIST + ",file")
+    video = tmp_path / "still_tone.mp4"
+    make_video(video, "gray", seconds=6, audio="tone")
+    with TestClient(create_app(settings)) as c:
+        state = _run_file_stream(c, video, IngestParams(2, 2, 0, True, skip_static=True), "tone")
+        assert state["skipped_static"] == 0 and state["windows"] >= 2, state  # 音声つきの窓は省略しない
+
+
+def test_skip_static_can_be_set_per_request(settings):
+    with TestClient(create_app(settings)) as c:  # 既定(SKIP_STATIC=false)でも、登録ごとに有効にできる
+        r = c.post("/api/streams", json={"url": "rtsp://cam.invalid/s1", "enabled": False, "skip_static": True})
+        assert r.status_code == 200, r.text
+        assert c.app.state.ctx.store.get_stream(r.json()["id"])["params"]["skip_static"] is True
+        r = c.post("/api/streams", json={"url": "rtsp://cam.invalid/s2", "enabled": False})
+        assert c.app.state.ctx.store.get_stream(r.json()["id"])["params"]["skip_static"] is False

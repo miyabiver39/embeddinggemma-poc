@@ -53,7 +53,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #      cuda は、NVIDIA のドライバがコンテナに渡す復号ライブラリ(NVDEC)を使う(NVIDIA_DRIVER_CAPABILITIES の video)。
 #      cuda は、推論の高速化(torch.compile)のため C コンパイラと Python のヘッダーも入れる(Triton が GPU の
 #      計算を呼び出す部品を、起動時にコンパイルする。無いと高速化を使わずに動く。src/mediasearch/embedders/accel.py)
-RUN apt-get update \
+#      配布元(archive.ubuntu.com)の一時的な失敗(HTTP 5xx)でビルドが止まらないよう、apt-get update を最大 5 回やり直す
+#      (2026-11-20、cpu のビルドだけが InRelease の 520 で失敗した。apt の Acquire::Retries は、update の 520 を
+#      やり直さないことを確かめたため、シェルで繰り返す)。Error-Mode=any で、一部の索引の失敗も失敗として扱う
+RUN for i in 1 2 3 4 5; do \
+      apt-get update -o APT::Update::Error-Mode=any && break; \
+      if [ "$i" = 5 ]; then exit 1; fi; \
+      echo "apt-get update に失敗したため、$((i * 15)) 秒後にやり直します($i/5)"; sleep $((i * 15)); \
+    done \
  && apt-get install -y --no-install-recommends \
       python3 python3-venv python3-pip ffmpeg ca-certificates tzdata curl \
  && if [ "$VARIANT" = "cuda" ]; then \

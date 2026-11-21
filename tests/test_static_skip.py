@@ -120,3 +120,14 @@ def test_disabled_by_default(client, tmp_path):
     sid, job = _ingest(client, video)
     assert len(_windows(client, sid)) == 4
     assert "skipped_static" not in job["timings"]
+
+
+@needs_ffmpeg
+def test_skip_static_per_request(client, tmp_path):
+    video = tmp_path / "still.mp4"
+    make_video(video, "gray", seconds=8)
+    r = client.post("/api/ingest/path", json={"path": str(video), "skip_static": True})
+    assert r.status_code == 200, r.text
+    job = wait_done(client, r.json()["job_id"])
+    assert job["status"] == "done" and job["timings"]["skipped_static"] == 3
+    assert len(_windows(client, r.json()["source_id"])) == 1
