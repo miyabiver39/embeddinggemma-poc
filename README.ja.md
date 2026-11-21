@@ -211,7 +211,8 @@ docker run -d -p 8000:8000 -v ./data:/data -e EMBEDDING_URL=http://gpu-server:80
 | `TORCH_CACHE_DIR` | `DATA_DIR/cache/torch` | PyTorch(`TORCHINDUCTOR_CACHE_DIR` / `TRITON_CACHE_DIR`)のコンパイルキャッシュ永続化先(各環境変数での個別上書きを優先) |
 | `WARMUP_ON_START` | `true` | 起動時に `/readyz` が Ready になる直前でダミー入力(テキスト・画像・音声)による 1 回のウォームアップ推論を行う(`remote` や `TORCH_COMPILE` で実施済みの場合を除く) |
 | `INGEST_PREFETCH` | `2` | 動画取り込みの Producer-Consumer パイプラインの有界キュー上限(1〜16)。窓 N の推論中に窓 N+1 の復号・前処理を先行実行しつつ、バックプレッシャーでメモリ肥大化を防ぐ |
-| `INGEST_WORKERS` | `1` | 同時に取り込むファイルの数(1〜8)。復号・前処理・保存を並べて進める。推論は優先度の仕組みを通して GPU に 1 回ずつ流すため、検索の優先とベクトルは変わらない。1 本の ffmpeg の復号では GPU が待ってしまう、速い GPU で効く。メモリの使用量はおおむねこの数に比例して増える |
+| `INGEST_WORKERS` | `1` | 同時に取り込むファイルの数(1〜8)。復号・前処理・保存を並べて進める。推論は優先度の仕組みを通して GPU に 1 回ずつ流すため、検索の優先とベクトルは変わらない。1 本の ffmpeg の復号では GPU が待ってしまう、速い GPU で効く。メモリの使用量はこの数とともに増える(GPU へ渡す前処理済みの入力は、この数によらずサーバー全体で `INGEST_PREFETCH` + 2 回分まで。GPU 版のイメージでは、2 以上のとき `MALLOC_ARENA_MAX=2` を既定にしてメモリの増加を抑える。RTX 3060・6 秒窓・8 本同時で最大約 4.6GB) |
+| `PIN_MEMORY` | `true` | GPU へ渡す入力を固定のメモリ(pin_memory)に置く。`false` にすると、メモリが減る(RTX 3060・8 本同時で最大約 4.6GB → 3.9GB)。RTX 3060 では取り込みの速さが 0〜2% 遅くなる程度 |
 | `IMAGE_MAX_TOKENS` | `0` | 画像1枚あたりのトークン上限(0=モデル既定) |
 | `TOP_K` | `10` | 検索の既定件数 |
 | `DATA_DIR` | `/data` | DB・サムネイル・アップロード動画の保存先 |
