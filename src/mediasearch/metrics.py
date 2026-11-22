@@ -226,6 +226,10 @@ def _gpu() -> dict:
                     "max_allocated_mb": round(torch.cuda.max_memory_allocated() / 2**20, 1),
                     "reserved_mb": round(torch.cuda.memory_reserved() / 2**20, 1),
                 }
+                # GPU への転送用の固定のメモリ(pin_memory)。PyTorch が確保したまま再利用のために持つ量を含む
+                host = torch.cuda.host_memory_stats()
+                out["torch"]["pinned_mb"] = round(host.get("allocated_bytes.current", 0) / 2**20, 1)
+                out["torch"]["pinned_peak_mb"] = round(host.get("allocated_bytes.peak", 0) / 2**20, 1)
             elif hasattr(torch, "xpu") and torch.xpu.is_available():
                 out["torch"] = {"allocated_mb": round(torch.xpu.memory_allocated() / 2**20, 1)}
         except Exception:  # 計測の失敗で API を失敗させない
@@ -239,7 +243,7 @@ def process_metrics() -> dict:
     status: dict[str, int] = {}
     for line in (_read("/proc/self/status") or "").splitlines():
         key, _, value = line.partition(":")
-        if key in ("VmRSS", "VmHWM", "Threads") and value.split():
+        if key in ("VmRSS", "VmHWM", "RssAnon", "RssShmem", "Threads") and value.split():
             status[key] = int(value.split()[0])  # VmRSS などは kB
     io = _kv((_read("/proc/self/io") or "").replace(":", ""))
     try:
@@ -255,6 +259,9 @@ def process_metrics() -> dict:
             "threads": status.get("Threads"),
             "rss_bytes": status.get("VmRSS", 0) * 1024,
             "rss_peak_bytes": status.get("VmHWM", 0) * 1024,
+            # 共有メモリ(GPU への転送用の固定のメモリは、ここに数えられる)
+            "rss_anon_bytes": status.get("RssAnon", 0) * 1024,
+            "rss_shmem_bytes": status.get("RssShmem", 0) * 1024,
             "io_read_bytes": io.get("read_bytes"),
             "io_write_bytes": io.get("write_bytes"),
         },

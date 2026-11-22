@@ -43,6 +43,19 @@ if [ "${VARIANT:-}" = "rocm" ]; then
   export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL="${TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL:-1}"
 fi
 
+# GPU 版で同時に取り込む(INGEST_WORKERS が 2 以上)場合は、C のメモリ管理(glibc)がスレッドごとに作る領域(アリーナ)を
+# 2 つまでにする。既定では CPU の数の 8 倍まで作り、ファイルごとのスレッド(復号・前処理・推論)が返したメモリが各領域に残って、
+# 同時数に比例して増えていた(RTX 3060・6 秒窓・8 本同時で、上限 8GB のコンテナが 3 回中 2 回止まった → 最大 4.6GB。#26)。
+# 1 本ずつ(既定)では、取り込みが約 2.5% 遅くなり(47.3 → 48.5 秒)、メモリも少ないため変えない。
+# CPU 版は、CPU の推論への影響を確かめていないため変えない。環境変数 MALLOC_ARENA_MAX を指定すれば、その値を使う
+case "${VARIANT:-}" in
+  cuda|rocm|intel)
+    if [ "${INGEST_WORKERS:-1}" -ge 2 ] 2>/dev/null; then
+      export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
+    fi
+    ;;
+esac
+
 set -- uvicorn --factory mediasearch.main:create_app \
   --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}" --log-level "$(echo "${LOG_LEVEL:-info}" | tr 'A-Z' 'a-z')"
 

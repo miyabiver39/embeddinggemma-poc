@@ -89,6 +89,8 @@ def summarize(recs: list[dict], vectors: dict) -> dict:
             "mem_max_mb": max((r["mem_max_mb"] for r in rs if r.get("mem_max_mb") is not None), default=None),
             "mem_total_max_mb": max((r["mem_total_max_mb"] for r in rs if r.get("mem_total_max_mb") is not None),
                                     default=None),
+            "pinned_max_mb": max((r["pinned_max_mb"] for r in rs if r.get("pinned_max_mb") is not None),
+                                 default=None),
             "error": (failures.get(key) or [None])[0],
         })  # fmt: skip
     # 同時数の効果: 同じ k・窓で、w=1 との差(%)。負なら短くなった
@@ -452,7 +454,7 @@ def compare_charts(named: list[tuple[str, dict]]) -> dict[str, tuple[str, str]]:
 # ---------------------------------------------------------------------- 書き出し
 CELL_COLS = ["experiment", "dtype", "image_max_side", "dims", "image_max_tokens", "k", "w", "win", "n", "failed", "completion_sec",
              "completion_min", "completion_max", "vs_w1_pct", "vs_k1_pct", "windows", "sec_per_window",
-             "realtime_factor", "infer_util", "gpu_util", "gpu_mem_max_mb", "cpu_util", "mem_max_mb", "mem_total_max_mb", "error"]  # fmt: skip
+             "realtime_factor", "infer_util", "gpu_util", "gpu_mem_max_mb", "cpu_util", "mem_max_mb", "mem_total_max_mb", "pinned_max_mb", "error"]  # fmt: skip
 PREC_COLS = ["dtype", "image_max_side", "dims", "image_max_tokens", "completion_w1", "sec_per_window_w1", "completion_w4",
              "sec_per_window_w4", "qps", "search_p50_ms", "search_p95_ms", "cos_mean", "cos_min", "top1_acc", "margin",
              "nan", "quality_error"]  # fmt: skip
